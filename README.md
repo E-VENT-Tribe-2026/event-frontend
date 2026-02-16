@@ -103,10 +103,11 @@ npm run preview
 
 ## 👥 The Tribe (Team Roles)
 
-- **DevOps Engineer:** [Your Name]  
-- **Software Architect:** [Architect's Name]  
-- **Frontend Lead:** [Lead Name]  
-- **Backend/AI Squad:** [Names]
+- **Software Architect:** Sonia Mangane, Kaleb Teshale Gebretsadik 
+- **Frontend Squad:** Khaoula Adouli, Rania Chafai, Nallamolu Harsha Gopal
+- **Backend Squad/AI Squad:** Rajinish Chowdary Pothakamuri, Maksim Marnat, Relja Popovic
+- **QA & test Squad:** Dharam Vishal, Shreyash Rameshbhai Hadiya
+- **DevOps Engineer:** Sonia Mangane 
 
 ---
 
