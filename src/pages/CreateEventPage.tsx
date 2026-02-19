@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
-import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
+import { ArrowLeft, Save } from 'lucide-react';
+import { addEvent, getCurrentUser, saveDraft, type EventItem } from '@/lib/storage';
 import { CATEGORIES } from '@/lib/seedData';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
@@ -34,33 +34,46 @@ export default function CreateEventPage() {
     return Object.keys(e).length === 0;
   };
 
+  const buildEvent = (isDraft: boolean): EventItem => ({
+    id: crypto.randomUUID(),
+    title: form.title,
+    description: form.description,
+    category: form.category,
+    date: form.date,
+    time: form.time,
+    location: form.location,
+    lat: 40.7128 + (Math.random() - 0.5) * 0.1,
+    lng: -74.006 + (Math.random() - 0.5) * 0.1,
+    budget: Number(form.budget),
+    participantsLimit: Number(form.limit),
+    participants: user ? [user.id] : [],
+    image: EVENT_IMAGES[Math.floor(Math.random() * EVENT_IMAGES.length)],
+    organizer: user?.name || 'Anonymous',
+    organizerId: user?.id || '',
+    organizerAvatar: user?.avatar || '',
+    isPrivate: form.isPrivate,
+    isDraft,
+    reviews: [],
+    reports: [],
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) { navigate('/login'); return; }
     if (!validate()) return;
-
-    const newEvent: EventItem = {
-      id: crypto.randomUUID(),
-      title: form.title,
-      description: form.description,
-      category: form.category,
-      date: form.date,
-      time: form.time,
-      location: form.location,
-      lat: 40.7128 + (Math.random() - 0.5) * 0.1,
-      lng: -74.006 + (Math.random() - 0.5) * 0.1,
-      budget: Number(form.budget),
-      participantsLimit: Number(form.limit),
-      participants: [user.id],
-      image: EVENT_IMAGES[Math.floor(Math.random() * EVENT_IMAGES.length)],
-      organizer: user.name,
-      organizerAvatar: user.avatar,
-      isPrivate: form.isPrivate,
-      reviews: [],
-    };
-    addEvent(newEvent);
+    addEvent(buildEvent(false));
     setToast({ show: true, message: 'Event published!', type: 'success' });
     setTimeout(() => navigate('/home'), 1500);
+  };
+
+  const handleSaveDraft = () => {
+    if (!user) { navigate('/login'); return; }
+    if (!form.title.trim()) {
+      setErrors({ title: 'Title required for draft' });
+      return;
+    }
+    saveDraft(buildEvent(true));
+    setToast({ show: true, message: 'Draft saved!', type: 'success' });
   };
 
   const inputCls = "w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50";
@@ -118,9 +131,15 @@ export default function CreateEventPage() {
           </button>
         </div>
 
-        <button type="submit" className="w-full gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98]">
-          Publish Event
-        </button>
+        <div className="flex gap-3">
+          <button type="button" onClick={handleSaveDraft}
+            className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground transition-transform active:scale-[0.98]">
+            <Save className="h-4 w-4" /> Save Draft
+          </button>
+          <button type="submit" className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98]">
+            Publish Event
+          </button>
+        </div>
       </motion.form>
 
       <BottomNav />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArrowLeft, Send, Smile } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -21,11 +21,23 @@ export default function ChatPage() {
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [messages, setMessages] = useState(MOCK_MESSAGES);
   const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
 
   const sendMessage = () => {
     if (!input.trim()) return;
-    setMessages([...messages, { id: crypto.randomUUID(), from: 'me', text: input, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+    setMessages(prev => [...prev, { id: crypto.randomUUID(), from: 'me', text: input, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
     setInput('');
+
+    // Simulate typing indicator + reply
+    setIsTyping(true);
+    setTimeout(() => {
+      setIsTyping(false);
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(), from: 'them',
+        text: ['Sounds great! 🎉', 'Can\'t wait!', 'That\'s awesome!', 'See you soon! 😄'][Math.floor(Math.random() * 4)],
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+    }, 1500 + Math.random() * 1000);
   };
 
   if (activeChat) {
@@ -35,7 +47,10 @@ export default function ChatPage() {
         <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
           <button onClick={() => setActiveChat(null)}><ArrowLeft className="h-5 w-5 text-foreground" /></button>
           <img src={chat.avatar} alt="" className="h-8 w-8 rounded-full bg-secondary" />
-          <h1 className="text-sm font-semibold text-foreground">{chat.name}</h1>
+          <div>
+            <h1 className="text-sm font-semibold text-foreground">{chat.name}</h1>
+            {isTyping && <p className="text-[10px] text-primary animate-pulse">typing...</p>}
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 custom-scrollbar">
@@ -50,6 +65,15 @@ export default function ChatPage() {
               </div>
             </motion.div>
           ))}
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl bg-secondary px-4 py-3 flex gap-1">
+                <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3 flex gap-2">
