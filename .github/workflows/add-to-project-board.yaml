@@ -1,0 +1,17 @@
+name: Add Issue to Project
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+
+jobs:
+  add-to-project:
+    name: Add item to project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v1
+        with:
+          
+          project-url: https://github.com/orgs/E-VENT-Tribe-2026/projects/1
+          github-token: ${{ secrets.ADD_TO_PROJECT_BOARD }}
