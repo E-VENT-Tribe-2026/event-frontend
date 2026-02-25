@@ -1,17 +1,47 @@
 // localStorage database helpers
 
+export type UserRole = 'participant' | 'organizer';
+
 export interface User {
   id: string;
+  role: UserRole;
   name: string;
   email: string;
   password: string;
   avatar: string;
-  profilePhoto: string; // base64 or URL
+  profilePhoto: string;
+  coverPhoto: string;
   bio: string;
   interests: string[];
-  dob: string; // date of birth ISO
+  dob: string;
   gender: string;
+  isPremium: boolean;
+  friends: string[];
+  // organizer-only fields
+  orgCategory?: string;
   createdAt: string;
+}
+
+export interface JoinRequest {
+  id: string;
+  eventId: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+}
+
+export interface Ticket {
+  id: string;
+  eventId: string;
+  userId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventTime: string;
+  eventLocation: string;
+  qrCode: string;
+  purchasedAt: string;
 }
 
 export interface EventItem {
@@ -33,8 +63,11 @@ export interface EventItem {
   organizerAvatar: string;
   isPrivate: boolean;
   isDraft: boolean;
+  requiresApproval: boolean;
   reviews: { userId: string; user: string; text: string; rating: number }[];
   reports: { userId: string; reason: string; time: string }[];
+  collaborators: string[];
+  survey?: { question: string; options: string[] }[];
 }
 
 export interface ChatMessage {
@@ -43,11 +76,12 @@ export interface ChatMessage {
   to: string;
   text: string;
   time: string;
+  type?: 'text' | 'emoji' | 'voice' | 'attachment';
 }
 
 export interface Notification {
   id: string;
-  type: 'join' | 'reminder' | 'message' | 'trending';
+  type: 'join' | 'reminder' | 'message' | 'trending' | 'approval' | 'payment';
   title: string;
   description: string;
   time: string;
@@ -59,6 +93,8 @@ const CURRENT_USER_KEY = 'event_current_user';
 const EVENTS_KEY = 'event_events';
 const NOTIFICATIONS_KEY = 'event_notifications';
 const DRAFTS_KEY = 'event_drafts';
+const JOIN_REQUESTS_KEY = 'event_join_requests';
+const TICKETS_KEY = 'event_tickets';
 
 // Users
 export function getUsers(): User[] {
@@ -84,6 +120,7 @@ export function logout() {
 }
 
 export function signup(data: {
+  role: UserRole;
   name: string;
   email: string;
   password: string;
@@ -91,6 +128,7 @@ export function signup(data: {
   dob: string;
   gender: string;
   interests: string[];
+  orgCategory?: string;
 }): { success: boolean; error?: string } {
   const users = getUsers();
   if (users.find(u => u.email === data.email)) {
@@ -98,15 +136,20 @@ export function signup(data: {
   }
   const user: User = {
     id: crypto.randomUUID(),
+    role: data.role,
     name: data.name,
     email: data.email,
     password: data.password,
     avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
     profilePhoto: data.profilePhoto || '',
-    bio: 'Hey there! I love events.',
+    coverPhoto: '',
+    bio: data.role === 'organizer' ? 'Event organizer on E-VENT' : 'Hey there! I love events.',
     interests: data.interests.length > 0 ? data.interests : ['Music', 'Tech', 'Food'],
     dob: data.dob,
     gender: data.gender,
+    isPremium: false,
+    friends: [],
+    orgCategory: data.orgCategory,
     createdAt: new Date().toISOString(),
   };
   users.push(user);
@@ -142,6 +185,16 @@ export function saveEvents(events: EventItem[]) {
 export function addEvent(event: EventItem) {
   const events = getEvents();
   events.unshift(event);
+  saveEvents(events);
+}
+
+export function updateEvent(id: string, updates: Partial<EventItem>) {
+  const events = getEvents().map(e => e.id === id ? { ...e, ...updates } : e);
+  saveEvents(events);
+}
+
+export function deleteEvent(id: string) {
+  const events = getEvents().filter(e => e.id !== id);
   saveEvents(events);
 }
 
@@ -188,6 +241,43 @@ export function saveDraft(event: EventItem) {
   const drafts = getDrafts();
   drafts.unshift(event);
   localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+}
+
+// Join Requests
+export function getJoinRequests(): JoinRequest[] {
+  return JSON.parse(localStorage.getItem(JOIN_REQUESTS_KEY) || '[]');
+}
+
+export function saveJoinRequests(reqs: JoinRequest[]) {
+  localStorage.setItem(JOIN_REQUESTS_KEY, JSON.stringify(reqs));
+}
+
+export function addJoinRequest(req: JoinRequest) {
+  const reqs = getJoinRequests();
+  // prevent duplicate
+  if (reqs.find(r => r.eventId === req.eventId && r.userId === req.userId)) return;
+  reqs.unshift(req);
+  saveJoinRequests(reqs);
+}
+
+export function updateJoinRequest(id: string, status: 'approved' | 'rejected') {
+  const reqs = getJoinRequests().map(r => r.id === id ? { ...r, status } : r);
+  saveJoinRequests(reqs);
+}
+
+// Tickets
+export function getTickets(): Ticket[] {
+  return JSON.parse(localStorage.getItem(TICKETS_KEY) || '[]');
+}
+
+export function saveTickets(tickets: Ticket[]) {
+  localStorage.setItem(TICKETS_KEY, JSON.stringify(tickets));
+}
+
+export function addTicket(ticket: Ticket) {
+  const tickets = getTickets();
+  tickets.unshift(ticket);
+  saveTickets(tickets);
 }
 
 // Notifications

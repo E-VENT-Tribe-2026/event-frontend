@@ -14,6 +14,9 @@ import MapPage from "./pages/MapPage";
 import ProfilePage from "./pages/ProfilePage";
 import ChatPage from "./pages/ChatPage";
 import NotificationsPage from "./pages/NotificationsPage";
+import PaymentPage from "./pages/PaymentPage";
+import PremiumPage from "./pages/PremiumPage";
+import OrganizerDashboardPage from "./pages/OrganizerDashboardPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,6 +39,9 @@ const App = () => (
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/payment/:eventId" element={<PaymentPage />} />
+          <Route path="/premium" element={<PremiumPage />} />
+          <Route path="/dashboard" element={<OrganizerDashboardPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

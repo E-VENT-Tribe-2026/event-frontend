@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, Chrome } from 'lucide-react';
 import { login } from '@/lib/storage';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
@@ -33,14 +33,14 @@ export default function LoginPage() {
     }
   };
 
+  const handleSocialLogin = (provider: string) => {
+    setToast({ show: true, message: `${provider} login requires Lovable Cloud backend`, type: 'error' });
+  };
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-sm space-y-8"
-      >
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-8">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gradient">E-VENT</h1>
           <p className="mt-2 text-sm text-muted-foreground">Welcome back! Sign in to continue</p>
@@ -50,13 +50,8 @@ export default function LoginPage() {
           <div>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50"
-              />
+              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)}
+                className="w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50" />
             </div>
             {errors.email && <p className="mt-1 text-xs text-destructive">{errors.email}</p>}
           </div>
@@ -64,13 +59,8 @@ export default function LoginPage() {
           <div>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type={showPw ? 'text' : 'password'}
-                placeholder="Password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="w-full rounded-xl bg-secondary pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50"
-              />
+              <input type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={e => setPassword(e.target.value)}
+                className="w-full rounded-xl bg-secondary pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50" />
               <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -86,6 +76,27 @@ export default function LoginPage() {
             Sign In
           </button>
         </form>
+
+        {/* Social Login */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-xs text-muted-foreground">or continue with</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { name: 'Google', icon: '🔵' },
+              { name: 'Facebook', icon: '📘' },
+              { name: 'LinkedIn', icon: '💼' },
+            ].map(p => (
+              <button key={p.name} onClick={() => handleSocialLogin(p.name)}
+                className="flex items-center justify-center gap-2 rounded-xl bg-secondary py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors">
+                <span>{p.icon}</span>
+              </button>
+            ))}
+          </div>
+        </div>
 
         <p className="text-center text-sm text-muted-foreground">
           Don't have an account? <Link to="/signup" className="text-primary font-medium hover:underline">Sign Up</Link>
