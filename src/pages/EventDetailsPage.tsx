@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { getEvents, joinEvent, getCurrentUser, addReview, reportEvent } from '@/lib/storage';
-import { ArrowLeft, MapPin, Clock, Users, Star, Flag, Send } from 'lucide-react';
+import { getEvents, getCurrentUser, addReview, reportEvent, addJoinRequest, getJoinRequests, joinEvent, type EventItem } from '@/lib/storage';
+import { ArrowLeft, MapPin, Clock, Users, Star, Flag, Send, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState } from 'react';
 import AppToast from '@/components/AppToast';
@@ -21,19 +21,49 @@ export default function EventDetailsPage() {
   if (!event) return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
 
   const user = getCurrentUser();
+  const isOrganizer = user?.role === 'organizer';
   const hasJoined = user ? event.participants.includes(user.id) : false;
   const alreadyReviewed = user ? (event.reviews || []).some(r => r.userId === user?.id) : false;
   const alreadyReported = user ? (event.reports || []).some(r => r.userId === user?.id) : false;
+  const existingRequest = user ? getJoinRequests().find(r => r.eventId === event.id && r.userId === user.id) : null;
 
-  const handleJoin = () => {
+  const handleJoinOrRequest = () => {
     if (!user) { navigate('/login'); return; }
+    if (isOrganizer) {
+      setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
+      return;
+    }
     if (hasJoined) {
       setToast({ show: true, message: 'Already joined!', type: 'error' });
       return;
     }
-    joinEvent(event.id, user.id);
-    setEventsState(getEvents());
-    setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+
+    if (event.requiresApproval) {
+      if (existingRequest) {
+        setToast({ show: true, message: `Request already ${existingRequest.status}`, type: 'error' });
+        return;
+      }
+      addJoinRequest({
+        id: crypto.randomUUID(),
+        eventId: event.id,
+        userId: user.id,
+        userName: user.name,
+        userAvatar: user.profilePhoto || user.avatar,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      });
+      setToast({ show: true, message: 'Join request sent! Waiting for organizer approval.', type: 'success' });
+    } else {
+      // Direct join → go to payment if paid
+      if (event.budget > 0) {
+        navigate(`/payment/${event.id}`);
+      } else {
+      // Free event, direct join
+        joinEvent(event.id, user.id);
+        setEventsState(getEvents());
+        setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+      }
+    }
   };
 
   const handleReview = () => {
@@ -56,6 +86,18 @@ export default function EventDetailsPage() {
 
   const reviews = event.reviews || [];
 
+  const getJoinButtonText = () => {
+    if (hasJoined) return 'Joined ✓';
+    if (isOrganizer) return 'Organizers can\'t join';
+    if (event.requiresApproval) {
+      if (existingRequest?.status === 'pending') return 'Request Pending...';
+      if (existingRequest?.status === 'approved') return 'Approved — Pay Now';
+      if (existingRequest?.status === 'rejected') return 'Request Rejected';
+      return 'Request to Join';
+    }
+    return event.budget > 0 ? `Join — $${event.budget}` : 'Join Event';
+  };
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
@@ -67,10 +109,15 @@ export default function EventDetailsPage() {
         <button onClick={() => navigate(-1)} className="absolute top-4 left-4 rounded-full bg-background/50 backdrop-blur-md p-2">
           <ArrowLeft className="h-5 w-5 text-foreground" />
         </button>
+        {event.requiresApproval && (
+          <div className="absolute top-4 right-4 flex items-center gap-1 rounded-full bg-accent/90 px-3 py-1 text-xs font-semibold text-accent-foreground">
+            <ShieldCheck className="h-3 w-3" /> Approval Required
+          </div>
+        )}
       </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-8 relative z-10 space-y-6">
-        <div className="rounded-xl gradient-card p-5 shadow-card space-y-4">
+        <div className="rounded-xl gradient-card p-5 shadow-card space-y-4 backdrop-blur-sm border border-border/30">
           <div className="flex items-start justify-between gap-2">
             <h1 className="text-xl font-bold text-foreground">{event.title}</h1>
             <span className="shrink-0 rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">{event.category}</span>
@@ -91,7 +138,7 @@ export default function EventDetailsPage() {
             <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4 text-primary" />{event.date} · {event.time}</div>
             <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4 text-accent" />{event.location}</div>
             <div className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4 text-primary" />{event.participants.length}/{event.participantsLimit}</div>
-            <div className="flex items-center gap-2 text-muted-foreground">${event.budget === 0 ? 'Free' : event.budget}</div>
+            <div className="flex items-center gap-2 text-muted-foreground font-semibold">{event.budget === 0 ? 'Free' : `$${event.budget}`}</div>
           </div>
 
           {/* Participant avatars */}
@@ -108,9 +155,7 @@ export default function EventDetailsPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-foreground">Reviews ({reviews.length})</h2>
             {hasJoined && !alreadyReviewed && (
-              <button onClick={() => setShowReviewForm(!showReviewForm)} className="text-xs text-primary font-medium">
-                Write Review
-              </button>
+              <button onClick={() => setShowReviewForm(!showReviewForm)} className="text-xs text-primary font-medium">Write Review</button>
             )}
           </div>
 
@@ -148,8 +193,10 @@ export default function EventDetailsPage() {
 
         {/* Actions */}
         <div className="flex gap-3">
-          <button onClick={handleJoin} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98]">
-            {hasJoined ? 'Joined ✓' : 'Join Event'}
+          <button onClick={handleJoinOrRequest}
+            disabled={isOrganizer || existingRequest?.status === 'rejected'}
+            className={`flex-1 rounded-xl py-3 text-sm font-semibold transition-transform active:scale-[0.98] ${isOrganizer || existingRequest?.status === 'rejected' ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'gradient-primary text-primary-foreground shadow-glow ripple-container'}`}>
+            {getJoinButtonText()}
           </button>
           <button onClick={() => alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)}
             className="rounded-xl bg-secondary px-4 py-3 text-sm text-muted-foreground hover:text-destructive transition-colors">

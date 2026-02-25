@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, ShieldCheck } from 'lucide-react';
 import { addEvent, getCurrentUser, saveDraft, type EventItem } from '@/lib/storage';
 import { CATEGORIES } from '@/lib/seedData';
 import { motion } from 'framer-motion';
@@ -17,9 +17,27 @@ const EVENT_IMAGES = [
 export default function CreateEventPage() {
   const navigate = useNavigate();
   const user = getCurrentUser();
-  const [form, setForm] = useState({ title: '', description: '', category: 'Music', date: '', time: '', location: '', budget: '0', limit: '50', isPrivate: false });
+  const [form, setForm] = useState({
+    title: '', description: '', category: 'Music', date: '', time: '', location: '',
+    budget: '0', limit: '50', isPrivate: false, requiresApproval: false,
+  });
+  const [surveyQuestions, setSurveyQuestions] = useState<{ question: string; options: string[] }[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
+
+  // Participants can't create events
+  if (user?.role === 'participant') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background pb-20">
+        <div className="text-center space-y-3 px-6">
+          <p className="text-lg font-semibold text-foreground">Only Organizers can create events</p>
+          <p className="text-sm text-muted-foreground">Switch to an organizer account to create events</p>
+          <button onClick={() => navigate('/home')} className="gradient-primary rounded-xl px-6 py-2 text-sm text-primary-foreground">Go Home</button>
+        </div>
+        <BottomNav />
+      </div>
+    );
+  }
 
   const update = (key: string, value: string | boolean) => setForm(f => ({ ...f, [key]: value }));
 
@@ -46,15 +64,18 @@ export default function CreateEventPage() {
     lng: -74.006 + (Math.random() - 0.5) * 0.1,
     budget: Number(form.budget),
     participantsLimit: Number(form.limit),
-    participants: user ? [user.id] : [],
+    participants: [],
     image: EVENT_IMAGES[Math.floor(Math.random() * EVENT_IMAGES.length)],
     organizer: user?.name || 'Anonymous',
     organizerId: user?.id || '',
-    organizerAvatar: user?.avatar || '',
+    organizerAvatar: user?.profilePhoto || user?.avatar || '',
     isPrivate: form.isPrivate,
     isDraft,
+    requiresApproval: form.requiresApproval,
     reviews: [],
     reports: [],
+    collaborators: [],
+    survey: surveyQuestions.length > 0 ? surveyQuestions : undefined,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -68,12 +89,21 @@ export default function CreateEventPage() {
 
   const handleSaveDraft = () => {
     if (!user) { navigate('/login'); return; }
-    if (!form.title.trim()) {
-      setErrors({ title: 'Title required for draft' });
-      return;
-    }
+    if (!form.title.trim()) { setErrors({ title: 'Title required for draft' }); return; }
     saveDraft(buildEvent(true));
     setToast({ show: true, message: 'Draft saved!', type: 'success' });
+  };
+
+  const addSurveyQuestion = () => {
+    setSurveyQuestions([...surveyQuestions, { question: '', options: ['', ''] }]);
+  };
+
+  const updateSurveyQuestion = (idx: number, question: string) => {
+    setSurveyQuestions(qs => qs.map((q, i) => i === idx ? { ...q, question } : q));
+  };
+
+  const updateSurveyOption = (qIdx: number, oIdx: number, value: string) => {
+    setSurveyQuestions(qs => qs.map((q, i) => i === qIdx ? { ...q, options: q.options.map((o, j) => j === oIdx ? value : o) } : q));
   };
 
   const inputCls = "w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50";
@@ -87,12 +117,7 @@ export default function CreateEventPage() {
         <h1 className="text-lg font-bold text-foreground">Create Event</h1>
       </header>
 
-      <motion.form
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        onSubmit={handleSubmit}
-        className="mx-auto max-w-lg space-y-4 px-4 pt-4"
-      >
+      <motion.form initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} onSubmit={handleSubmit} className="mx-auto max-w-lg space-y-4 px-4 pt-4">
         <div>
           <input placeholder="Event Title" value={form.title} onChange={e => update('title', e.target.value)} className={inputCls} />
           {errors.title && <p className="mt-1 text-xs text-destructive">{errors.title}</p>}
@@ -120,15 +145,49 @@ export default function CreateEventPage() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <input type="number" placeholder="Budget ($)" value={form.budget} onChange={e => update('budget', e.target.value)} className={inputCls} />
-          <input type="number" placeholder="Max Participants" value={form.limit} onChange={e => update('limit', e.target.value)} className={inputCls} />
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Max Participants: {form.limit}</label>
+            <input type="range" min="10" max="1000" value={form.limit} onChange={e => update('limit', e.target.value)} className="w-full accent-primary" />
+          </div>
         </div>
 
-        <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-          <span className="text-sm text-foreground">Private Event</span>
-          <button type="button" onClick={() => update('isPrivate', !form.isPrivate)}
-            className={`h-6 w-11 rounded-full transition-colors ${form.isPrivate ? 'bg-primary' : 'bg-muted'}`}>
-            <div className={`h-5 w-5 rounded-full bg-foreground transition-transform ${form.isPrivate ? 'translate-x-5' : 'translate-x-0.5'}`} />
-          </button>
+        {/* Toggles */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
+            <span className="text-sm text-foreground">Private Event</span>
+            <button type="button" onClick={() => update('isPrivate', !form.isPrivate)}
+              className={`h-6 w-11 rounded-full transition-colors ${form.isPrivate ? 'bg-primary' : 'bg-muted'}`}>
+              <div className={`h-5 w-5 rounded-full bg-foreground transition-transform ${form.isPrivate ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              <span className="text-sm text-foreground">Require Approval</span>
+            </div>
+            <button type="button" onClick={() => update('requiresApproval', !form.requiresApproval)}
+              className={`h-6 w-11 rounded-full transition-colors ${form.requiresApproval ? 'bg-primary' : 'bg-muted'}`}>
+              <div className={`h-5 w-5 rounded-full bg-foreground transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Survey Builder */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-foreground">Survey Questions</span>
+            <button type="button" onClick={addSurveyQuestion} className="text-xs text-primary font-medium">+ Add Question</button>
+          </div>
+          {surveyQuestions.map((q, qi) => (
+            <div key={qi} className="rounded-xl bg-secondary p-3 space-y-2">
+              <input placeholder={`Question ${qi + 1}`} value={q.question} onChange={e => updateSurveyQuestion(qi, e.target.value)}
+                className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none" />
+              {q.options.map((o, oi) => (
+                <input key={oi} placeholder={`Option ${oi + 1}`} value={o} onChange={e => updateSurveyOption(qi, oi, e.target.value)}
+                  className="w-full rounded-lg bg-muted px-3 py-2 text-xs text-foreground outline-none" />
+              ))}
+            </div>
+          ))}
         </div>
 
         <div className="flex gap-3">
