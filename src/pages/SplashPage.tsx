@@ -26,26 +26,32 @@ export default function SplashPage() {
   }, [navigate]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background relative overflow-hidden">
+      {/* Background glow effects */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-primary/15 blur-[120px] animate-pulse" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-accent/15 blur-[120px] animate-pulse" style={{ animationDelay: '1s' }} />
+
       <motion.div
         initial={{ scale: 0.5, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
-        className="flex flex-col items-center gap-6"
+        className="flex flex-col items-center gap-6 relative z-10"
       >
         <div className="relative">
-          <div className="h-24 w-24 rounded-2xl gradient-primary flex items-center justify-center shadow-glow">
-            <span className="text-4xl font-bold text-primary-foreground">E</span>
-          </div>
           <motion.div
-            className="absolute inset-0 rounded-2xl border-2 border-primary/50"
+            className="h-28 w-28 rounded-3xl gradient-primary flex items-center justify-center shadow-glow"
+            style={{ animation: 'glow-pulse 2s ease-in-out infinite' }}>
+            <span className="text-5xl font-bold text-primary-foreground">E</span>
+          </motion.div>
+          <motion.div
+            className="absolute inset-0 rounded-3xl border-2 border-primary/50"
             animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0, 0.5] }}
             transition={{ duration: 2, repeat: Infinity }}
           />
         </div>
-        <h1 className="text-3xl font-bold text-gradient">E-VENT</h1>
+        <h1 className="text-4xl font-bold text-gradient">E-VENT</h1>
         <p className="text-sm text-muted-foreground">Discover amazing events near you</p>
-        <div className="w-48 h-1 rounded-full bg-secondary overflow-hidden mt-4">
+        <div className="w-52 h-1.5 rounded-full bg-secondary overflow-hidden mt-4">
           <motion.div
             className="h-full gradient-primary rounded-full"
             style={{ width: `${progress}%` }}

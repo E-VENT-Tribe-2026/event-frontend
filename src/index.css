@@ -48,9 +48,11 @@
     /* Custom tokens */
     --gradient-primary: linear-gradient(135deg, hsl(271 76% 53%), hsl(330 100% 59%));
     --gradient-card: linear-gradient(145deg, hsl(213 50% 17%), hsl(213 50% 13%));
+    --gradient-glass: linear-gradient(135deg, hsl(213 50% 20% / 0.6), hsl(213 50% 15% / 0.4));
     --shadow-glow: 0 0 20px hsl(271 76% 53% / 0.3);
     --shadow-card: 0 4px 20px hsl(213 61% 5% / 0.5);
     --shadow-accent: 0 0 20px hsl(330 100% 59% / 0.3);
+    --shadow-glass: 0 8px 32px hsl(213 61% 5% / 0.4);
   }
 
   .dark {
@@ -76,6 +78,20 @@
 
   .gradient-card {
     background: var(--gradient-card);
+  }
+
+  .glass-card {
+    background: var(--gradient-glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid hsl(213 30% 30% / 0.3);
+    box-shadow: var(--shadow-glass);
+  }
+
+  .glass-nav {
+    background: hsl(213 50% 13% / 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
   }
 
   .shadow-glow {
@@ -137,9 +153,17 @@
     box-shadow: var(--shadow-glow);
   }
 
+  /* Blur locked content */
+  .blur-locked {
+    filter: blur(6px);
+    pointer-events: none;
+    user-select: none;
+  }
+
   /* Scrollbar styling */
   .custom-scrollbar::-webkit-scrollbar {
     width: 4px;
+    height: 4px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
@@ -147,6 +171,21 @@
   .custom-scrollbar::-webkit-scrollbar-thumb {
     background: hsl(213 30% 30%);
     border-radius: 4px;
+  }
+
+  /* Glow border */
+  .glow-border {
+    position: relative;
+  }
+  .glow-border::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: var(--gradient-primary);
+    z-index: -1;
+    opacity: 0.5;
+    filter: blur(4px);
   }
 }
 
@@ -173,4 +212,14 @@
 @keyframes spin-slow {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px hsl(271 76% 53% / 0.3); }
+  50% { box-shadow: 0 0 40px hsl(271 76% 53% / 0.6); }
 }
