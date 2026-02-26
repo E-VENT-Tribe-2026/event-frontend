@@ -103,6 +103,7 @@ npm run preview
 
 ## 👥 The Tribe (Team Roles)
 
+- **Product and Project Manager** Arda Arslan
 - **Software Architect:** Sonia Mangane, Kaleb Teshale Gebretsadik 
 - **Frontend Squad:** Khaoula Adouli, Rania Chafai, Nallamolu Harsha Gopal
 - **Backend Squad/AI Squad:** Rajinish Chowdary Pothakamuri, Maksim Marnat, Relja Popovic
