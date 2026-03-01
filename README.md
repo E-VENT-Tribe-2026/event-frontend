@@ -1,124 +1,73 @@
-# E-VENT Frontend (PWA) 🚀
+# Welcome to your Lovable project
 
-This is the user interface for **E-VENT**, a Progressive Web App (PWA) designed for smart event discovery and social coordination.
+## Project info
 
-## 🏛️ System Architecture: The Orchestrator Model
-This frontend is a **Thin Client**. It communicates exclusively with the **Python Orchestrator** to handle data and authentication.
+**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
 
----
+## How can I edit this code?
 
-## 🛠️ Tech Stack
-- **Framework:** React.js (Vite)
-- **Language:** TypeScript
-- **Styling:** Tailwind CSS
-- **Communication:** Python FastAPI (Orchestrator)
+There are several ways of editing your application.
 
----
+**Use Lovable**
 
-## 📋 Prerequisites
-- **Node.js**: v20.x or higher
-- **npm**: v10.x or higher
+Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
 
----
+Changes made via Lovable will be committed automatically to this repo.
 
-## 🚀 Getting Started
+**Use your preferred IDE**
 
-### 1. Clone the Repository
+If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
 
-```bash
-git clone https://github.com/E-VENT-Tribe/event-frontend.git
-cd event-frontend
-```
+The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
 
-### 2. Install Dependencies
+Follow these steps:
 
-Run this command to install all necessary packages for the frontend:
+```sh
+# Step 1: Clone the repository using the project's Git URL.
+git clone <YOUR_GIT_URL>
 
-```bash
-npm install
-```
+# Step 2: Navigate to the project directory.
+cd <YOUR_PROJECT_NAME>
 
-### 3. Environment Variables
+# Step 3: Install the necessary dependencies.
+npm i
 
-Create a file named `.env.local` in the root directory. This file is ignored by Git.
-
-```env
-VITE_API_BASE_URL=http://localhost:8000
-VITE_ENV=development
-```
-
-### 4. Run Development Server
-
-To start the local development environment:
-
-```bash
+# Step 4: Start the development server with auto-reloading and an instant preview.
 npm run dev
 ```
 
-The app will be available at:
+**Edit a file directly in GitHub**
 
-```
-http://localhost:5173
-```
+- Navigate to the desired file(s).
+- Click the "Edit" button (pencil icon) at the top right of the file view.
+- Make your changes and commit the changes.
 
----
+**Use GitHub Codespaces**
 
-## 🛡️ DevOps & Workflow Guidelines
+- Navigate to the main page of your repository.
+- Click on the "Code" button (green button) near the top right.
+- Select the "Codespaces" tab.
+- Click on "New codespace" to launch a new Codespace environment.
+- Edit files directly within the Codespace and commit and push your changes once you're done.
 
-### 🌿 Branching Strategy
+## What technologies are used for this project?
 
-- `main`: Production-only  
-- `develop`: Integration branch  
-- `feat/*`: Individual feature branches  
+This project is built with:
 
-### 🔎 Pull Requests
+- Vite
+- TypeScript
+- React
+- shadcn-ui
+- Tailwind CSS
 
-Direct pushes to `main` or `develop` are blocked.  
-All code must be reviewed and approved before merging.
+## How can I deploy this project?
 
-### ⚙️ CI/CD
+Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
 
-- Merges to `develop` trigger the **Staging build**
-- Merges to `main` trigger the **Production build**
+## Can I connect a custom domain to my Lovable project?
 
----
+Yes, you can!
 
-## 📱 PWA & Production Testing
+To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
-To test the Service Worker, offline mode, and PWA installation:
-
-### Build the project
-
-```bash
-npm run build
-```
-
-### Preview the production build
-
-```bash
-npm run preview
-```
-
----
-
-## 👥 The Tribe (Team Roles)
-
-- **Product and Project Manager** Arda Arslan
-- **Software Architect:** Sonia Mangane, Kaleb Teshale Gebretsadik 
-- **Frontend Squad:** Khaoula Adouli, Rania Chafai, Nallamolu Harsha Gopal
-- **Backend Squad/AI Squad:** Rajinish Chowdary Pothakamuri, Maksim Marnat, Relja Popovic
-- **QA & test Squad:** Dharam Vishal, Shreyash Rameshbhai Hadiya
-- **DevOps Engineer:** Sonia Mangane 
-
----
-
-## 📬 Deployment Status
-
-- **Staging Environment:** TBD  
-- **Production Environment:** TBD  
-
----
-
-© 2026 E-VENT Project Team
-
-
+Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
