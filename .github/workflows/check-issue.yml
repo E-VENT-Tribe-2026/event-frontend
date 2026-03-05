@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ensure Issue Link
-        uses: t-richards/linked-issue-check@v1
+        uses: epiper/actions-linked-issue@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          issue-keywords: "fixes, closes, resolves"
+          fail-if-no-linked-issue: true
