@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ensure Issue Link
-        uses: epiper/actions-linked-issue@v1
+        uses: nearform-actions/github-action-check-linked-issues@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-keywords: "fixes, closes, resolves"
