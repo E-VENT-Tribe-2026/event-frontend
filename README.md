@@ -106,9 +106,9 @@ npm run preview
 - **Product and Project Manager** Arda Arslan
 - **Software Architect:** Sonia Mangane, Kaleb Teshale Gebretsadik 
 - **Frontend Squad:** Khaoula Adouli, Rania Chafai, Nallamolu Harsha Gopal
-- **Backend Squad/AI Squad:** Rajinish Chowdary Pothakamuri, Maksim Marnat, Relja Popovic
+- **Backend Squad/AI Squad:** Rajinish Chowdary Pothakamuri,  Relja Popovic
 - **QA & test Squad:** Dharam Vishal, Shreyash Rameshbhai Hadiya
-- **DevOps Engineer:** Sonia Mangane 
+- **DevOps Engineer:** Sonia Mangane, Maksim Marnat
 
 ---
 
