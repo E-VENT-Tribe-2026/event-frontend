@@ -99,8 +99,12 @@ export default function ProfilePage() {
             <h2 className="text-xl font-bold text-foreground">{user.name}</h2>
           )}
           <div className="flex items-center gap-2">
-            <span className={`rounded-full px-3 py-0.5 text-xs font-medium ${user.role === 'organizer' ? 'bg-accent/20 text-accent' : 'bg-primary/20 text-primary'}`}>
-              {user.role === 'organizer' ? '🏢 Organizer' : '🎉 Participant'}
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-medium ${
+                user.role === 'organizer' ? 'bg-accent/10 text-accent' : 'bg-primary/10 text-primary'
+              }`}
+            >
+              {user.role === 'organizer' ? 'Organization' : 'Individual'}
             </span>
           </div>
           <p className="text-sm text-muted-foreground">{user.email}</p>

@@ -1,61 +1,71 @@
 import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getEvents, getCurrentUser, getUsers, type EventItem } from '@/lib/storage';
-import { CATEGORIES } from '@/lib/seedData';
+import { fetchEvents } from '@/lib/api';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import EventCard from '@/components/EventCard';
 import AppToast from '@/components/AppToast';
+import CategoryFilter from '@/components/CategoryFilter';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Lock, TrendingUp, MapPin, Sparkles, Users, Crown, Brain, Eye, UserPlus } from 'lucide-react';
+import { Lock, Sparkles, Crown, Brain, Eye, UserPlus, Loader2 } from 'lucide-react';
 
 export default function HomePage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [budgetMax, setBudgetMax] = useState(500);
-  const [events] = useState<EventItem[]>(getEvents());
+  const [localEvents] = useState<EventItem[]>(getEvents());
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const user = getCurrentUser();
   const allUsers = getUsers();
 
+  const { data: apiEvents, isLoading, isError } = useQuery<EventItem[]>({
+    queryKey: ['events', { category, search }],
+    queryFn: () =>
+      fetchEvents({
+        category: category === 'All' ? undefined : category.toLowerCase(),
+        search: search || undefined,
+        upcoming: false,
+      }),
+    staleTime: 30_000,
+    retry: 1,
+  });
+
+  const events = apiEvents?.length ? apiEvents : localEvents;
+
   const filtered = useMemo(() => {
+    const selectedCategory = category.toLowerCase();
+    const term = search.toLowerCase().trim();
     return events.filter(e => {
       if (e.isDraft) return false;
-      if (category !== 'All' && e.category !== category) return false;
+      if (category !== 'All' && e.category.toLowerCase() !== selectedCategory) return false;
       if (e.budget > budgetMax) return false;
-      if (search && !e.title.toLowerCase().includes(search.toLowerCase()) && !e.location.toLowerCase().includes(search.toLowerCase())) return false;
+      if (term) {
+        const inTitle = e.title.toLowerCase().includes(term);
+        const inLocation = e.location.toLowerCase().includes(term);
+        if (!inTitle && !inLocation) return false;
+      }
       return true;
     });
-  }, [events, search, category, budgetMax]);
+  }, [events, category, budgetMax, search]);
 
-  const trending = useMemo(() => [...events].filter(e => !e.isDraft).sort((a, b) => b.participants.length - a.participants.length).slice(0, 4), [events]);
   const recommended = useMemo(() => {
     if (!user) return filtered.slice(0, 4);
     return filtered.filter(e => user.interests?.some(i => e.category === i)).slice(0, 4);
   }, [filtered, user]);
-  const nearby = useMemo(() => filtered.slice(0, 4), [filtered]);
 
   // AI-powered sections (mock)
   const recentlyViewed = useMemo(() => events.filter(e => !e.isDraft).slice(2, 5), [events]);
   const suggestedPeople = useMemo(() => allUsers.filter(u => u.id !== user?.id).slice(0, 4), [allUsers, user]);
   const suggestedCollaborators = useMemo(() => allUsers.filter(u => u.role === 'organizer' && u.id !== user?.id).slice(0, 3), [allUsers, user]);
 
-  // Friend activity data
-  const friendActivity = useMemo(() => {
-    if (!user?.friends?.length) return [];
-    return user.friends.map(fId => {
-      const friend = allUsers.find(u => u.id === fId);
-      if (!friend) return null;
-      const joinedEvent = events.find(e => e.participants.includes(fId));
-      return friend && joinedEvent ? { friend, event: joinedEvent } : null;
-    }).filter(Boolean).slice(0, 4);
-  }, [user, allUsers, events]);
 
   const handleJoin = (id: string) => {
     if (!user) { navigate('/login'); return; }
     if (user.role === 'organizer') {
-      setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
+      setToast({ show: true, message: 'Organizations cannot join events', type: 'error' });
       return;
     }
     navigate(`/event/${id}`);
@@ -76,22 +86,28 @@ export default function HomePage() {
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
       <TopBar search={search} onSearchChange={setSearch} />
 
-      <div className="mx-auto max-w-lg px-4 pt-4 space-y-2">
-        {/* Category chips */}
-        <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
-          {['All', ...CATEGORIES].map(c => (
-            <button key={c} onClick={() => setCategory(c)}
-              className={`shrink-0 rounded-full px-4 py-1.5 text-xs font-medium transition-all ${category === c ? 'gradient-primary text-primary-foreground shadow-glow' : 'glass-card text-secondary-foreground hover:text-foreground'}`}>
-              {c}
-            </button>
-          ))}
-        </div>
+      <div className="mx-auto w-full max-w-5xl px-4 pt-4 space-y-2">
+        {isError && (
+          <div className="text-center py-2 text-xs text-muted-foreground">
+            Using offline events (backend unavailable).
+          </div>
+        )}
+
+        {/* Category filter */}
+        <CategoryFilter events={events} value={category} onChange={setCategory} />
 
         {/* Budget filter */}
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground shrink-0">Budget: ${budgetMax}</span>
           <input type="range" min={0} max={500} value={budgetMax} onChange={e => setBudgetMax(Number(e.target.value))} className="flex-1 accent-primary h-1" />
         </div>
+
+        {isLoading && (
+          <div className="flex flex-col items-center justify-center py-8">
+            <Loader2 className="h-12 w-12 animate-spin text-primary mb-2" />
+            <span className="text-xs text-muted-foreground">Loading events…</span>
+          </div>
+        )}
 
         {/* Premium banner */}
         {user && !user.isPremium && (
@@ -108,78 +124,6 @@ export default function HomePage() {
             <span className="text-xs font-semibold text-primary">→</span>
           </motion.div>
         )}
-
-        {/* Recommended */}
-        {recommended.length > 0 && (
-          <>
-            <SectionHeader icon={Sparkles} title="Recommended for You" badge="AI" />
-            <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
-              {recommended.map((event, i) => (
-                <motion.div key={event.id} className="shrink-0 w-64" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
-                  <EventCard event={event} onJoin={handleJoin} />
-                </motion.div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Trending */}
-        <SectionHeader icon={TrendingUp} title="Trending Events" accent />
-        <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
-          {trending.map((event, i) => (
-            <motion.div key={event.id} className="shrink-0 w-64" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
-              <EventCard event={event} onJoin={handleJoin} />
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Nearby */}
-        <SectionHeader icon={MapPin} title="Nearby Events" />
-        <motion.div layout className="grid gap-4 sm:grid-cols-2">
-          {nearby.map((event, i) => (
-            <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-              <EventCard event={event} onJoin={handleJoin} />
-            </motion.div>
-          ))}
-        </motion.div>
-
-        {/* Friend Activity (Premium locked) */}
-        <SectionHeader icon={Users} title="Friend Activity" />
-        <div className="relative rounded-2xl glass-card p-6 text-center overflow-hidden">
-          {user?.isPremium ? (
-            friendActivity.length > 0 ? (
-              <div className="space-y-3 text-left">
-                {friendActivity.map((item: any, i: number) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <img src={item.friend.avatar} alt="" className="h-8 w-8 rounded-full bg-secondary" />
-                    <p className="text-xs text-foreground">
-                      <span className="font-semibold">{item.friend.name}</span>
-                      <span className="text-muted-foreground"> joined </span>
-                      <span className="text-primary font-medium">{item.event.title}</span>
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No friend activity yet. Add friends to see what events they're joining!</p>
-            )
-          ) : (
-            <>
-              <div className="absolute inset-0 backdrop-blur-sm bg-background/60 z-10 flex flex-col items-center justify-center gap-2">
-                <Lock className="h-8 w-8 text-primary" />
-                <p className="text-sm font-medium text-foreground">Premium Feature</p>
-                <button onClick={() => navigate('/premium')} className="gradient-primary rounded-full px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow">
-                  Unlock Now
-                </button>
-              </div>
-              <div className="space-y-2 blur-locked">
-                <div className="h-10 shimmer rounded-lg" />
-                <div className="h-10 shimmer rounded-lg" />
-                <div className="h-10 shimmer rounded-lg" />
-              </div>
-            </>
-          )}
-        </div>
 
         {/* People You May Match With */}
         {suggestedPeople.length > 0 && (
@@ -209,7 +153,7 @@ export default function HomePage() {
                   <img src={c.profilePhoto || c.avatar} alt="" className="h-10 w-10 rounded-full bg-secondary" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{c.name}</p>
-                    <p className="text-xs text-muted-foreground">{c.orgCategory || 'Organizer'}</p>
+                    <p className="text-xs text-muted-foreground">{c.orgCategory || 'Organization'}</p>
                   </div>
                   <button className="rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">Invite</button>
                 </motion.div>
@@ -234,7 +178,7 @@ export default function HomePage() {
 
         {/* All Events */}
         <SectionHeader icon={Sparkles} title="All Events" />
-        <motion.div layout className="grid gap-4 sm:grid-cols-2">
+        <motion.div layout className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((event, i) => (
             <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
               <EventCard event={event} onJoin={handleJoin} />

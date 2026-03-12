@@ -11,7 +11,8 @@ const EVENT_IMAGES = [
   'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=600&q=80',
 ];
 
-const CATEGORIES = ['Music', 'Tech', 'Food', 'Sports', 'Art', 'Networking', 'Gaming', 'Wellness'];
+// Base category list (without the synthetic "All" option)
+const CATEGORIES = ['Music', 'Tech', 'Food', 'Sports', 'Art', 'Networking', 'Gaming', 'Wellness', 'Outdoors'];
 
 const seedEvents: EventItem[] = [
   {

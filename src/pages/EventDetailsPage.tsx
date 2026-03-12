@@ -37,7 +37,7 @@ export default function EventDetailsPage() {
   const handleJoinOrRequest = () => {
     if (!user) { navigate('/login'); return; }
     if (isOrganizer) {
-      setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
+      setToast({ show: true, message: 'Organizations cannot join events', type: 'error' });
       return;
     }
     if (hasJoined) {
@@ -104,7 +104,7 @@ export default function EventDetailsPage() {
 
   const getJoinButtonText = () => {
     if (hasJoined) return 'Joined ✓';
-    if (isOrganizer) return "Organizers can't join";
+    if (isOrganizer) return "Organizations can't join";
     if (event.requiresApproval) {
       if (existingRequest?.status === 'pending') return 'Request Pending...';
       if (existingRequest?.status === 'approved') return 'Approved — Pay Now';
@@ -139,12 +139,12 @@ export default function EventDetailsPage() {
             <span className="shrink-0 rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">{event.category}</span>
           </div>
 
-          {/* Organizer */}
+          {/* Organization */}
           <div className="flex items-center gap-3">
             <img src={event.organizerAvatar} alt="" className="h-10 w-10 rounded-full bg-secondary ring-2 ring-primary/30" />
             <div>
               <p className="text-sm font-medium text-foreground">{event.organizer}</p>
-              <p className="text-xs text-muted-foreground">Organizer</p>
+              <p className="text-xs text-muted-foreground">Organization</p>
             </div>
           </div>
 

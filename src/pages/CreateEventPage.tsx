@@ -30,8 +30,8 @@ export default function CreateEventPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background pb-20">
         <div className="text-center space-y-3 px-6">
-          <p className="text-lg font-semibold text-foreground">Only Organizers can create events</p>
-          <p className="text-sm text-muted-foreground">Switch to an organizer account to create events</p>
+          <p className="text-lg font-semibold text-foreground">Only Organizations can create events</p>
+          <p className="text-sm text-muted-foreground">Switch to an organization account to create events</p>
           <button onClick={() => navigate('/home')} className="gradient-primary rounded-xl px-6 py-2 text-sm text-primary-foreground">Go Home</button>
         </div>
         <BottomNav />

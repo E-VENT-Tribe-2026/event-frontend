@@ -25,7 +25,7 @@ export default function OrganizerDashboardPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
         <div className="text-center space-y-3">
-          <p className="text-lg font-semibold">Organizer Access Only</p>
+          <p className="text-lg font-semibold">Organization Access Only</p>
           <button onClick={() => navigate('/home')} className="gradient-primary rounded-xl px-6 py-2 text-sm text-primary-foreground">Go Home</button>
         </div>
       </div>
