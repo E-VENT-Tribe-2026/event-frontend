@@ -1,17 +1,15 @@
 import { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User, Camera, Calendar, ChevronDown, Building2 } from 'lucide-react';
-import { signup, type UserRole } from '@/lib/storage';
+import { Eye, EyeOff, Mail, Lock, User, Camera, Calendar, ChevronDown } from 'lucide-react';
+import { signup } from '@/lib/storage';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 
 const ALL_INTERESTS = ['Music', 'Sports', 'Gaming', 'Movies', 'Study', 'Travel', 'Tech', 'Art', 'Fitness', 'Coffee', 'Networking', 'Food', 'Wellness'];
-const ORG_CATEGORIES = ['Entertainment', 'Education', 'Tech', 'Sports', 'Food & Beverage', 'Art & Culture', 'Nonprofit', 'Corporate'];
 
 export default function SignupPage() {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [role, setRole] = useState<UserRole>('participant');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,10 +19,10 @@ export default function SignupPage() {
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
-  const [orgCategory, setOrgCategory] = useState('');
   const [profilePhoto, setProfilePhoto] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showInterests, setShowInterests] = useState(false);
 
   const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -41,29 +39,65 @@ export default function SignupPage() {
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!name.trim()) e.name = role === 'organizer' ? 'Organization name required' : 'Name is required';
+    if (!name.trim()) e.name = 'Name is required';
     if (!email.trim()) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
     if (!password) e.password = 'Password is required';
     else if (password.length < 6) e.password = 'Minimum 6 characters';
     if (password !== confirmPw) e.confirmPw = 'Passwords do not match';
-    if (role === 'participant') {
-      if (!dob) e.dob = 'Date of birth is required';
-      if (!gender) e.gender = 'Gender is required';
-    }
-    if (role === 'organizer' && !orgCategory) e.orgCategory = 'Category is required';
+    if (!dob) e.dob = 'Date of birth is required';
+    if (!gender) e.gender = 'Gender is required';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
-    const result = signup({ role, name, email, password, profilePhoto, dob, gender, interests, orgCategory });
-    if (result.success) {
-      navigate('/home');
-    } else {
+    if (!validate() || isSubmitting) return;
+    setIsSubmitting(true);
+
+    // Keep existing local experience
+    const result = signup({ role: 'participant', name, email, password, profilePhoto, dob, gender, interests });
+    if (!result.success) {
       setToast({ show: true, message: result.error!, type: 'error' });
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Also register with backend/Supabase so the database is updated
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          full_name: name,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const message = (data && (data.detail || data.message)) || 'Signup failed on server';
+        setToast({ show: true, message, type: 'error' });
+        setIsSubmitting(false);
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+      const token = data?.access_token;
+      if (token) {
+        localStorage.setItem('api_token', token);
+      }
+
+      // After successful signup, send user to login page
+      navigate('/login');
+    } catch (err) {
+      setToast({ show: true, message: 'Cannot reach server. Make sure backend is running.', type: 'error' });
+      setIsSubmitting(false);
     }
   };
 
@@ -76,16 +110,6 @@ export default function SignupPage() {
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
           <p className="mt-2 text-sm text-muted-foreground">Join E-VENT and discover events</p>
-        </div>
-
-        {/* Role Toggle */}
-        <div className="flex rounded-xl bg-secondary p-1">
-          {(['participant', 'organizer'] as UserRole[]).map(r => (
-            <button key={r} type="button" onClick={() => setRole(r)}
-              className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-all ${role === r ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}`}>
-              {r === 'participant' ? '🎉 Participant' : '🏢 Organizer'}
-            </button>
-          ))}
         </div>
 
         {/* Profile Photo */}
@@ -109,8 +133,8 @@ export default function SignupPage() {
           {/* Name */}
           <div>
             <div className="relative">
-              {role === 'organizer' ? <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /> : <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />}
-              <input type="text" placeholder={role === 'organizer' ? 'Organization Name' : 'Full Name'} value={name} onChange={e => setName(e.target.value)} className={inputCls} />
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input type="text" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className={inputCls} />
             </div>
             {errors.name && <p className="mt-1 text-xs text-destructive">{errors.name}</p>}
           </div>
@@ -119,71 +143,55 @@ export default function SignupPage() {
           <div>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input type="email" placeholder={role === 'organizer' ? 'Contact Email' : 'Email'} value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
+              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
             </div>
             {errors.email && <p className="mt-1 text-xs text-destructive">{errors.email}</p>}
           </div>
 
           <AnimatePresence mode="wait">
-            {role === 'participant' ? (
-              <motion.div key="participant-fields" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-3">
-                {/* DOB */}
-                <div>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <input type="date" value={dob} onChange={e => setDob(e.target.value)} className={inputCls} />
-                  </div>
-                  {errors.dob && <p className="mt-1 text-xs text-destructive">{errors.dob}</p>}
+            <motion.div key="signup-fields" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-3">
+              {/* DOB */}
+              <div>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input type="date" value={dob} onChange={e => setDob(e.target.value)} className={inputCls} />
                 </div>
-                {/* Gender */}
-                <div>
-                  <div className="relative">
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                    <select value={gender} onChange={e => setGender(e.target.value)} className="w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/50 appearance-none">
-                      <option value="" disabled>Select Gender</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                  {errors.gender && <p className="mt-1 text-xs text-destructive">{errors.gender}</p>}
+                {errors.dob && <p className="mt-1 text-xs text-destructive">{errors.dob}</p>}
+              </div>
+              {/* Gender */}
+              <div>
+                <div className="relative">
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <select value={gender} onChange={e => setGender(e.target.value)} className="w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/50 appearance-none">
+                    <option value="" disabled>Select Gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
                 </div>
-                {/* Interests */}
-                <div>
-                  <button type="button" onClick={() => setShowInterests(!showInterests)}
-                    className="w-full rounded-xl bg-secondary px-4 py-3 text-sm text-left flex items-center justify-between text-foreground">
-                    <span className={interests.length ? 'text-foreground' : 'text-muted-foreground'}>
-                      {interests.length ? interests.join(', ') : 'Select Interests'}
-                    </span>
-                    <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showInterests ? 'rotate-180' : ''}`} />
-                  </button>
-                  {showInterests && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mt-2 flex flex-wrap gap-2 rounded-xl bg-secondary p-3">
-                      {ALL_INTERESTS.map(i => (
-                        <button key={i} type="button" onClick={() => toggleInterest(i)}
-                          className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${interests.includes(i) ? 'gradient-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
-                          {i}
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div key="organizer-fields" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-3">
-                {/* Org Category */}
-                <div>
-                  <div className="relative">
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                    <select value={orgCategory} onChange={e => setOrgCategory(e.target.value)} className="w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/50 appearance-none">
-                      <option value="" disabled>Organization Category</option>
-                      {ORG_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  {errors.orgCategory && <p className="mt-1 text-xs text-destructive">{errors.orgCategory}</p>}
-                </div>
-              </motion.div>
-            )}
+                {errors.gender && <p className="mt-1 text-xs text-destructive">{errors.gender}</p>}
+              </div>
+              {/* Interests */}
+              <div>
+                <button type="button" onClick={() => setShowInterests(!showInterests)}
+                  className="w-full rounded-xl bg-secondary px-4 py-3 text-sm text-left flex items-center justify-between text-foreground">
+                  <span className={interests.length ? 'text-foreground' : 'text-muted-foreground'}>
+                    {interests.length ? interests.join(', ') : 'Select Interests'}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showInterests ? 'rotate-180' : ''}`} />
+                </button>
+                {showInterests && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mt-2 flex flex-wrap gap-2 rounded-xl bg-secondary p-3">
+                    {ALL_INTERESTS.map(i => (
+                      <button key={i} type="button" onClick={() => toggleInterest(i)}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${interests.includes(i) ? 'gradient-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+                        {i}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </div>
+            </motion.div>
           </AnimatePresence>
 
           {/* Password */}
@@ -210,8 +218,8 @@ export default function SignupPage() {
             {errors.confirmPw && <p className="mt-1 text-xs text-destructive">{errors.confirmPw}</p>}
           </div>
 
-          <button type="submit" className="w-full gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98]">
-            {role === 'organizer' ? 'Create Organization' : 'Create Account'}
+          <button type="submit" className="w-full gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98] disabled:opacity-60" disabled={isSubmitting}>
+            {isSubmitting ? 'Creating Account...' : 'Create Account'}
           </button>
         </form>
 

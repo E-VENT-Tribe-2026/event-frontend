@@ -119,6 +119,13 @@ export function logout() {
   localStorage.removeItem(CURRENT_USER_KEY);
 }
 
+function generateId() {
+  if (typeof window !== 'undefined' && window.crypto && 'randomUUID' in window.crypto) {
+    return window.crypto.randomUUID();
+  }
+  return `user_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 export function signup(data: {
   role: UserRole;
   name: string;
@@ -135,7 +142,7 @@ export function signup(data: {
     return { success: false, error: 'Email already registered' };
   }
   const user: User = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     role: data.role,
     name: data.name,
     email: data.email,
