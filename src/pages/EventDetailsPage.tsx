@@ -5,8 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useMemo, useEffect } from 'react';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+import { getApiUrl } from '@/lib/api';
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
 
 function mapApiEventToItem(api: Record<string, unknown>): EventItem {
@@ -62,7 +61,7 @@ export default function EventDetailsPage() {
   useEffect(() => {
     if (!id || events.some(e => e.id === id)) return;
     setLoadingApi(true);
-    fetch(`${API_BASE_URL}/api/events/${id}`)
+    fetch(getApiUrl(`/api/events/${id}`))
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => setApiEvent(mapApiEventToItem(data)))
       .catch(() => setApiEvent(null))

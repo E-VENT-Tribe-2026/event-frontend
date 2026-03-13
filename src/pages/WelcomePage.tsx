@@ -42,19 +42,20 @@ export default function WelcomePage() {
       </header>
 
       {/* Main content */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8 sm:py-12 text-center max-w-3xl mx-auto">
+      <main className="relative z-10 flex-1 px-4 py-8 sm:py-12">
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-center gap-10 text-center lg:flex-row lg:items-start lg:justify-between lg:text-left">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="space-y-6"
+          className="space-y-6 lg:max-w-xl"
         >
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
             <span className="text-gradient">The people platform</span>
             <br />
             for events and meetups
           </h1>
-          <p className="text-lg text-muted-foreground max-w-xl mx-auto">
+          <p className="text-lg text-muted-foreground max-w-xl mx-auto lg:mx-0">
             Whatever your interest — tech talks, coffee meetups, hikes, or game nights — E-VENT helps you find the people and events that fit your vibe.
           </p>
 
@@ -72,7 +73,7 @@ export default function WelcomePage() {
           </div>
 
           {/* Category chips */}
-          <div className="flex flex-wrap justify-center gap-2 pt-2">
+          <div className="flex flex-wrap justify-center gap-2 pt-2 lg:justify-start">
             {CATEGORIES.slice(0, 6).map((cat, i) => (
               <span
                 key={cat}
@@ -84,7 +85,7 @@ export default function WelcomePage() {
           </div>
 
           {/* CTAs */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-6">
+          <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 pt-6">
             <Link
               to="/signup"
               className="w-full sm:w-auto rounded-xl gradient-primary px-8 py-3.5 text-sm font-semibold text-primary-foreground shadow-glow ripple-container hover:opacity-95 transition-opacity flex items-center justify-center gap-2"
@@ -101,7 +102,7 @@ export default function WelcomePage() {
           </div>
 
           {/* Feature links */}
-          <div className="flex flex-wrap justify-center gap-6 pt-8 text-sm">
+          <div className="flex flex-wrap justify-center lg:justify-start gap-6 pt-8 text-sm">
             <Link
               to="/login"
               className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
@@ -124,7 +125,7 @@ export default function WelcomePage() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.3, duration: 0.5 }}
-          className="mt-12 w-full max-w-sm rounded-2xl glass-card p-5 text-left"
+          className="mt-12 w-full max-w-sm rounded-2xl glass-card p-5 text-left lg:mt-0"
         >
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
             Events near you
@@ -157,6 +158,7 @@ export default function WelcomePage() {
             Get started →
           </Link>
         </motion.aside>
+        </div>
       </main>
 
       {/* Footer */}
