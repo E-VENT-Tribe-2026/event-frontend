@@ -8,8 +8,7 @@ import AppToast from '@/components/AppToast';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Lock, TrendingUp, MapPin, Sparkles, Users, Crown, Brain, Eye, UserPlus } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+import { getApiUrl } from '@/lib/api';
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
 
 /** Map backend event (from database) to frontend EventItem for display */
@@ -61,7 +60,7 @@ export default function HomePage() {
     if (category && category !== 'All') params.set('category', category);
     if (search.trim()) params.set('search', search.trim());
     setLoading(true);
-    fetch(`${API_BASE_URL}/api/events?${params}`)
+    fetch(getApiUrl(`/api/events?${params}`))
       .then((res) => res.ok ? res.json() : Promise.reject(new Error('Failed to load events')))
       .then((data: { data?: Record<string, unknown>[] }) => {
         if (cancelled) return;
@@ -133,7 +132,7 @@ export default function HomePage() {
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
       <TopBar search={search} onSearchChange={setSearch} />
 
-      <div className="mx-auto max-w-lg px-4 pt-4 space-y-2">
+      <div className="mx-auto w-full max-w-5xl px-4 md:px-8 pt-6 space-y-4">
         {/* Category chips */}
         <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
           {['All', ...CATEGORIES].map(c => (
