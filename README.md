@@ -40,11 +40,18 @@ npm install
 
 ### 3. Environment Variables
 
-Create a file named `.env.local` in the root directory. This file is ignored by Git.
+Create a file named `.env.local` in the root directory for local development. This file is ignored by Git.
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
 VITE_ENV=development
+```
+
+For deployment (e.g. Render, Vercel), set `VITE_API_BASE_URL` in your hosting provider’s environment settings to the URL of your **backend/orchestrator**, for example:
+
+```env
+VITE_API_BASE_URL=https://your-backend-service.onrender.com
+VITE_ENV=production
 ```
 
 ### 4. Run Development Server

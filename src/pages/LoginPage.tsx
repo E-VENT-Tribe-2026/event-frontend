@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
-import { login } from '@/lib/storage';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
+import { getApiUrl } from '@/lib/api';
+import { setAuthToken } from '@/lib/auth';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -28,17 +29,9 @@ export default function LoginPage() {
     if (!validate() || isSubmitting) return;
     setIsSubmitting(true);
 
-    const result = login(email, password);
-    if (!result.success) {
-      setToast({ show: true, message: result.error!, type: 'error' });
-      setIsSubmitting(false);
-      return;
-    }
-
-    // Await backend login so api_token is set before we navigate (needed for events to save to database)
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+    // Backend login: source of truth for credentials
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      const res = await fetch(getApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -48,16 +41,21 @@ export default function LoginPage() {
 
       if (res.ok) {
         const data = await res.json().catch(() => null);
-        const token = data?.access_token;
-        if (token) {
-          localStorage.setItem('api_token', token);
-        }
+        const token = data?.access_token ?? null;
+        setAuthToken(token);
       } else {
         const err = await res.json().catch(() => ({}));
-        setToast({ show: true, message: (err.detail || 'Server login failed. Events may not save to the database.') as string, type: 'error' });
+        const message =
+          (err && (err.detail || err.message || err.error)) ||
+          'Invalid email or password';
+        setToast({ show: true, message, type: 'error' });
+        setIsSubmitting(false);
+        return;
       }
     } catch {
-      setToast({ show: true, message: 'Cannot reach server. Events will only save locally. Start the backend for database sync.', type: 'error' });
+      setToast({ show: true, message: 'Cannot reach server. Please try again later.', type: 'error' });
+      setIsSubmitting(false);
+      return;
     }
 
     setIsSubmitting(false);
@@ -77,7 +75,7 @@ export default function LoginPage() {
       <div className="absolute bottom-0 left-0 w-72 h-72 rounded-full bg-accent/10 blur-[100px]" />
 
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-8 relative z-10">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md px-4 space-y-8 relative z-10">
         <div className="text-center">
           <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', delay: 0.1 }}
             className="mx-auto mb-4 h-16 w-16 rounded-2xl gradient-primary flex items-center justify-center shadow-glow">

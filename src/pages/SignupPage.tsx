@@ -4,6 +4,8 @@ import { Eye, EyeOff, Mail, Lock, User, Camera, Calendar, ChevronDown } from 'lu
 import { signup } from '@/lib/storage';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
+import { getApiUrl } from '@/lib/api';
+import { setAuthToken } from '@/lib/auth';
 
 const ALL_INTERESTS = ['Music', 'Sports', 'Gaming', 'Movies', 'Study', 'Travel', 'Tech', 'Art', 'Fitness', 'Coffee', 'Networking', 'Food', 'Wellness'];
 
@@ -65,9 +67,8 @@ export default function SignupPage() {
     }
 
     // Also register with backend/Supabase so the database is updated
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+      const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -87,12 +88,6 @@ export default function SignupPage() {
         return;
       }
 
-      const data = await res.json().catch(() => null);
-      const token = data?.access_token;
-      if (token) {
-        localStorage.setItem('api_token', token);
-      }
-
       // After successful signup, send user to login page
       navigate('/login');
     } catch (err) {
@@ -106,7 +101,7 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-6">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md px-4 space-y-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
           <p className="mt-2 text-sm text-muted-foreground">Join E-VENT and discover events</p>

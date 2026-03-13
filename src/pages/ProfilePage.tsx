@@ -6,6 +6,8 @@ import { LogOut, Edit2, Check, Calendar, Users, Star, Ticket, Crown, UserPlus, C
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
+import { getApiUrl } from '@/lib/api';
+import { getAuthToken, clearAuthToken } from '@/lib/auth';
 
 function calcAge(dob: string): number | null {
   if (!dob) return null;
@@ -53,12 +55,11 @@ export default function ProfilePage() {
     updateUser({ name, bio });
 
     // Also update profile in backend so Supabase data matches UI
-    const token = localStorage.getItem('api_token');
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+    const token = getAuthToken();
 
     if (token) {
       try {
-        await fetch(`${API_BASE_URL}/api/profile/me`, {
+        await fetch(getApiUrl('/api/profile/me'), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -80,6 +81,7 @@ export default function ProfilePage() {
 
   const handleLogout = () => {
     logout();
+    clearAuthToken();
     navigate('/login');
   };
 
@@ -105,7 +107,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-14 relative z-10 space-y-5">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-4xl px-4 md:px-8 -mt-14 relative z-10 space-y-5">
         {/* Avatar + Info */}
         <div className="flex flex-col items-center gap-2">
           <div className="relative">
