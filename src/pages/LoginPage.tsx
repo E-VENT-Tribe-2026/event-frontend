@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -22,15 +23,45 @@ export default function LoginPage() {
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (!validate() || isSubmitting) return;
+    setIsSubmitting(true);
+
     const result = login(email, password);
-    if (result.success) {
-      navigate('/home');
-    } else {
+    if (!result.success) {
       setToast({ show: true, message: result.error!, type: 'error' });
+      setIsSubmitting(false);
+      return;
     }
+
+    // Await backend login so api_token is set before we navigate (needed for events to save to database)
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const token = data?.access_token;
+        if (token) {
+          localStorage.setItem('api_token', token);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setToast({ show: true, message: (err.detail || 'Server login failed. Events may not save to the database.') as string, type: 'error' });
+      }
+    } catch {
+      setToast({ show: true, message: 'Cannot reach server. Events will only save locally. Start the backend for database sync.', type: 'error' });
+    }
+
+    setIsSubmitting(false);
+    navigate('/home');
   };
 
   const handleSocialLogin = (provider: string) => {
@@ -81,8 +112,8 @@ export default function LoginPage() {
             <Link to="/forgot-password" className="text-xs text-primary hover:underline">Forgot Password?</Link>
           </div>
 
-          <button type="submit" className="w-full gradient-primary rounded-xl py-3.5 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98]">
-            Sign In
+          <button type="submit" className="w-full gradient-primary rounded-xl py-3.5 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98] disabled:opacity-60" disabled={isSubmitting}>
+            {isSubmitting ? 'Signing In...' : 'Sign In'}
           </button>
         </form>
 

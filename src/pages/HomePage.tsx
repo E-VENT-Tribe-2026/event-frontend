@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { getEvents, getCurrentUser, getUsers, type EventItem } from '@/lib/storage';
+import { useState, useMemo, useEffect } from 'react';
+import { getCurrentUser, getUsers, type EventItem } from '@/lib/storage';
 import { CATEGORIES } from '@/lib/seedData';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
@@ -9,27 +9,84 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Lock, TrendingUp, MapPin, Sparkles, Users, Crown, Brain, Eye, UserPlus } from 'lucide-react';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
+
+/** Map backend event (from database) to frontend EventItem for display */
+function mapApiEventToItem(api: Record<string, unknown>): EventItem {
+  const start = api.start_datetime ? new Date(api.start_datetime as string) : new Date();
+  const dateStr = start.toISOString().slice(0, 10);
+  const timeStr = start.toTimeString().slice(0, 5);
+  return {
+    id: (api.id as string) ?? '',
+    title: (api.title as string) ?? '',
+    description: (api.description as string) ?? '',
+    category: (api.category as string) ?? 'Other',
+    date: dateStr,
+    time: timeStr,
+    location: (api.location_name as string) ?? '',
+    lat: typeof api.latitude === 'number' ? api.latitude : 0,
+    lng: typeof api.longitude === 'number' ? api.longitude : 0,
+    budget: Number(api.cost) ?? 0,
+    participantsLimit: Number(api.max_capacity) ?? 0,
+    participants: [],
+    image: DEFAULT_IMAGE,
+    organizer: '',
+    organizerId: (api.created_by as string) ?? '',
+    organizerAvatar: '',
+    isPrivate: false,
+    isDraft: false,
+    requiresApproval: false,
+    reviews: [],
+    reports: [],
+    collaborators: [],
+  };
+}
+
 export default function HomePage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [budgetMax, setBudgetMax] = useState(500);
-  const [events] = useState<EventItem[]>(getEvents());
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const user = getCurrentUser();
   const allUsers = getUsers();
 
+  // Fetch events from database (backend API) only — no local/seed events
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({ limit: '50', page: '1' });
+    if (category && category !== 'All') params.set('category', category);
+    if (search.trim()) params.set('search', search.trim());
+    setLoading(true);
+    fetch(`${API_BASE_URL}/api/events?${params}`)
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error('Failed to load events')))
+      .then((data: { data?: Record<string, unknown>[] }) => {
+        if (cancelled) return;
+        const list = Array.isArray(data?.data) ? data.data : [];
+        setEvents(list.map(mapApiEventToItem));
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [category, search]);
+
   const filtered = useMemo(() => {
     return events.filter(e => {
-      if (e.isDraft) return false;
-      if (category !== 'All' && e.category !== category) return false;
       if (e.budget > budgetMax) return false;
       if (search && !e.title.toLowerCase().includes(search.toLowerCase()) && !e.location.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
   }, [events, search, category, budgetMax]);
 
-  const trending = useMemo(() => [...events].filter(e => !e.isDraft).sort((a, b) => b.participants.length - a.participants.length).slice(0, 4), [events]);
+  // Trending: respect category/budget/search filter so e.g. "Music" shows only music events
+  const trending = useMemo(() => [...filtered].sort((a, b) => b.participants.length - a.participants.length).slice(0, 4), [filtered]);
   const recommended = useMemo(() => {
     if (!user) return filtered.slice(0, 4);
     return filtered.filter(e => user.interests?.some(i => e.category === i)).slice(0, 4);
@@ -37,7 +94,7 @@ export default function HomePage() {
   const nearby = useMemo(() => filtered.slice(0, 4), [filtered]);
 
   // AI-powered sections (mock)
-  const recentlyViewed = useMemo(() => events.filter(e => !e.isDraft).slice(2, 5), [events]);
+  const recentlyViewed = useMemo(() => filtered.filter(e => !e.isDraft).slice(0, 5), [filtered]);
   const suggestedPeople = useMemo(() => allUsers.filter(u => u.id !== user?.id).slice(0, 4), [allUsers, user]);
   const suggestedCollaborators = useMemo(() => allUsers.filter(u => u.role === 'organizer' && u.id !== user?.id).slice(0, 3), [allUsers, user]);
 
@@ -232,18 +289,23 @@ export default function HomePage() {
           </>
         )}
 
-        {/* All Events */}
+        {/* All Events (from database) */}
         <SectionHeader icon={Sparkles} title="All Events" />
-        <motion.div layout className="grid gap-4 sm:grid-cols-2">
-          {filtered.map((event, i) => (
-            <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-              <EventCard event={event} onJoin={handleJoin} />
+        {loading ? (
+          <div className="text-center py-12 text-muted-foreground text-sm">Loading events from database…</div>
+        ) : (
+          <>
+            <motion.div layout className="grid gap-4 sm:grid-cols-2">
+              {filtered.map((event, i) => (
+                <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                  <EventCard event={event} onJoin={handleJoin} />
+                </motion.div>
+              ))}
             </motion.div>
-          ))}
-        </motion.div>
-
-        {filtered.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground text-sm">No events found matching your filters</div>
+            {filtered.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground text-sm">No events found. Create one to see it here.</div>
+            )}
+          </>
         )}
       </div>
 

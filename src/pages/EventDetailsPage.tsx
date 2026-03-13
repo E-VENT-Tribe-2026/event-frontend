@@ -2,15 +2,53 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getEvents, getCurrentUser, addReview, reportEvent, addJoinRequest, getJoinRequests, joinEvent, getUsers, type EventItem } from '@/lib/storage';
 import { ArrowLeft, MapPin, Clock, Users, Star, Flag, Send, ShieldCheck, UserCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
+
+function mapApiEventToItem(api: Record<string, unknown>): EventItem {
+  const start = api.start_datetime ? new Date(api.start_datetime as string) : new Date();
+  const dateStr = start.toISOString().slice(0, 10);
+  const timeStr = start.toTimeString().slice(0, 5);
+  const profiles = api.profiles as Record<string, unknown> | null | undefined;
+  const organizerName = profiles && typeof profiles === 'object' && profiles.full_name != null ? String(profiles.full_name) : '';
+  const organizerAvatar = profiles && typeof profiles === 'object' && profiles.avatar_url != null ? String(profiles.avatar_url) : '';
+  return {
+    id: (api.id as string) ?? '',
+    title: (api.title as string) ?? '',
+    description: (api.description as string) ?? '',
+    category: (api.category as string) ?? 'Other',
+    date: dateStr,
+    time: timeStr,
+    location: (api.location_name as string) ?? '',
+    lat: typeof api.latitude === 'number' ? api.latitude : 0,
+    lng: typeof api.longitude === 'number' ? api.longitude : 0,
+    budget: Number(api.cost) ?? 0,
+    participantsLimit: Number(api.max_capacity) ?? 0,
+    participants: [],
+    image: DEFAULT_IMAGE,
+    organizer: organizerName,
+    organizerId: (api.created_by as string) ?? '',
+    organizerAvatar: organizerAvatar || DEFAULT_IMAGE,
+    isPrivate: false,
+    isDraft: false,
+    requiresApproval: false,
+    reviews: [],
+    reports: [],
+    collaborators: [],
+  };
+}
 
 export default function EventDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [events, setEventsState] = useState(getEvents());
-  const event = events.find(e => e.id === id);
+  const [apiEvent, setApiEvent] = useState<EventItem | null>(null);
+  const [loadingApi, setLoadingApi] = useState(false);
+  const event = events.find(e => e.id === id) ?? apiEvent ?? null;
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [reviewText, setReviewText] = useState('');
@@ -19,6 +57,17 @@ export default function EventDetailsPage() {
   const [reportReason, setReportReason] = useState('');
   const user = getCurrentUser();
   const allUsers = getUsers();
+
+  // If event not in local storage, fetch from database
+  useEffect(() => {
+    if (!id || events.some(e => e.id === id)) return;
+    setLoadingApi(true);
+    fetch(`${API_BASE_URL}/api/events/${id}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => setApiEvent(mapApiEventToItem(data)))
+      .catch(() => setApiEvent(null))
+      .finally(() => setLoadingApi(false));
+  }, [id, events]);
 
   const isOrganizer = user?.role === 'organizer';
   const hasJoined = user && event ? event.participants.includes(user.id) : false;
@@ -32,6 +81,7 @@ export default function EventDetailsPage() {
     return event.participants.map(pId => allUsers.find(u => u.id === pId)).filter(Boolean).slice(0, 6);
   }, [event, allUsers]);
 
+  if (loadingApi) return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
   if (!event) return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
 
   const handleJoinOrRequest = () => {

@@ -49,8 +49,31 @@ export default function ProfilePage() {
   const age = calcAge(user.dob);
   const avatarSrc = user.profilePhoto || user.avatar;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     updateUser({ name, bio });
+
+    // Also update profile in backend so Supabase data matches UI
+    const token = localStorage.getItem('api_token');
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/profile/me`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            full_name: name,
+            bio,
+          }),
+        });
+      } catch {
+        // Ignore backend failure; local update already applied
+      }
+    }
+
     setEditing(false);
     setToast({ show: true, message: 'Profile updated!', type: 'success' });
   };

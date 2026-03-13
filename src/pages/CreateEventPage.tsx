@@ -25,20 +25,6 @@ export default function CreateEventPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
 
-  // Participants can't create events
-  if (user?.role === 'participant') {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background pb-20">
-        <div className="text-center space-y-3 px-6">
-          <p className="text-lg font-semibold text-foreground">Only Organizers can create events</p>
-          <p className="text-sm text-muted-foreground">Switch to an organizer account to create events</p>
-          <button onClick={() => navigate('/home')} className="gradient-primary rounded-xl px-6 py-2 text-sm text-primary-foreground">Go Home</button>
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
-
   const update = (key: string, value: string | boolean) => setForm(f => ({ ...f, [key]: value }));
 
   const validate = () => {
@@ -78,12 +64,60 @@ export default function CreateEventPage() {
     survey: surveyQuestions.length > 0 ? surveyQuestions : undefined,
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) { navigate('/login'); return; }
     if (!validate()) return;
-    addEvent(buildEvent(false));
-    setToast({ show: true, message: 'Event published!', type: 'success' });
+
+    const localEvent = buildEvent(false);
+    const token = localStorage.getItem('api_token');
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+
+    // 1) Save to backend (database) first if we have a token
+    if (token) {
+      const start = new Date(`${form.date}T${form.time || '00:00'}:00`);
+      const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+      const payload = {
+        title: form.title,
+        description: form.description || undefined,
+        category: form.category || undefined,
+        cost: Number(form.budget) || 0,
+        max_capacity: Number(form.limit) || null,
+        start_datetime: start.toISOString(),
+        end_datetime: end.toISOString(),
+        location_name: form.location || undefined,
+        latitude: localEvent.lat,
+        longitude: localEvent.lng,
+      };
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/events`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const msg = typeof err.detail === 'string' ? err.detail : (err.detail?.[0]?.msg || 'Event could not be saved to the database.');
+          setToast({ show: true, message: msg, type: 'error' });
+          return;
+        }
+      } catch {
+        setToast({ show: true, message: 'Cannot reach server. Start the backend so events save to the database.', type: 'error' });
+        return;
+      }
+    } else {
+      setToast({ show: true, message: 'Log in again so events can be saved to the database.', type: 'error' });
+      return;
+    }
+
+    // 2) Update local app state so the event appears in the UI
+    addEvent(localEvent);
+    setToast({ show: true, message: 'Event published and saved to the database!', type: 'success' });
     setTimeout(() => navigate('/home'), 1500);
   };
 
