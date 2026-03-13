@@ -1,4 +1,4 @@
-// localStorage database helpers
+// In-memory "database" helpers (no localStorage)
 
 export type UserRole = 'participant' | 'organizer';
 
@@ -88,35 +88,34 @@ export interface Notification {
   read: boolean;
 }
 
-const USERS_KEY = 'event_users';
-const CURRENT_USER_KEY = 'event_current_user';
-const EVENTS_KEY = 'event_events';
-const NOTIFICATIONS_KEY = 'event_notifications';
-const DRAFTS_KEY = 'event_drafts';
-const JOIN_REQUESTS_KEY = 'event_join_requests';
-const TICKETS_KEY = 'event_tickets';
+let USERS: User[] = [];
+let CURRENT_USER_ID: string | null = null;
+let EVENTS: EventItem[] = [];
+let NOTIFICATIONS: Notification[] = [];
+let DRAFTS: EventItem[] = [];
+let JOIN_REQUESTS: JoinRequest[] = [];
+let TICKETS: Ticket[] = [];
 
 // Users
 export function getUsers(): User[] {
-  return JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+  return USERS;
 }
 
 export function saveUsers(users: User[]) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  USERS = users;
 }
 
 export function getCurrentUser(): User | null {
-  const id = localStorage.getItem(CURRENT_USER_KEY);
-  if (!id) return null;
-  return getUsers().find(u => u.id === id) || null;
+  if (!CURRENT_USER_ID) return null;
+  return getUsers().find(u => u.id === CURRENT_USER_ID) || null;
 }
 
 export function setCurrentUser(id: string) {
-  localStorage.setItem(CURRENT_USER_KEY, id);
+  CURRENT_USER_ID = id;
 }
 
 export function logout() {
-  localStorage.removeItem(CURRENT_USER_KEY);
+  CURRENT_USER_ID = null;
 }
 
 function generateId() {
@@ -182,11 +181,11 @@ export function updateUser(updates: Partial<User>) {
 
 // Events
 export function getEvents(): EventItem[] {
-  return JSON.parse(localStorage.getItem(EVENTS_KEY) || '[]');
+  return EVENTS;
 }
 
 export function saveEvents(events: EventItem[]) {
-  localStorage.setItem(EVENTS_KEY, JSON.stringify(events));
+  EVENTS = events;
 }
 
 export function addEvent(event: EventItem) {
@@ -241,22 +240,20 @@ export function reportEvent(eventId: string, report: { userId: string; reason: s
 
 // Drafts
 export function getDrafts(): EventItem[] {
-  return JSON.parse(localStorage.getItem(DRAFTS_KEY) || '[]');
+  return DRAFTS;
 }
 
 export function saveDraft(event: EventItem) {
-  const drafts = getDrafts();
-  drafts.unshift(event);
-  localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+  DRAFTS = [event, ...DRAFTS];
 }
 
 // Join Requests
 export function getJoinRequests(): JoinRequest[] {
-  return JSON.parse(localStorage.getItem(JOIN_REQUESTS_KEY) || '[]');
+  return JOIN_REQUESTS;
 }
 
 export function saveJoinRequests(reqs: JoinRequest[]) {
-  localStorage.setItem(JOIN_REQUESTS_KEY, JSON.stringify(reqs));
+  JOIN_REQUESTS = reqs;
 }
 
 export function addJoinRequest(req: JoinRequest) {
@@ -274,11 +271,11 @@ export function updateJoinRequest(id: string, status: 'approved' | 'rejected') {
 
 // Tickets
 export function getTickets(): Ticket[] {
-  return JSON.parse(localStorage.getItem(TICKETS_KEY) || '[]');
+  return TICKETS;
 }
 
 export function saveTickets(tickets: Ticket[]) {
-  localStorage.setItem(TICKETS_KEY, JSON.stringify(tickets));
+  TICKETS = tickets;
 }
 
 export function addTicket(ticket: Ticket) {
@@ -289,11 +286,11 @@ export function addTicket(ticket: Ticket) {
 
 // Notifications
 export function getNotifications(): Notification[] {
-  return JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
+  return NOTIFICATIONS;
 }
 
 export function saveNotifications(notifs: Notification[]) {
-  localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifs));
+  NOTIFICATIONS = notifs;
 }
 
 export function addNotification(notif: Notification) {

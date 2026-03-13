@@ -6,6 +6,8 @@ import { CATEGORIES } from '@/lib/seedData';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
+import { getApiUrl } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 const EVENT_IMAGES = [
   'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80',
@@ -70,8 +72,7 @@ export default function CreateEventPage() {
     if (!validate()) return;
 
     const localEvent = buildEvent(false);
-    const token = localStorage.getItem('api_token');
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+    const token = getAuthToken();
 
     // 1) Save to backend (database) first if we have a token
     if (token) {
@@ -91,7 +92,7 @@ export default function CreateEventPage() {
       };
 
       try {
-        const res = await fetch(`${API_BASE_URL}/api/events`, {
+        const res = await fetch(getApiUrl('/api/events'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
