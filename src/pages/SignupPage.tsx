@@ -4,10 +4,9 @@ import { Eye, EyeOff, Mail, Lock, User, Camera, Calendar, ChevronDown } from 'lu
 import { signup } from '@/lib/storage';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
-import { getApiUrl } from '@/lib/api';
-import { setAuthToken } from '@/lib/auth';
 
 const ALL_INTERESTS = ['Music', 'Sports', 'Gaming', 'Movies', 'Study', 'Travel', 'Tech', 'Art', 'Fitness', 'Coffee', 'Networking', 'Food', 'Wellness'];
+const MIN_AGE = 18;
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -39,6 +38,17 @@ export default function SignupPage() {
     setInterests(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]);
   };
 
+  const isAtLeastAge = (isoDate: string, minAge: number) => {
+    // isoDate expected "YYYY-MM-DD" from <input type="date" />
+    const [y, m, d] = isoDate.split('-').map(Number);
+    if (!y || !m || !d) return false;
+    const dobDate = new Date(y, m - 1, d);
+    if (Number.isNaN(dobDate.getTime())) return false;
+    const today = new Date();
+    const cutoff = new Date(today.getFullYear() - minAge, today.getMonth(), today.getDate());
+    return dobDate <= cutoff;
+  };
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = 'Name is required';
@@ -48,6 +58,7 @@ export default function SignupPage() {
     else if (password.length < 6) e.password = 'Minimum 6 characters';
     if (password !== confirmPw) e.confirmPw = 'Passwords do not match';
     if (!dob) e.dob = 'Date of birth is required';
+    else if (!isAtLeastAge(dob, MIN_AGE)) e.dob = `You must be at least ${MIN_AGE} years old`;
     if (!gender) e.gender = 'Gender is required';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -58,17 +69,12 @@ export default function SignupPage() {
     if (!validate() || isSubmitting) return;
     setIsSubmitting(true);
 
-    // Keep existing local experience
-    const result = signup({ role: 'participant', name, email, password, profilePhoto, dob, gender, interests });
-    if (!result.success) {
-      setToast({ show: true, message: result.error!, type: 'error' });
-      setIsSubmitting(false);
-      return;
-    }
-
-    // Also register with backend/Supabase so the database is updated
+    // Register on backend/Supabase before considering signup complete.
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
     try {
-      const res = await fetch(getApiUrl('/api/auth/register'), {
+      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -77,7 +83,9 @@ export default function SignupPage() {
           email,
           password,
           full_name: name,
+          dob,
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -88,11 +96,25 @@ export default function SignupPage() {
         return;
       }
 
-      // After successful signup, send user to login page
-      navigate('/login');
-    } catch (err) {
-      setToast({ show: true, message: 'Cannot reach server. Make sure backend is running.', type: 'error' });
+      const data = await res.json().catch(() => null);
+      const token = data?.access_token;
+      if (token) localStorage.setItem('api_token', token);
+
+      // Keep local app profile in sync only after server signup succeeds.
+      const result = signup({ role: 'participant', name, email, password, profilePhoto, dob, gender, interests });
+      if (!result.success) {
+        setToast({ show: true, message: result.error!, type: 'error' });
+        setIsSubmitting(false);
+        return;
+      }
+
       setIsSubmitting(false);
+      navigate('/login');
+    } catch {
+      setToast({ show: true, message: 'Cannot reach server. Start backend and try again.', type: 'error' });
+      setIsSubmitting(false);
+    } finally {
+      window.clearTimeout(timeout);
     }
   };
 
@@ -101,7 +123,7 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md px-4 space-y-6">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
           <p className="mt-2 text-sm text-muted-foreground">Join E-VENT and discover events</p>
@@ -147,6 +169,7 @@ export default function SignupPage() {
             <motion.div key="signup-fields" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-3">
               {/* DOB */}
               <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Date of Birth</label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <input type="date" value={dob} onChange={e => setDob(e.target.value)} className={inputCls} />

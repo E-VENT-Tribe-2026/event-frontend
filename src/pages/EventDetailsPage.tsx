@@ -1,17 +1,21 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { getEvents, getCurrentUser, addReview, reportEvent, addJoinRequest, getJoinRequests, joinEvent, getUsers, type EventItem } from '@/lib/storage';
+import { getEvents, getCurrentUser, addReview, reportEvent, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, type EventItem } from '@/lib/storage';
 import { ArrowLeft, MapPin, Clock, Users, Star, Flag, Send, ShieldCheck, UserCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useMemo, useEffect } from 'react';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
-import { getApiUrl } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
 
 function mapApiEventToItem(api: Record<string, unknown>): EventItem {
   const start = api.start_datetime ? new Date(api.start_datetime as string) : new Date();
   const dateStr = start.toISOString().slice(0, 10);
   const timeStr = start.toTimeString().slice(0, 5);
+  const cost = Number(api.cost);
+  const capacity = Number(api.max_capacity);
   const profiles = api.profiles as Record<string, unknown> | null | undefined;
   const organizerName = profiles && typeof profiles === 'object' && profiles.full_name != null ? String(profiles.full_name) : '';
   const organizerAvatar = profiles && typeof profiles === 'object' && profiles.avatar_url != null ? String(profiles.avatar_url) : '';
@@ -25,8 +29,8 @@ function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     location: (api.location_name as string) ?? '',
     lat: typeof api.latitude === 'number' ? api.latitude : 0,
     lng: typeof api.longitude === 'number' ? api.longitude : 0,
-    budget: Number(api.cost) ?? 0,
-    participantsLimit: Number(api.max_capacity) ?? 0,
+    budget: Number.isFinite(cost) ? cost : 0,
+    participantsLimit: Number.isFinite(capacity) ? capacity : 0,
     participants: [],
     image: DEFAULT_IMAGE,
     organizer: organizerName,
@@ -54,6 +58,8 @@ export default function EventDetailsPage() {
   const [reviewRating, setReviewRating] = useState(5);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState('');
+  const [apiParticipants, setApiParticipants] = useState<Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }>>([]);
+  const [isUpdatingParticipation, setIsUpdatingParticipation] = useState(false);
   const user = getCurrentUser();
   const allUsers = getUsers();
 
@@ -61,15 +67,51 @@ export default function EventDetailsPage() {
   useEffect(() => {
     if (!id || events.some(e => e.id === id)) return;
     setLoadingApi(true);
-    fetch(getApiUrl(`/api/events/${id}`))
+    fetch(`${API_BASE_URL}/api/events/${id}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => setApiEvent(mapApiEventToItem(data)))
       .catch(() => setApiEvent(null))
       .finally(() => setLoadingApi(false));
   }, [id, events]);
 
+  const isRemoteEvent = Boolean(apiEvent);
+
+  const getApiToken = async (): Promise<string | null> => {
+    const existing = localStorage.getItem('api_token');
+    if (existing) return existing;
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (token) {
+      localStorage.setItem('api_token', token);
+      return token;
+    }
+    return null;
+  };
+
+  const loadApiParticipants = async (eventId: string) => {
+    try {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(`${API_BASE_URL}/api/participants/${eventId}/participants`, {
+        signal: controller.signal,
+      }).finally(() => window.clearTimeout(timeout));
+      if (!res.ok) return;
+      const data = await res.json().catch(() => []);
+      if (Array.isArray(data)) setApiParticipants(data);
+    } catch {
+      // keep current participant state when API call fails
+    }
+  };
+
+  useEffect(() => {
+    if (!event?.id || !isRemoteEvent) return;
+    loadApiParticipants(event.id);
+  }, [event?.id, isRemoteEvent]);
+
   const isOrganizer = user?.role === 'organizer';
-  const hasJoined = user && event ? event.participants.includes(user.id) : false;
+  const participantIds = apiParticipants.length > 0 ? apiParticipants.map((p) => p.user_id) : event ? event.participants : [];
+  const hasJoined = user && event ? participantIds.includes(user.id) : false;
   const alreadyReviewed = user && event ? (event.reviews || []).some(r => r.userId === user?.id) : false;
   const alreadyReported = user && event ? (event.reports || []).some(r => r.userId === user?.id) : false;
   const existingRequest = user && event ? getJoinRequests().find(r => r.eventId === event.id && r.userId === user.id) : null;
@@ -77,20 +119,65 @@ export default function EventDetailsPage() {
   // Get participant avatars
   const participantUsers = useMemo(() => {
     if (!event) return [];
+    if (apiParticipants.length > 0) {
+      return apiParticipants
+        .filter((p) => p?.profiles)
+        .slice(0, 6)
+        .map((p) => ({
+          profilePhoto: p.profiles?.avatar_url || DEFAULT_IMAGE,
+          avatar: p.profiles?.avatar_url || DEFAULT_IMAGE,
+          name: p.profiles?.full_name || 'Participant',
+        }));
+    }
     return event.participants.map(pId => allUsers.find(u => u.id === pId)).filter(Boolean).slice(0, 6);
-  }, [event, allUsers]);
+  }, [event, allUsers, apiParticipants]);
 
   if (loadingApi) return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
   if (!event) return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
 
-  const handleJoinOrRequest = () => {
+  const handleJoinOrRequest = async () => {
     if (!user) { navigate('/login'); return; }
+    if (!event) return;
     if (isOrganizer) {
       setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
       return;
     }
+
+    if (isUpdatingParticipation) return;
+    setIsUpdatingParticipation(true);
+
     if (hasJoined) {
-      setToast({ show: true, message: 'Already joined!', type: 'error' });
+      if (isRemoteEvent) {
+        const token = await getApiToken();
+        if (!token) {
+          setToast({ show: true, message: 'Session missing. Please sign in again.', type: 'error' });
+          setIsUpdatingParticipation(false);
+          return;
+        }
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/participants/${event.id}/leave`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            setToast({ show: true, message: (err.detail || 'Could not leave event') as string, type: 'error' });
+            setIsUpdatingParticipation(false);
+            return;
+          }
+          await loadApiParticipants(event.id);
+          setToast({ show: true, message: 'You left the event.', type: 'success' });
+        } catch {
+          setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
+        } finally {
+          setIsUpdatingParticipation(false);
+        }
+        return;
+      }
+      leaveEvent(event.id, user.id);
+      setEventsState(getEvents());
+      setToast({ show: true, message: 'You left the event.', type: 'success' });
+      setIsUpdatingParticipation(false);
       return;
     }
 
@@ -105,9 +192,11 @@ export default function EventDetailsPage() {
             setEventsState(getEvents());
             setToast({ show: true, message: 'Successfully joined!', type: 'success' });
           }
+          setIsUpdatingParticipation(false);
           return;
         }
         setToast({ show: true, message: `Request already ${existingRequest.status}`, type: 'error' });
+        setIsUpdatingParticipation(false);
         return;
       }
       addJoinRequest({
@@ -120,13 +209,43 @@ export default function EventDetailsPage() {
         createdAt: new Date().toISOString(),
       });
       setToast({ show: true, message: 'Join request sent! Waiting for organizer approval.', type: 'success' });
+      setIsUpdatingParticipation(false);
     } else {
       if (event.budget > 0) {
         navigate(`/payment/${event.id}`);
+        setIsUpdatingParticipation(false);
       } else {
+        if (isRemoteEvent) {
+          const token = await getApiToken();
+          if (!token) {
+            setToast({ show: true, message: 'Session missing. Please sign in again.', type: 'error' });
+            setIsUpdatingParticipation(false);
+            return;
+          }
+          try {
+            const res = await fetch(`${API_BASE_URL}/api/participants/${event.id}/join`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              setToast({ show: true, message: (err.detail || 'Could not join event') as string, type: 'error' });
+              setIsUpdatingParticipation(false);
+              return;
+            }
+            await loadApiParticipants(event.id);
+            setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+          } catch {
+            setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
+          } finally {
+            setIsUpdatingParticipation(false);
+          }
+          return;
+        }
         joinEvent(event.id, user.id);
         setEventsState(getEvents());
         setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+        setIsUpdatingParticipation(false);
       }
     }
   };
@@ -152,7 +271,8 @@ export default function EventDetailsPage() {
   const reviews = event.reviews || [];
 
   const getJoinButtonText = () => {
-    if (hasJoined) return 'Joined ✓';
+    if (isUpdatingParticipation) return 'Please wait...';
+    if (hasJoined) return 'Leave Event';
     if (isOrganizer) return "Organizers can't join";
     if (event.requiresApproval) {
       if (existingRequest?.status === 'pending') return 'Request Pending...';
@@ -202,7 +322,7 @@ export default function EventDetailsPage() {
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4 text-primary" />{event.date} · {event.time}</div>
             <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4 text-accent" /><span className="truncate">{event.location}</span></div>
-            <div className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4 text-primary" />{event.participants.length}/{event.participantsLimit}</div>
+            <div className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4 text-primary" />{participantIds.length}/{event.participantsLimit}</div>
             <div className="flex items-center gap-2 text-foreground font-semibold">{event.budget === 0 ? 'Free' : `$${event.budget}`}</div>
           </div>
 
@@ -212,14 +332,14 @@ export default function EventDetailsPage() {
               {participantUsers.map((p: any, i: number) => (
                 <img key={i} src={p.profilePhoto || p.avatar} alt="" className="h-8 w-8 rounded-full border-2 border-card bg-secondary object-cover" />
               ))}
-              {event.participants.length > 6 && (
+              {participantIds.length > 6 && (
                 <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-card bg-secondary text-xs text-muted-foreground">
-                  +{event.participants.length - 6}
+                  +{participantIds.length - 6}
                 </div>
               )}
             </div>
-            {event.participants.length > 0 && (
-              <p className="text-xs text-muted-foreground">{event.participants.length} attending</p>
+            {participantIds.length > 0 && (
+              <p className="text-xs text-muted-foreground">{participantIds.length} attending</p>
             )}
           </div>
         </div>
@@ -279,8 +399,8 @@ export default function EventDetailsPage() {
         {/* Actions */}
         <div className="flex gap-3">
           <button onClick={handleJoinOrRequest}
-            disabled={isOrganizer || existingRequest?.status === 'rejected'}
-            className={`flex-1 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${isOrganizer || existingRequest?.status === 'rejected' ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'gradient-primary text-primary-foreground shadow-glow ripple-container'}`}>
+            disabled={isOrganizer || existingRequest?.status === 'rejected' || isUpdatingParticipation}
+            className={`flex-1 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${isOrganizer || existingRequest?.status === 'rejected' || isUpdatingParticipation ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'gradient-primary text-primary-foreground shadow-glow ripple-container'}`}>
             {getJoinButtonText()}
           </button>
           <button onClick={() => alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)}

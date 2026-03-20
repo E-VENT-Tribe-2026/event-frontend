@@ -18,6 +18,7 @@ import PaymentPage from "./pages/PaymentPage";
 import PremiumPage from "./pages/PremiumPage";
 import OrganizerDashboardPage from "./pages/OrganizerDashboardPage";
 import TicketPage from "./pages/TicketPage";
+import AuthCallbackPage from "./pages/AuthCallbackPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +32,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/home" element={<HomePage />} />

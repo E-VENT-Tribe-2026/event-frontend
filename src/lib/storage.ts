@@ -114,8 +114,58 @@ export function setCurrentUser(id: string) {
   CURRENT_USER_ID = id;
 }
 
+/** Create or update a user from OAuth (e.g. Google) and set as current user. */
+export function setCurrentUserFromOAuth(data: { id: string; email: string; name?: string; avatar?: string }): void {
+  const users = getUsers();
+  const existing = users.find((u) => u.email === data.email || u.id === data.id);
+  const now = new Date().toISOString();
+  const name = data.name || data.email?.split('@')[0] || 'User';
+  const avatar =
+    data.avatar ||
+    `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.id)}`;
+
+  if (existing) {
+    const updated = {
+      ...existing,
+      id: data.id,
+      name,
+      email: data.email,
+      avatar,
+      profilePhoto: data.avatar || existing.profilePhoto,
+    };
+    saveUsers(users.map((u) => (u.id === existing.id || u.email === data.email ? updated : u)));
+  } else {
+    const newUser: User = {
+      id: data.id,
+      role: 'participant',
+      name,
+      email: data.email,
+      password: '',
+      avatar,
+      profilePhoto: data.avatar || '',
+      coverPhoto: '',
+      bio: 'Hey there! I love events.',
+      interests: ['Music', 'Tech', 'Food'],
+      dob: '',
+      gender: '',
+      isPremium: false,
+      friends: [],
+      createdAt: now,
+    };
+    saveUsers([...users, newUser]);
+  }
+  setCurrentUser(data.id);
+}
+
 export function logout() {
   CURRENT_USER_ID = null;
+}
+
+function generateId() {
+  if (typeof window !== 'undefined' && window.crypto && 'randomUUID' in window.crypto) {
+    return window.crypto.randomUUID();
+  }
+  return `user_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 function generateId() {
@@ -194,6 +244,17 @@ export function addEvent(event: EventItem) {
   saveEvents(events);
 }
 
+export function upsertEvent(event: EventItem) {
+  const events = getEvents();
+  const idx = events.findIndex((e) => e.id === event.id);
+  if (idx >= 0) {
+    events[idx] = { ...events[idx], ...event };
+  } else {
+    events.unshift(event);
+  }
+  saveEvents(events);
+}
+
 export function updateEvent(id: string, updates: Partial<EventItem>) {
   const events = getEvents().map(e => e.id === id ? { ...e, ...updates } : e);
   saveEvents(events);
@@ -208,6 +269,16 @@ export function joinEvent(eventId: string, userId: string) {
   const events = getEvents().map(e => {
     if (e.id === eventId && !e.participants.includes(userId)) {
       return { ...e, participants: [...e.participants, userId] };
+    }
+    return e;
+  });
+  saveEvents(events);
+}
+
+export function leaveEvent(eventId: string, userId: string) {
+  const events = getEvents().map(e => {
+    if (e.id === eventId) {
+      return { ...e, participants: e.participants.filter((id) => id !== userId) };
     }
     return e;
   });
