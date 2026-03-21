@@ -10,6 +10,29 @@ import BottomNav from '@/components/BottomNav';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
+import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
+
+/** Backend stores `created_by` as UUID; API may return flat body or `{ data: { id, created_by } }`. */
+function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
+  if (!res || typeof res !== 'object') return {};
+  const r = res as Record<string, unknown>;
+  const fromObj = (o: Record<string, unknown>) => {
+    const id = o.id;
+    const created =
+      (typeof o.created_by === 'string' && o.created_by) ||
+      (typeof o.createdBy === 'string' && o.createdBy) ||
+      undefined;
+    return {
+      id: typeof id === 'string' ? id : undefined,
+      created_by: created,
+    };
+  };
+  const top = fromObj(r);
+  if (top.created_by || top.id) return top;
+  const data = r.data;
+  if (data && typeof data === 'object') return fromObj(data as Record<string, unknown>);
+  return {};
+}
 
 const EVENT_IMAGES = [
   'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80',
@@ -98,17 +121,17 @@ export default function CreateEventPage() {
       const calculatedLng = parseFloat((-74.006 + (Math.random() - 0.5) * 0.1).toFixed(6));
 
       const payload = {
-  title: form.title.trim(),
-  description: form.description.trim(),
-  category: form.category,
-  cost: Math.round(Number(form.budget)) || 0, 
-  max_capacity: Math.floor(Number(form.limit)) || 50,
-  start_datetime: safeISO(startObj),
-  end_datetime: safeISO(endObj),
-  location_name: form.location.trim(),
-  latitude: calculatedLat,
-  longitude: calculatedLng
-};
+          title: form.title.trim(),
+          description: form.description.trim(),
+          category: form.category,
+          cost: Math.round(Number(form.budget)) || 0, 
+          max_capacity: Math.floor(Number(form.limit)) || 50,
+          start_datetime: safeISO(startObj),
+          end_datetime: safeISO(endObj),
+          location_name: form.location.trim(),
+          latitude: calculatedLat,
+          longitude: calculatedLng
+        };
 
       const requestUrl = getApiUrl(`${API_ENDPOINTS.EVENTS}/`);
       
@@ -140,9 +163,30 @@ export default function CreateEventPage() {
       }
 
       const responseData = await res.json();
+      const { id: apiEventId, created_by: apiCreatedBy } = extractCreatedEventPayload(responseData);
+      const { data: authUserData } = await supabase.auth.getUser();
+      const authUser = authUserData?.user;
+      // Prefer DB UUID from `created_by` so Profile "my events" matches `events.created_by`.
+      const organizerId =
+        apiCreatedBy ||
+        user?.id ||
+        authUser?.id ||
+        'current_user';
+      const organizerName =
+        user?.name ||
+        (typeof authUser?.user_metadata?.full_name === 'string' ? authUser.user_metadata.full_name : undefined) ||
+        (typeof authUser?.user_metadata?.name === 'string' ? authUser.user_metadata.name : undefined) ||
+        (authUser?.email ? authUser.email.split('@')[0] : undefined) ||
+        'Organizer';
+      const organizerAvatar =
+        pickImageUrl(
+          user?.profilePhoto,
+          user?.avatar,
+          typeof authUser?.user_metadata?.avatar_url === 'string' ? authUser.user_metadata.avatar_url : null,
+        ) ?? getGeneratedAvatarUrl(organizerId);
       
       const localEvent: EventItem = {
-        id: responseData.id || crypto.randomUUID(),
+        id: apiEventId || crypto.randomUUID(),
         ...payload,
         date: form.date,
         time: form.time,
@@ -153,9 +197,9 @@ export default function CreateEventPage() {
         participantsLimit: payload.max_capacity,
         participants: [],
         image: EVENT_IMAGES[0],
-        organizer: user?.name || 'User',
-        organizerId: user?.id || '',
-        organizerAvatar: '',
+        organizer: organizerName,
+        organizerId,
+        organizerAvatar,
         isPrivate: form.isPrivate,
         requiresApproval: form.requiresApproval,
         isDraft: false,

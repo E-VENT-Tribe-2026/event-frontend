@@ -7,44 +7,10 @@ import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
 import { supabase } from '@/lib/supabase';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
+import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import { UserAvatar } from '@/components/UserAvatar';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
-const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
-
-function mapApiEventToItem(api: Record<string, unknown>): EventItem {
-  const start = api.start_datetime ? new Date(api.start_datetime as string) : new Date();
-  const dateStr = start.toISOString().slice(0, 10);
-  const timeStr = start.toTimeString().slice(0, 5);
-  const cost = Number(api.cost);
-  const capacity = Number(api.max_capacity);
-  const profiles = api.profiles as Record<string, unknown> | null | undefined;
-  const organizerName = profiles && typeof profiles === 'object' && profiles.full_name != null ? String(profiles.full_name) : '';
-  const organizerAvatar = profiles && typeof profiles === 'object' && profiles.avatar_url != null ? String(profiles.avatar_url) : '';
-  return {
-    id: (api.id as string) ?? '',
-    title: (api.title as string) ?? '',
-    description: (api.description as string) ?? '',
-    category: (api.category as string) ?? 'Other',
-    date: dateStr,
-    time: timeStr,
-    location: (api.location_name as string) ?? '',
-    lat: typeof api.latitude === 'number' ? api.latitude : 0,
-    lng: typeof api.longitude === 'number' ? api.longitude : 0,
-    budget: Number.isFinite(cost) ? cost : 0,
-    participantsLimit: Number.isFinite(capacity) ? capacity : 0,
-    participants: [],
-    image: DEFAULT_IMAGE,
-    organizer: organizerName,
-    organizerId: (api.created_by as string) ?? '',
-    organizerAvatar: organizerAvatar || DEFAULT_IMAGE,
-    isPrivate: false,
-    isDraft: false,
-    requiresApproval: false,
-    reviews: [],
-    reports: [],
-    collaborators: [],
-  };
-}
 
 export default function EventDetailsPage() {
   const { id } = useParams();
@@ -119,18 +85,38 @@ export default function EventDetailsPage() {
 
   // Get participant avatars
   const participantUsers = useMemo(() => {
-    if (!event) return [];
+    if (!event) return [] as Array<{
+      id: string;
+      profilePhoto?: string;
+      avatar?: string;
+      name: string;
+      email?: string;
+    }>;
     if (apiParticipants.length > 0) {
       return apiParticipants
-        .filter((p) => p?.profiles)
+        .filter((p) => p?.user_id)
         .slice(0, 6)
         .map((p) => ({
-          profilePhoto: p.profiles?.avatar_url || DEFAULT_IMAGE,
-          avatar: p.profiles?.avatar_url || DEFAULT_IMAGE,
+          id: p.user_id,
+          profilePhoto: p.profiles?.avatar_url,
+          avatar: p.profiles?.avatar_url,
           name: p.profiles?.full_name || 'Participant',
         }));
     }
-    return event.participants.map(pId => allUsers.find(u => u.id === pId)).filter(Boolean).slice(0, 6);
+    return event.participants
+      .map((pId) => {
+        const u = allUsers.find((x) => x.id === pId);
+        if (!u) return null;
+        return {
+          id: u.id,
+          profilePhoto: u.profilePhoto,
+          avatar: u.avatar,
+          name: u.name,
+          email: u.email,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 6) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
   }, [event, allUsers, apiParticipants]);
 
   if (loadingApi) return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
@@ -330,8 +316,17 @@ export default function EventDetailsPage() {
           {/* Participant avatars */}
           <div className="flex items-center gap-2">
             <div className="flex -space-x-2">
-              {participantUsers.map((p: any, i: number) => (
-                <img key={i} src={p.profilePhoto || p.avatar} alt="" className="h-8 w-8 rounded-full border-2 border-card bg-secondary object-cover" />
+              {participantUsers.map((p) => (
+                <UserAvatar
+                  key={p.id}
+                  src={p.profilePhoto}
+                  srcSecondary={p.avatar}
+                  seed={p.id}
+                  name={p.name}
+                  email={p.email}
+                  size="sm"
+                  className="border-2 border-card"
+                />
               ))}
               {participantIds.length > 6 && (
                 <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-card bg-secondary text-xs text-muted-foreground">

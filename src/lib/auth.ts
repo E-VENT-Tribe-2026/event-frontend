@@ -1,3 +1,5 @@
+import { clearSessionUserSnapshot } from './storage';
+
 const AUTH_TOKEN_KEY = 'event_auth_token';
 
 let authToken: string | null =
@@ -22,6 +24,7 @@ export function clearAuthToken() {
   authToken = null;
   if (typeof window !== 'undefined') {
     window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    clearSessionUserSnapshot();
   }
 }
 

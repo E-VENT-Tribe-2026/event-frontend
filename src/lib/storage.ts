@@ -96,6 +96,53 @@ let DRAFTS: EventItem[] = [];
 let JOIN_REQUESTS: JoinRequest[] = [];
 let TICKETS: Ticket[] = [];
 
+/** Persisted next to `event_auth_token` so refresh keeps you signed in in the UI. */
+export const SESSION_USER_SNAPSHOT_KEY = 'event_session_user';
+const AUTH_TOKEN_SESSION_KEY = 'event_auth_token';
+
+function persistCurrentUserToSession(): void {
+  if (typeof window === 'undefined') return;
+  const u = getCurrentUser();
+  if (u) {
+    try {
+      window.sessionStorage.setItem(SESSION_USER_SNAPSHOT_KEY, JSON.stringify(u));
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }
+}
+
+/** Call when clearing the auth token (logout / invalid session). */
+export function clearSessionUserSnapshot(): void {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(SESSION_USER_SNAPSHOT_KEY);
+}
+
+function restorePersistedCurrentUser(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!window.sessionStorage.getItem(AUTH_TOKEN_SESSION_KEY)) {
+      window.sessionStorage.removeItem(SESSION_USER_SNAPSHOT_KEY);
+      return;
+    }
+    const raw = window.sessionStorage.getItem(SESSION_USER_SNAPSHOT_KEY);
+    if (!raw) return;
+    const user = JSON.parse(raw) as User;
+    if (!user?.id || !user?.email) return;
+    const users = getUsers();
+    const existingIdx = users.findIndex((u) => u.id === user.id);
+    if (existingIdx >= 0) {
+      const merged = { ...users[existingIdx], ...user };
+      saveUsers(users.map((u, i) => (i === existingIdx ? merged : u)));
+    } else {
+      saveUsers([...users, user]);
+    }
+    setCurrentUser(user.id);
+  } catch {
+    window.sessionStorage.removeItem(SESSION_USER_SNAPSHOT_KEY);
+  }
+}
+
 // Users
 export function getUsers(): User[] {
   return USERS;
@@ -122,7 +169,7 @@ export function setCurrentUserFromOAuth(data: { id: string; email: string; name?
   const name = data.name || data.email?.split('@')[0] || 'User';
   const avatar =
     data.avatar ||
-    `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.id)}`;
+    `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(data.id)}`;
 
   if (existing) {
     const updated = {
@@ -131,7 +178,7 @@ export function setCurrentUserFromOAuth(data: { id: string; email: string; name?
       name,
       email: data.email,
       avatar,
-      profilePhoto: data.avatar || existing.profilePhoto,
+      profilePhoto: data.avatar || existing.profilePhoto || avatar,
     };
     saveUsers(users.map((u) => (u.id === existing.id || u.email === data.email ? updated : u)));
   } else {
@@ -142,7 +189,7 @@ export function setCurrentUserFromOAuth(data: { id: string; email: string; name?
       email: data.email,
       password: '',
       avatar,
-      profilePhoto: data.avatar || '',
+      profilePhoto: data.avatar || avatar,
       coverPhoto: '',
       bio: 'Hey there! I love events.',
       interests: ['Music', 'Tech', 'Food'],
@@ -155,10 +202,12 @@ export function setCurrentUserFromOAuth(data: { id: string; email: string; name?
     saveUsers([...users, newUser]);
   }
   setCurrentUser(data.id);
+  persistCurrentUserToSession();
 }
 
 export function logout() {
   CURRENT_USER_ID = null;
+  clearSessionUserSnapshot();
 }
 
 function generateId() {
@@ -189,7 +238,7 @@ export function signup(data: {
     name: data.name,
     email: data.email,
     password: data.password,
-    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
+    avatar: `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
     profilePhoto: data.profilePhoto || '',
     coverPhoto: '',
     bio: data.role === 'organizer' ? 'Event organizer on E-VENT' : 'Hey there! I love events.',
@@ -204,6 +253,7 @@ export function signup(data: {
   users.push(user);
   saveUsers(users);
   setCurrentUser(user.id);
+  persistCurrentUserToSession();
   return { success: true };
 }
 
@@ -212,6 +262,7 @@ export function login(email: string, password: string): { success: boolean; erro
   const user = users.find(u => u.email === email && u.password === password);
   if (!user) return { success: false, error: 'Invalid email or password' };
   setCurrentUser(user.id);
+  persistCurrentUserToSession();
   return { success: true };
 }
 
@@ -220,6 +271,7 @@ export function updateUser(updates: Partial<User>) {
   if (!current) return;
   const users = getUsers().map(u => u.id === current.id ? { ...u, ...updates } : u);
   saveUsers(users);
+  persistCurrentUserToSession();
 }
 
 // Events
@@ -362,3 +414,5 @@ export function addNotification(notif: Notification) {
   notifs.unshift(notif);
   saveNotifications(notifs);
 }
+
+restorePersistedCurrentUser();

@@ -1,5 +1,7 @@
 import { Search, Bell } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { getCurrentUser } from '@/lib/storage';
+import { UserAvatar } from '@/components/UserAvatar';
 
 interface TopBarProps {
   search: string;
@@ -7,6 +9,8 @@ interface TopBarProps {
 }
 
 export default function TopBar({ search, onSearchChange }: TopBarProps) {
+  const user = getCurrentUser();
+
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
       <div className="mx-auto flex max-w-lg items-center gap-3">
@@ -21,10 +25,22 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
             className="w-full rounded-full bg-secondary pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
           />
         </div>
-        <Link to="/notifications" className="relative shrink-0">
+        <Link to="/notifications" className="relative shrink-0 p-1">
           <Bell className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
-          <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-accent" />
+          <span className="absolute top-0 right-0 h-2 w-2 rounded-full bg-accent" />
         </Link>
+        {user && (
+          <Link to="/profile" className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-primary/40 transition-all">
+            <UserAvatar
+              src={user.profilePhoto}
+              srcSecondary={user.avatar}
+              seed={user.id}
+              name={user.name}
+              email={user.email}
+              size="sm"
+            />
+          </Link>
+        )}
       </div>
     </header>
   );
