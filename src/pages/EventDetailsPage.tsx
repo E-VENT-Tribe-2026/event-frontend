@@ -6,6 +6,7 @@ import { useState, useMemo, useEffect } from 'react';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
 import { supabase } from '@/lib/supabase';
+import { getAuthToken, setAuthToken } from '@/lib/auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
@@ -77,13 +78,13 @@ export default function EventDetailsPage() {
   const isRemoteEvent = Boolean(apiEvent);
 
   const getApiToken = async (): Promise<string | null> => {
-    const existing = localStorage.getItem('api_token');
+    const existing = getAuthToken();
     if (existing) return existing;
     if (!supabase) return null;
     const { data } = await supabase.auth.getSession();
     const token = data?.session?.access_token;
     if (token) {
-      localStorage.setItem('api_token', token);
+      setAuthToken(token);
       return token;
     }
     return null;

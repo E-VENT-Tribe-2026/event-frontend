@@ -6,6 +6,7 @@ import { LogOut, Edit2, Check, Calendar, Users, Star, Ticket, UserPlus, CreditCa
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
+import { getAuthToken, clearAuthToken } from '@/lib/auth';
 
 function calcAge(dob: string): number | null {
   if (!dob) return null;
@@ -90,7 +91,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!user) return;
-    const token = localStorage.getItem('api_token');
+    const token = getAuthToken();
     if (!token) return;
 
     const loadMyJoinedEvents = async () => {
@@ -127,7 +128,7 @@ export default function ProfilePage() {
     updateUser({ name, bio });
 
     // Also update profile in backend so Supabase data matches UI
-    const token = localStorage.getItem('api_token');
+    const token = getAuthToken();
     if (token) {
       try {
         await fetch(`${API_BASE_URL}/api/profile/me`, {
@@ -152,11 +153,12 @@ export default function ProfilePage() {
 
   const handleLogout = () => {
     logout();
+    clearAuthToken();
     navigate('/login');
   };
 
   const handleLeaveFromProfile = async (eventId: string) => {
-    const token = localStorage.getItem('api_token');
+    const token = getAuthToken();
     setLeavingEventId(eventId);
     if (token) {
       try {

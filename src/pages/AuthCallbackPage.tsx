@@ -1,98 +1,121 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
+import { setAuthToken } from '@/lib/auth';
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
+  
+  // Prevent React 18 Strict Mode from running the exchange logic twice
+  const initialized = useRef(false);
 
   useEffect(() => {
+    if (initialized.current) return;
+    
     if (!isSupabaseConfigured() || !supabase) {
-      setError('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env');
+      setError('Supabase is not configured. Check your environment variables.');
       return;
     }
 
-    const run = async () => {
-      let session: { access_token: string; user: { id: string; email?: string; user_metadata?: Record<string, unknown> } } | null = null;
+    const handleAuth = async () => {
+      initialized.current = true;
 
-      const code = searchParams.get('code');
-      if (code) {
-        const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-        if (exchangeError) {
-          setError(exchangeError.message);
-          return;
+      try {
+        let session = null;
+        const code = searchParams.get('code');
+
+        // 1. Exchange the temporary code for a real session
+        if (code) {
+          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) throw exchangeError;
+          session = data.session;
+        } else {
+          // Fallback check if session already exists
+          const { data: { session: s }, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) throw sessionError;
+          session = s;
         }
-        session = data.session;
-      } else {
-        const { data: { session: s }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) {
-          setError(sessionError.message);
-          return;
+
+        if (!session) {
+          throw new Error('No session found. Please try signing in again.');
         }
-        session = s;
+
+        // 2. Setup Auth State
+        const { access_token, user } = session;
+        setAuthToken(access_token);
+
+        const name = user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'User';
+        const avatar = user.user_metadata?.avatar_url ?? user.user_metadata?.picture;
+
+        setCurrentUserFromOAuth({
+          id: user.id,
+          email: user.email ?? '',
+          name,
+          avatar,
+        });
+
+        // 3. Sync Profile to Database (The "Ensure Profile" step)
+        // This ensures /api/profile/me won't 404 when the user lands on /home
+        const { error: upsertError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            email: user.email,
+            full_name: name,
+            avatar_url: avatar,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id' });
+
+        if (upsertError) {
+          console.error('Profile sync failed:', upsertError.message);
+          // We continue anyway, but the user might see a 404 on the next page
+        }
+
+        // 4. Final Redirect
+        navigate('/home', { replace: true });
+
+      } catch (err: any) {
+        console.error('Auth callback error:', err);
+        setError(err.message || 'An unexpected error occurred during sign-in.');
+        
+        // Auto-redirect to login after a delay if no session was found
+        if (err.message.includes('No session')) {
+          setTimeout(() => navigate('/login'), 3000);
+        }
       }
-
-      if (!session) {
-        setError('No session found. Please try signing in again.');
-        setTimeout(() => navigate('/login'), 2000);
-        return;
-      }
-
-      const token = session.access_token;
-      localStorage.setItem('api_token', token);
-
-      const user = session.user;
-      const name = user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'User';
-      const avatar = user.user_metadata?.avatar_url ?? user.user_metadata?.picture;
-
-      setCurrentUserFromOAuth({
-        id: user.id,
-        email: user.email ?? '',
-        name,
-        avatar,
-      });
-
-      // Navigate immediately; don't block on backend sync.
-      navigate('/home', { replace: true });
-
-      // Ensure profile exists in backend (for Supabase profiles table), best-effort with timeout.
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 5000);
-      fetch(`${API_BASE_URL}/api/auth/ensure-profile`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-      }).finally(() => window.clearTimeout(timeout));
     };
 
-    run();
+    handleAuth();
   }, [navigate, searchParams]);
 
   if (error) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6">
-        <p className="text-destructive text-center">{error}</p>
-        <button
-          type="button"
-          onClick={() => navigate('/login')}
-          className="mt-4 text-primary hover:underline"
-        >
-          Back to Login
-        </button>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 text-center">
+        <div className="max-w-md space-y-4">
+          <h2 className="text-2xl font-bold text-destructive">Authentication Error</h2>
+          <p className="text-muted-foreground">{error}</p>
+          <button
+            type="button"
+            onClick={() => navigate('/login')}
+            className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Back to Login
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6">
-      <p className="text-muted-foreground">Signing you in...</p>
+      <div className="flex flex-col items-center space-y-4">
+        {/* You could add a Spinner component here */}
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+        <p className="text-muted-foreground animate-pulse">Completing secure sign-in...</p>
+      </div>
     </div>
   );
 }

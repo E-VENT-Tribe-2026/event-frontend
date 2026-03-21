@@ -5,6 +5,7 @@ import { ArrowLeft, CreditCard, Smartphone, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import AppToast from '@/components/AppToast';
+import { getAuthToken } from '@/lib/auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
@@ -78,7 +79,7 @@ export default function PaymentPage() {
   }, [eventId, localEvents]);
 
   const getApiToken = async (): Promise<string | null> => {
-    const token = localStorage.getItem('api_token');
+    const token = getAuthToken();
     return token || null;
   };
 

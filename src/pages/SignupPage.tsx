@@ -1,9 +1,12 @@
 import { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, User, Camera, Calendar, ChevronDown } from 'lucide-react';
-import { signup } from '@/lib/storage';
+import { setCurrentUserFromOAuth } from '@/lib/storage';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
+import { getApiUrl } from '@/lib/api';
+import { setAuthToken } from '@/lib/auth';
 
 const ALL_INTERESTS = ['Music', 'Sports', 'Gaming', 'Movies', 'Study', 'Travel', 'Tech', 'Art', 'Fitness', 'Coffee', 'Networking', 'Food', 'Wellness'];
 const MIN_AGE = 18;
@@ -69,12 +72,11 @@ export default function SignupPage() {
     if (!validate() || isSubmitting) return;
     setIsSubmitting(true);
 
-    // Register on backend/Supabase before considering signup complete.
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
+    // Register on backend before considering signup complete.
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 8000);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+      const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -97,24 +99,43 @@ export default function SignupPage() {
       }
 
       const data = await res.json().catch(() => null);
-      const token = data?.access_token;
-      if (token) localStorage.setItem('api_token', token);
+      const token = data?.access_token ?? null;
+      setAuthToken(token);
 
-      // Keep local app profile in sync only after server signup succeeds.
-      const result = signup({ role: 'participant', name, email, password, profilePhoto, dob, gender, interests });
-      if (!result.success) {
-        setToast({ show: true, message: result.error!, type: 'error' });
-        setIsSubmitting(false);
-        return;
-      }
+      const backendUser = data?.user ?? {};
+      const userId = backendUser?.id ?? data?.user_id ?? `email:${email.toLowerCase()}`;
+      const avatar = profilePhoto || backendUser?.avatar_url || backendUser?.picture;
+      setCurrentUserFromOAuth({
+        id: String(userId),
+        email,
+        name,
+        avatar: avatar ? String(avatar) : undefined,
+      });
 
       setIsSubmitting(false);
-      navigate('/login');
+      navigate('/home');
     } catch {
       setToast({ show: true, message: 'Cannot reach server. Start backend and try again.', type: 'error' });
       setIsSubmitting(false);
     } finally {
       window.clearTimeout(timeout);
+    }
+  };
+
+  const handleGoogleSignup = async () => {
+    if (!isSupabaseConfigured() || !supabase) {
+      setToast({ show: true, message: 'Google sign-up is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY and enable Google provider in Supabase.', type: 'error' });
+      return;
+    }
+
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
+    });
+
+    if (error) {
+      setToast({ show: true, message: error.message, type: 'error' });
     }
   };
 
@@ -244,6 +265,13 @@ export default function SignupPage() {
         <p className="text-center text-sm text-muted-foreground">
           Already have an account? <Link to="/login" className="text-primary font-medium hover:underline">Sign In</Link>
         </p>
+        <button
+          type="button"
+          onClick={handleGoogleSignup}
+          className="w-full rounded-xl glass-card py-3 text-sm font-semibold text-foreground hover:shadow-glow transition-all"
+        >
+          Continue with Google
+        </button>
       </motion.div>
     </div>
   );
