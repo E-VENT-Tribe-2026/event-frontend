@@ -1,18 +1,51 @@
-import { useState, useMemo } from 'react';
-import { getCurrentUser, updateUser, getEvents, getTickets, getUsers, getJoinRequests } from '@/lib/storage';
+import { useState, useMemo, useEffect } from 'react';
+import { getCurrentUser, updateUser, getEvents, getTickets, getUsers, getJoinRequests, leaveEvent, upsertEvent, type EventItem } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, Calendar, Users, Star, Ticket, Crown, UserPlus, CreditCard } from 'lucide-react';
+import { LogOut, Edit2, Check, Calendar, Users, Star, Ticket, UserPlus, CreditCard } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
-import { getApiUrl } from '@/lib/api';
-import { getAuthToken, clearAuthToken } from '@/lib/auth';
 
 function calcAge(dob: string): number | null {
   if (!dob) return null;
   const diff = Date.now() - new Date(dob).getTime();
   return Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
+const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
+
+function mapApiEventToItem(api: Record<string, unknown>): EventItem {
+  const start = api.start_datetime ? new Date(api.start_datetime as string) : new Date();
+  const dateStr = start.toISOString().slice(0, 10);
+  const timeStr = start.toTimeString().slice(0, 5);
+  const cost = Number(api.cost);
+  const capacity = Number(api.max_capacity);
+  return {
+    id: (api.id as string) ?? '',
+    title: (api.title as string) ?? '',
+    description: (api.description as string) ?? '',
+    category: (api.category as string) ?? 'Other',
+    date: dateStr,
+    time: timeStr,
+    location: (api.location_name as string) ?? '',
+    lat: typeof api.latitude === 'number' ? api.latitude : 0,
+    lng: typeof api.longitude === 'number' ? api.longitude : 0,
+    budget: Number.isFinite(cost) ? cost : 0,
+    participantsLimit: Number.isFinite(capacity) ? capacity : 0,
+    participants: [],
+    image: DEFAULT_IMAGE,
+    organizer: '',
+    organizerId: (api.created_by as string) ?? '',
+    organizerAvatar: '',
+    isPrivate: false,
+    isDraft: false,
+    requiresApproval: false,
+    reviews: [],
+    reports: [],
+    collaborators: [],
+  };
 }
 
 export default function ProfilePage() {
@@ -23,10 +56,17 @@ export default function ProfilePage() {
   const [bio, setBio] = useState(user?.bio || '');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as const });
   const [activeTab, setActiveTab] = useState<'events' | 'tickets' | 'reviews' | 'friends'>('events');
+  const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
+  const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
 
   const events = useMemo(() => getEvents(), []);
   const tickets = useMemo(() => user ? getTickets().filter(t => t.userId === user.id) : [], [user]);
   const joinedEvents = useMemo(() => user ? events.filter(e => e.participants.includes(user.id)) : [], [events, user]);
+  const allJoinedEvents = useMemo(() => {
+    const byId = new Map<string, EventItem>();
+    [...joinedEvents, ...remoteJoinedEvents].forEach((e) => byId.set(e.id, e));
+    return Array.from(byId.values());
+  }, [joinedEvents, remoteJoinedEvents]);
   const createdEvents = useMemo(() => user ? events.filter(e => e.organizerId === user.id) : [], [events, user]);
   const reviewsReceived = useMemo(() => {
     if (!user) return [];
@@ -48,6 +88,38 @@ export default function ProfilePage() {
 
   if (!user) { navigate('/login'); return null; }
 
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem('api_token');
+    if (!token) return;
+
+    const loadMyJoinedEvents = async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${API_BASE_URL}/api/participants/my/events`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        }).finally(() => window.clearTimeout(timeout));
+        if (!res.ok) return;
+        const data = await res.json().catch(() => []);
+        if (!Array.isArray(data)) return;
+        const mapped = data
+          .map((row: any) => row?.events)
+          .filter(Boolean)
+          .map((evt: Record<string, unknown>) => mapApiEventToItem(evt));
+        setRemoteJoinedEvents(mapped);
+        mapped.forEach((evt) => {
+          upsertEvent({ ...evt, participants: [...evt.participants, user.id] });
+        });
+      } catch {
+        // Keep profile usable even if backend fetch fails.
+      }
+    };
+
+    loadMyJoinedEvents();
+  }, [user]);
+
   const age = calcAge(user.dob);
   const avatarSrc = user.profilePhoto || user.avatar;
 
@@ -55,11 +127,10 @@ export default function ProfilePage() {
     updateUser({ name, bio });
 
     // Also update profile in backend so Supabase data matches UI
-    const token = getAuthToken();
-
+    const token = localStorage.getItem('api_token');
     if (token) {
       try {
-        await fetch(getApiUrl('/api/profile/me'), {
+        await fetch(`${API_BASE_URL}/api/profile/me`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -81,12 +152,30 @@ export default function ProfilePage() {
 
   const handleLogout = () => {
     logout();
-    clearAuthToken();
     navigate('/login');
   };
 
+  const handleLeaveFromProfile = async (eventId: string) => {
+    const token = localStorage.getItem('api_token');
+    setLeavingEventId(eventId);
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/participants/${eventId}/leave`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {
+        // Keep local leave behavior as fallback.
+      }
+    }
+    leaveEvent(eventId, user.id);
+    setRemoteJoinedEvents((prev) => prev.filter((e) => e.id !== eventId));
+    setLeavingEventId(null);
+    setToast({ show: true, message: 'You left the event.', type: 'success' });
+  };
+
   const tabs = [
-    { key: 'events' as const, label: 'Events', count: joinedEvents.length },
+    { key: 'events' as const, label: 'Events', count: allJoinedEvents.length },
     { key: 'tickets' as const, label: 'Tickets', count: tickets.length },
     { key: 'reviews' as const, label: 'Reviews', count: reviewsReceived.length },
     { key: 'friends' as const, label: 'Friends', count: friends.length },
@@ -100,23 +189,17 @@ export default function ProfilePage() {
       <div className="relative h-36 bg-gradient-to-r from-primary/30 to-accent/30 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-background" />
         <div className="absolute top-3 right-3 flex items-center gap-3 z-10">
-          {user.isPremium && <span className="rounded-full gradient-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground flex items-center gap-1"><Crown className="h-3 w-3" /> Premium</span>}
           <button onClick={handleLogout} className="flex items-center gap-1 text-xs text-foreground/80 glass-card rounded-full px-3 py-1.5">
             <LogOut className="h-3 w-3" /> Logout
           </button>
         </div>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-4xl px-4 md:px-8 -mt-14 relative z-10 space-y-5">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-14 relative z-10 space-y-5">
         {/* Avatar + Info */}
         <div className="flex flex-col items-center gap-2">
           <div className="relative">
             <img src={avatarSrc} alt="" className="h-24 w-24 rounded-full bg-secondary ring-4 ring-background object-cover shadow-glow" />
-            {user.isPremium && (
-              <div className="absolute -bottom-1 -right-1 rounded-full gradient-primary p-1.5 shadow-glow">
-                <Crown className="h-3.5 w-3.5 text-primary-foreground" />
-              </div>
-            )}
           </div>
           {editing ? (
             <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center text-foreground outline-none focus:ring-2 focus:ring-primary/50" />
@@ -199,7 +282,7 @@ export default function ProfilePage() {
         <div className="space-y-2 min-h-[200px]">
           {activeTab === 'events' && (
             <>
-              {joinedEvents.length === 0 && createdEvents.length === 0 ? (
+              {allJoinedEvents.length === 0 && createdEvents.length === 0 ? (
                 <p className="text-center text-xs text-muted-foreground py-8">No events yet</p>
               ) : (
                 <div className="space-y-2">
@@ -212,14 +295,23 @@ export default function ProfilePage() {
                       </div>
                     </button>
                   ))}
-                  {joinedEvents.map(e => (
-                    <button key={e.id} onClick={() => navigate(`/event/${e.id}`)} className="flex items-center gap-3 w-full text-left rounded-xl glass-card p-3 hover:shadow-glow transition-shadow">
-                      <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-foreground truncate">{e.title}</p>
-                        <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                      </div>
-                    </button>
+                  {allJoinedEvents.map(e => (
+                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 hover:shadow-glow transition-shadow">
+                      <button onClick={() => navigate(`/event/${e.id}`)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+                        <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">{e.title}</p>
+                          <p className="text-[10px] text-muted-foreground">{e.date}</p>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => handleLeaveFromProfile(e.id)}
+                        disabled={leavingEventId === e.id}
+                        className="rounded-full bg-secondary px-3 py-1 text-[10px] font-semibold text-foreground disabled:opacity-50"
+                      >
+                        {leavingEventId === e.id ? 'Leaving...' : 'Leave'}
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -288,13 +380,6 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* Premium CTA */}
-        {!user.isPremium && (
-          <button onClick={() => navigate('/premium')}
-            className="w-full rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container gradient-primary">
-            ⭐ Upgrade to Premium
-          </button>
-        )}
       </motion.div>
 
       <BottomNav />

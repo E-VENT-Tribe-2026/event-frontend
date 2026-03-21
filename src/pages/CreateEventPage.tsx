@@ -2,12 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, ShieldCheck } from 'lucide-react';
 import { addEvent, getCurrentUser, saveDraft, type EventItem } from '@/lib/storage';
+import { supabase } from '@/lib/supabase';
 import { CATEGORIES } from '@/lib/seedData';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
-import { getApiUrl } from '@/lib/api';
-import { getAuthToken } from '@/lib/auth';
 
 const EVENT_IMAGES = [
   'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80',
@@ -26,15 +25,32 @@ export default function CreateEventPage() {
   const [surveyQuestions, setSurveyQuestions] = useState<{ question: string; options: string[] }[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const update = (key: string, value: string | boolean) => setForm(f => ({ ...f, [key]: value }));
+  const todayIso = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
+  const now = new Date();
+  const minTimeToday = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.title.trim()) e.title = 'Required';
     if (!form.description.trim()) e.description = 'Required';
-    if (!form.date) e.date = 'Required';
-    if (!form.time) e.time = 'Required';
+    if (!form.date) {
+      e.date = 'Required';
+    } else if (form.date < todayIso) {
+      e.date = 'Event date cannot be in the past';
+    }
+    if (!form.time) {
+      e.time = 'Required';
+    } else if (form.date === todayIso) {
+      const [hours, minutes] = form.time.split(':').map(Number);
+      const selected = new Date();
+      selected.setHours(hours, minutes, 0, 0);
+      if (selected <= new Date()) {
+        e.time = 'Choose a future time for today';
+      }
+    }
     if (!form.location.trim()) e.location = 'Required';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -66,13 +82,57 @@ export default function CreateEventPage() {
     survey: surveyQuestions.length > 0 ? surveyQuestions : undefined,
   });
 
+  const getApiToken = async (apiBaseUrl: string): Promise<string | null> => {
+    const existing = localStorage.getItem('api_token');
+    if (existing) return existing;
+
+    // Google OAuth users: token lives in Supabase session.
+    if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      const sessionToken = data?.session?.access_token;
+      if (sessionToken) {
+        localStorage.setItem('api_token', sessionToken);
+        return sessionToken;
+      }
+    }
+
+    // Email/password local users: try to get backend token on-demand.
+    if (user?.email && user?.password) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: user.email, password: user.password }),
+          signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => null);
+        const token = data?.access_token;
+        if (!token) return null;
+        localStorage.setItem('api_token', token);
+        return token;
+      } catch {
+        return null;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!user) { navigate('/login'); return; }
     if (!validate()) return;
+    setIsSubmitting(true);
 
     const localEvent = buildEvent(false);
-    const token = getAuthToken();
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
+    const token = await getApiToken(API_BASE_URL);
 
     // 1) Save to backend (database) first if we have a token
     if (token) {
@@ -92,33 +152,40 @@ export default function CreateEventPage() {
       };
 
       try {
-        const res = await fetch(getApiUrl('/api/events'), {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${API_BASE_URL}/api/events`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
           },
           body: JSON.stringify(payload),
-        });
+          signal: controller.signal,
+        }).finally(() => window.clearTimeout(timeout));
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           const msg = typeof err.detail === 'string' ? err.detail : (err.detail?.[0]?.msg || 'Event could not be saved to the database.');
           setToast({ show: true, message: msg, type: 'error' });
+          setIsSubmitting(false);
           return;
         }
       } catch {
         setToast({ show: true, message: 'Cannot reach server. Start the backend so events save to the database.', type: 'error' });
+        setIsSubmitting(false);
         return;
       }
     } else {
-      setToast({ show: true, message: 'Log in again so events can be saved to the database.', type: 'error' });
+      setToast({ show: true, message: 'Could not get your session token. Please sign in again, then try creating the event.', type: 'error' });
+      setIsSubmitting(false);
       return;
     }
 
     // 2) Update local app state so the event appears in the UI
     addEvent(localEvent);
     setToast({ show: true, message: 'Event published and saved to the database!', type: 'success' });
+    setIsSubmitting(false);
     setTimeout(() => navigate('/home'), 1500);
   };
 
@@ -166,11 +233,11 @@ export default function CreateEventPage() {
         </select>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <input type="date" value={form.date} onChange={e => update('date', e.target.value)} className={inputCls} />
+            <input type="date" min={todayIso} value={form.date} onChange={e => update('date', e.target.value)} className={inputCls} />
             {errors.date && <p className="mt-1 text-xs text-destructive">{errors.date}</p>}
           </div>
           <div>
-            <input type="time" value={form.time} onChange={e => update('time', e.target.value)} className={inputCls} />
+            <input type="time" min={form.date === todayIso ? minTimeToday : undefined} value={form.time} onChange={e => update('time', e.target.value)} className={inputCls} />
             {errors.time && <p className="mt-1 text-xs text-destructive">{errors.time}</p>}
           </div>
         </div>
@@ -230,8 +297,8 @@ export default function CreateEventPage() {
             className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground transition-transform active:scale-[0.98]">
             <Save className="h-4 w-4" /> Save Draft
           </button>
-          <button type="submit" className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98]">
-            Publish Event
+          <button type="submit" disabled={isSubmitting} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98] disabled:opacity-60">
+            {isSubmitting ? 'Publishing...' : 'Publish Event'}
           </button>
         </div>
       </motion.form>
