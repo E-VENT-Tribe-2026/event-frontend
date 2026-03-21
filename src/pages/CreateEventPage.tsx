@@ -28,13 +28,29 @@ export default function CreateEventPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const update = (key: string, value: string | boolean) => setForm(f => ({ ...f, [key]: value }));
+  const todayIso = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
+  const now = new Date();
+  const minTimeToday = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.title.trim()) e.title = 'Required';
     if (!form.description.trim()) e.description = 'Required';
-    if (!form.date) e.date = 'Required';
-    if (!form.time) e.time = 'Required';
+    if (!form.date) {
+      e.date = 'Required';
+    } else if (form.date < todayIso) {
+      e.date = 'Event date cannot be in the past';
+    }
+    if (!form.time) {
+      e.time = 'Required';
+    } else if (form.date === todayIso) {
+      const [hours, minutes] = form.time.split(':').map(Number);
+      const selected = new Date();
+      selected.setHours(hours, minutes, 0, 0);
+      if (selected <= new Date()) {
+        e.time = 'Choose a future time for today';
+      }
+    }
     if (!form.location.trim()) e.location = 'Required';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -217,11 +233,11 @@ export default function CreateEventPage() {
         </select>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <input type="date" value={form.date} onChange={e => update('date', e.target.value)} className={inputCls} />
+            <input type="date" min={todayIso} value={form.date} onChange={e => update('date', e.target.value)} className={inputCls} />
             {errors.date && <p className="mt-1 text-xs text-destructive">{errors.date}</p>}
           </div>
           <div>
-            <input type="time" value={form.time} onChange={e => update('time', e.target.value)} className={inputCls} />
+            <input type="time" min={form.date === todayIso ? minTimeToday : undefined} value={form.time} onChange={e => update('time', e.target.value)} className={inputCls} />
             {errors.time && <p className="mt-1 text-xs text-destructive">{errors.time}</p>}
           </div>
         </div>

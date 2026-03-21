@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { getCurrentUser, updateUser, getEvents, getTickets, getUsers, getJoinRequests, leaveEvent, upsertEvent, type EventItem } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, Calendar, Users, Star, Ticket, Crown, UserPlus, CreditCard } from 'lucide-react';
+import { LogOut, Edit2, Check, Calendar, Users, Star, Ticket, UserPlus, CreditCard } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -189,7 +189,6 @@ export default function ProfilePage() {
       <div className="relative h-36 bg-gradient-to-r from-primary/30 to-accent/30 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-background" />
         <div className="absolute top-3 right-3 flex items-center gap-3 z-10">
-          {user.isPremium && <span className="rounded-full gradient-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground flex items-center gap-1"><Crown className="h-3 w-3" /> Premium</span>}
           <button onClick={handleLogout} className="flex items-center gap-1 text-xs text-foreground/80 glass-card rounded-full px-3 py-1.5">
             <LogOut className="h-3 w-3" /> Logout
           </button>
@@ -201,11 +200,6 @@ export default function ProfilePage() {
         <div className="flex flex-col items-center gap-2">
           <div className="relative">
             <img src={avatarSrc} alt="" className="h-24 w-24 rounded-full bg-secondary ring-4 ring-background object-cover shadow-glow" />
-            {user.isPremium && (
-              <div className="absolute -bottom-1 -right-1 rounded-full gradient-primary p-1.5 shadow-glow">
-                <Crown className="h-3.5 w-3.5 text-primary-foreground" />
-              </div>
-            )}
           </div>
           {editing ? (
             <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center text-foreground outline-none focus:ring-2 focus:ring-primary/50" />
@@ -386,13 +380,6 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* Premium CTA */}
-        {!user.isPremium && (
-          <button onClick={() => navigate('/premium')}
-            className="w-full rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container gradient-primary">
-            ⭐ Upgrade to Premium
-          </button>
-        )}
       </motion.div>
 
       <BottomNav />

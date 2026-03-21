@@ -7,7 +7,7 @@ import EventCard from '@/components/EventCard';
 import AppToast from '@/components/AppToast';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Lock, TrendingUp, MapPin, Sparkles, Users, Crown, Brain, Eye, UserPlus } from 'lucide-react';
+import { TrendingUp, MapPin, Sparkles, Users, Brain, Eye, UserPlus } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
@@ -163,22 +163,6 @@ export default function HomePage() {
           <input type="range" min={0} max={500} value={budgetMax} onChange={e => setBudgetMax(Number(e.target.value))} className="flex-1 accent-primary h-1" />
         </div>
 
-        {/* Premium banner */}
-        {user && !user.isPremium && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl p-4 flex items-center gap-3 cursor-pointer hover:shadow-glow transition-shadow glass-card glow-border"
-            onClick={() => navigate('/premium')}>
-            <div className="rounded-xl gradient-primary p-2.5">
-              <Crown className="h-6 w-6 text-primary-foreground" />
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-bold text-foreground">Upgrade to Premium</p>
-              <p className="text-xs text-muted-foreground">Unlock friend activity, analytics & more</p>
-            </div>
-            <span className="text-xs font-semibold text-primary">→</span>
-          </motion.div>
-        )}
-
         {/* Recommended */}
         {recommended.length > 0 && (
           <>
@@ -213,41 +197,24 @@ export default function HomePage() {
           ))}
         </motion.div>
 
-        {/* Friend Activity (Premium locked) */}
+        {/* Friend Activity */}
         <SectionHeader icon={Users} title="Friend Activity" />
         <div className="relative rounded-2xl glass-card p-6 text-center overflow-hidden">
-          {user?.isPremium ? (
-            friendActivity.length > 0 ? (
-              <div className="space-y-3 text-left">
-                {friendActivity.map((item: any, i: number) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <img src={item.friend.avatar} alt="" className="h-8 w-8 rounded-full bg-secondary" />
-                    <p className="text-xs text-foreground">
-                      <span className="font-semibold">{item.friend.name}</span>
-                      <span className="text-muted-foreground"> joined </span>
-                      <span className="text-primary font-medium">{item.event.title}</span>
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No friend activity yet. Add friends to see what events they're joining!</p>
-            )
+          {friendActivity.length > 0 ? (
+            <div className="space-y-3 text-left">
+              {friendActivity.map((item: any, i: number) => (
+                <div key={i} className="flex items-center gap-3">
+                  <img src={item.friend.avatar} alt="" className="h-8 w-8 rounded-full bg-secondary" />
+                  <p className="text-xs text-foreground">
+                    <span className="font-semibold">{item.friend.name}</span>
+                    <span className="text-muted-foreground"> joined </span>
+                    <span className="text-primary font-medium">{item.event.title}</span>
+                  </p>
+                </div>
+              ))}
+            </div>
           ) : (
-            <>
-              <div className="absolute inset-0 backdrop-blur-sm bg-background/60 z-10 flex flex-col items-center justify-center gap-2">
-                <Lock className="h-8 w-8 text-primary" />
-                <p className="text-sm font-medium text-foreground">Premium Feature</p>
-                <button onClick={() => navigate('/premium')} className="gradient-primary rounded-full px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow">
-                  Unlock Now
-                </button>
-              </div>
-              <div className="space-y-2 blur-locked">
-                <div className="h-10 shimmer rounded-lg" />
-                <div className="h-10 shimmer rounded-lg" />
-                <div className="h-10 shimmer rounded-lg" />
-              </div>
-            </>
+            <p className="text-sm text-muted-foreground">No friend activity yet. Add friends to see what events they're joining!</p>
           )}
         </div>
 
