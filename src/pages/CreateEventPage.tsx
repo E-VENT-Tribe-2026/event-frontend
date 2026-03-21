@@ -98,17 +98,17 @@ export default function CreateEventPage() {
       const calculatedLng = parseFloat((-74.006 + (Math.random() - 0.5) * 0.1).toFixed(6));
 
       const payload = {
-        title: form.title.trim(),
-        description: form.description.trim(),
-        category: form.category,
-        cost: Number(form.budget) || 0, // Explicit zero-pass
-        max_capacity: Math.floor(Number(form.limit)) || 50,
-        start_datetime: safeISO(startObj),
-        end_datetime: safeISO(endObj),
-        location_name: form.location.trim(),
-        latitude: calculatedLat,
-        longitude: calculatedLng
-      };
+  title: form.title.trim(),
+  description: form.description.trim(),
+  category: form.category,
+  cost: Math.round(Number(form.budget)) || 0, 
+  max_capacity: Math.floor(Number(form.limit)) || 50,
+  start_datetime: safeISO(startObj),
+  end_datetime: safeISO(endObj),
+  location_name: form.location.trim(),
+  latitude: calculatedLat,
+  longitude: calculatedLng
+};
 
       const requestUrl = getApiUrl(`${API_ENDPOINTS.EVENTS}/`);
       
