@@ -42,7 +42,6 @@ export default function SignupPage() {
   };
 
   const isAtLeastAge = (isoDate: string, minAge: number) => {
-    // isoDate expected "YYYY-MM-DD" from <input type="date" />
     const [y, m, d] = isoDate.split('-').map(Number);
     if (!y || !m || !d) return false;
     const dobDate = new Date(y, m - 1, d);
@@ -72,50 +71,42 @@ export default function SignupPage() {
     if (!validate() || isSubmitting) return;
     setIsSubmitting(true);
 
-    // Register on backend before considering signup complete.
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 8000);
+    
     try {
       const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          full_name: name,
-          dob,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, full_name: name, dob, gender, interests }),
         signal: controller.signal,
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const message = (data && (data.detail || data.message)) || 'Signup failed on server';
-        setToast({ show: true, message, type: 'error' });
+        // CHECK FOR EXISTING USER ERROR FROM BACKEND
+        const isExisting = res.status === 409 || data.message?.toLowerCase().includes('exists');
+        setToast({ 
+          show: true, 
+          message: isExisting ? 'An account with this email already exists.' : (data.detail || data.message || 'Signup failed'), 
+          type: 'error' 
+        });
         setIsSubmitting(false);
         return;
       }
 
-      const data = await res.json().catch(() => null);
-      const token = data?.access_token ?? null;
-      setAuthToken(token);
-
-      const backendUser = data?.user ?? {};
-      const userId = backendUser?.id ?? data?.user_id ?? `email:${email.toLowerCase()}`;
-      const avatar = profilePhoto || backendUser?.avatar_url || backendUser?.picture;
+      setAuthToken(data.access_token);
       setCurrentUserFromOAuth({
-        id: String(userId),
+        id: String(data.user?.id || `email:${email}`),
         email,
         name,
-        avatar: avatar ? String(avatar) : undefined,
+        avatar: profilePhoto || undefined,
       });
 
-      setIsSubmitting(false);
       navigate('/home');
     } catch {
-      setToast({ show: true, message: 'Cannot reach server. Start backend and try again.', type: 'error' });
+      setToast({ show: true, message: 'Server unreachable. Please try again later.', type: 'error' });
       setIsSubmitting(false);
     } finally {
       window.clearTimeout(timeout);
@@ -124,26 +115,32 @@ export default function SignupPage() {
 
   const handleGoogleSignup = async () => {
     if (!isSupabaseConfigured() || !supabase) {
-      setToast({ show: true, message: 'Google sign-up is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY and enable Google provider in Supabase.', type: 'error' });
+      setToast({ show: true, message: 'Google Auth not configured.', type: 'error' });
       return;
     }
-
-    const redirectTo = `${window.location.origin}/auth/callback`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo },
+    // "type=signup" tells your callback to check if the user is new. 
+    // If they aren't new, the callback should redirect them to login with an error param.
+    const redirectTo = `${window.location.origin}/auth/callback?type=signup`;
+    await supabase.auth.signInWithOAuth({ 
+      provider: 'google', 
+      options: { 
+        redirectTo,
+        queryParams: { prompt: 'select_account' } // Forces account selection to avoid auto-logging into wrong one
+      } 
     });
-
-    if (error) {
-      setToast({ show: true, message: error.message, type: 'error' });
-    }
   };
 
-  const inputCls = "w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50";
+  const inputCls = "w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 transition-all";
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8">
-      <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8 relative">
+      <AppToast 
+        message={toast.message} 
+        type={toast.type} 
+        show={toast.show} 
+        onClose={() => setToast(t => ({ ...t, show: false }))} 
+      />
+      
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
@@ -169,109 +166,97 @@ export default function SignupPage() {
 
         <form onSubmit={handleSubmit} className="space-y-3">
           {/* Name */}
-          <div>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input type="text" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className={inputCls} />
-            </div>
-            {errors.name && <p className="mt-1 text-xs text-destructive">{errors.name}</p>}
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type="text" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className={inputCls} />
           </div>
+          {errors.name && <p className="text-xs text-destructive px-1">{errors.name}</p>}
 
           {/* Email */}
-          <div>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
+          <div className="relative">
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
+          </div>
+          {errors.email && <p className="text-xs text-destructive px-1">{errors.email}</p>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50" />
+              {errors.dob && <p className="text-xs text-destructive mt-1">{errors.dob}</p>}
             </div>
-            {errors.email && <p className="mt-1 text-xs text-destructive">{errors.email}</p>}
+            <select value={gender} onChange={e => setGender(e.target.value)} className="rounded-xl bg-secondary px-3 text-xs outline-none focus:ring-2 focus:ring-primary/50 appearance-none">
+              <option value="">Gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
           </div>
 
-          <AnimatePresence mode="wait">
-            <motion.div key="signup-fields" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-3">
-              {/* DOB */}
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Date of Birth</label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input type="date" value={dob} onChange={e => setDob(e.target.value)} className={inputCls} />
+          {/* Interests */}
+          <button type="button" onClick={() => setShowInterests(!showInterests)} className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors">
+            <span className="truncate">
+              {interests.length ? interests.join(', ') : 'Select Interests'}
+            </span>
+            <ChevronDown className={`h-4 w-4 transition-transform ${showInterests ? 'rotate-180' : ''}`} />
+          </button>
+          
+          <AnimatePresence>
+            {showInterests && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="flex flex-wrap gap-2 p-3 bg-secondary/50 rounded-xl border border-border/50">
+                  {ALL_INTERESTS.map(i => (
+                    <button key={i} type="button" onClick={() => toggleInterest(i)} className={`px-3 py-1 text-[10px] font-medium rounded-full transition-all ${interests.includes(i) ? 'bg-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+                      {i}
+                    </button>
+                  ))}
                 </div>
-                {errors.dob && <p className="mt-1 text-xs text-destructive">{errors.dob}</p>}
-              </div>
-              {/* Gender */}
-              <div>
-                <div className="relative">
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <select value={gender} onChange={e => setGender(e.target.value)} className="w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/50 appearance-none">
-                    <option value="" disabled>Select Gender</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                {errors.gender && <p className="mt-1 text-xs text-destructive">{errors.gender}</p>}
-              </div>
-              {/* Interests */}
-              <div>
-                <button type="button" onClick={() => setShowInterests(!showInterests)}
-                  className="w-full rounded-xl bg-secondary px-4 py-3 text-sm text-left flex items-center justify-between text-foreground">
-                  <span className={interests.length ? 'text-foreground' : 'text-muted-foreground'}>
-                    {interests.length ? interests.join(', ') : 'Select Interests'}
-                  </span>
-                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showInterests ? 'rotate-180' : ''}`} />
-                </button>
-                {showInterests && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mt-2 flex flex-wrap gap-2 rounded-xl bg-secondary p-3">
-                    {ALL_INTERESTS.map(i => (
-                      <button key={i} type="button" onClick={() => toggleInterest(i)}
-                        className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${interests.includes(i) ? 'gradient-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
-                        {i}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </div>
-            </motion.div>
+              </motion.div>
+            )}
           </AnimatePresence>
 
           {/* Password */}
-          <div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="w-full rounded-xl bg-secondary pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50" />
-              <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-            {errors.password && <p className="mt-1 text-xs text-destructive">{errors.password}</p>}
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} />
+            <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+              {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
           </div>
+          {errors.password && <p className="text-xs text-destructive px-1">{errors.password}</p>}
 
           {/* Confirm Password */}
-          <div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input type={showConfirmPw ? 'text' : 'password'} placeholder="Confirm Password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} className="w-full rounded-xl bg-secondary pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50" />
-              <button type="button" onClick={() => setShowConfirmPw(!showConfirmPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                {showConfirmPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-            {errors.confirmPw && <p className="mt-1 text-xs text-destructive">{errors.confirmPw}</p>}
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type={showConfirmPw ? 'text' : 'password'} placeholder="Confirm Password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} className={inputCls} />
+            <button type="button" onClick={() => setShowConfirmPw(!showConfirmPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+              {showConfirmPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
           </div>
+          {errors.confirmPw && <p className="text-xs text-destructive px-1">{errors.confirmPw}</p>}
 
-          <button type="submit" className="w-full gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container transition-transform active:scale-[0.98] disabled:opacity-60" disabled={isSubmitting}>
+          <button type="submit" disabled={isSubmitting} className="w-full gradient-primary rounded-xl py-3 text-sm font-bold text-primary-foreground shadow-glow transition-all active:scale-[0.98] disabled:opacity-70">
             {isSubmitting ? 'Creating Account...' : 'Create Account'}
           </button>
         </form>
 
+        <div className="relative py-2">
+          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border"></div></div>
+          <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">or join with</span></div>
+        </div>
+        
+        <button onClick={handleGoogleSignup} className="w-full flex items-center justify-center gap-3 rounded-xl glass-card py-3 hover:shadow-glow transition-all active:scale-[0.98]">
+          <svg width="18" height="18" viewBox="0 0 24 24">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+          </svg>
+          <span className="text-sm font-medium">Google</span>
+        </button>
+
         <p className="text-center text-sm text-muted-foreground">
           Already have an account? <Link to="/login" className="text-primary font-medium hover:underline">Sign In</Link>
         </p>
-        <button
-          type="button"
-          onClick={handleGoogleSignup}
-          className="w-full rounded-xl glass-card py-3 text-sm font-semibold text-foreground hover:shadow-glow transition-all"
-        >
-          Continue with Google
-        </button>
       </motion.div>
     </div>
   );
