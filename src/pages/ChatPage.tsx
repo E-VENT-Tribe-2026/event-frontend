@@ -4,12 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentUser } from '@/lib/storage';
 import BottomNav from '@/components/BottomNav';
+import { UserAvatar } from '@/components/UserAvatar';
 
 const MOCK_CHATS = [
-  { id: '1', name: 'DJ Luna', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Luna', lastMsg: 'See you at the festival!', time: '2m', unread: 2 },
-  { id: '2', name: 'TechCorp', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=TechCorp', lastMsg: 'The summit starts at 9 AM', time: '1h', unread: 0 },
-  { id: '3', name: 'FoodieClub', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Foodie', lastMsg: 'Vendor spots available!', time: '3h', unread: 1 },
-  { id: '4', name: 'ArtCollective', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Art', lastMsg: 'Exhibition opens Friday', time: '5h', unread: 0 },
+  { id: '1', name: 'DJ Luna', avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=Luna', lastMsg: 'See you at the festival!', time: '2m', unread: 2 },
+  { id: '2', name: 'TechCorp', avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=TechCorp', lastMsg: 'The summit starts at 9 AM', time: '1h', unread: 0 },
+  { id: '3', name: 'FoodieClub', avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=Foodie', lastMsg: 'Vendor spots available!', time: '3h', unread: 1 },
+  { id: '4', name: 'ArtCollective', avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=Art', lastMsg: 'Exhibition opens Friday', time: '5h', unread: 0 },
 ];
 
 const MOCK_MESSAGES = [
@@ -149,7 +150,7 @@ export default function ChatPage() {
       <div className="flex min-h-screen flex-col bg-background pb-20">
         <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border glass-nav px-4 py-3">
           <button onClick={() => setActiveChat(null)}><ArrowLeft className="h-5 w-5 text-foreground" /></button>
-          <img src={chat.avatar} alt="" className="h-9 w-9 rounded-full bg-secondary ring-2 ring-primary/30" />
+          <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="sm" className="ring-2 ring-primary/30" />
           <div>
             <h1 className="text-sm font-semibold text-foreground">{chat.name}</h1>
             {isTyping && <p className="text-[10px] text-primary animate-pulse">typing...</p>}
@@ -222,8 +223,8 @@ export default function ChatPage() {
           <button key={chat.id} onClick={() => setActiveChat(chat.id)}
             className="flex w-full items-center gap-3 px-4 py-4 hover:bg-secondary/30 transition-colors">
             <div className="relative">
-              <img src={chat.avatar} alt="" className="h-12 w-12 rounded-full bg-secondary ring-2 ring-border" />
-              <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 ring-2 ring-background" />
+              <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="lg" className="ring-2 ring-border" />
+              <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 ring-2 ring-background z-10" />
             </div>
             <div className="flex-1 text-left min-w-0">
               <p className="text-sm font-medium text-foreground">{chat.name}</p>
