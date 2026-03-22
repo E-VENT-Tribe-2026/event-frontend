@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, ShieldCheck } from 'lucide-react';
-import { addEvent, getCurrentUser, saveDraft, type EventItem } from '@/lib/storage';
+import { ArrowLeft, ShieldCheck } from 'lucide-react';
+import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { CATEGORIES } from '@/lib/seedData';
 import { motion } from 'framer-motion';
@@ -12,7 +12,6 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 
-/** Backend stores `created_by` as UUID; API may return flat body or `{ data: { id, created_by } }`. */
 function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
   if (!res || typeof res !== 'object') return {};
   const r = res as Record<string, unknown>;
@@ -61,7 +60,6 @@ export default function CreateEventPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   const update = (key: string, value: string | boolean) => {
     setForm(f => ({ ...f, [key]: value }));
@@ -106,7 +104,7 @@ export default function CreateEventPage() {
     
     setIsSubmitting(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for Render wake-up
+    const timeoutId = setTimeout(() => controller.abort(), 60000); 
 
     try {
       const token = await resolveApiToken();
@@ -116,7 +114,6 @@ export default function CreateEventPage() {
       const endObj = new Date(startObj.getTime() + 7200000); 
       const safeISO = (d: Date) => d.toISOString().split('.')[0] + "Z";
 
-      // Calculate coordinates to avoid ReferenceError
       const calculatedLat = parseFloat((40.7128 + (Math.random() - 0.5) * 0.1).toFixed(6));
       const calculatedLng = parseFloat((-74.006 + (Math.random() - 0.5) * 0.1).toFixed(6));
 
@@ -135,13 +132,6 @@ export default function CreateEventPage() {
 
       const requestUrl = getApiUrl(`${API_ENDPOINTS.EVENTS}/`);
       
-      setDebugInfo({
-        tokenPresent: true,
-        requestUrl,
-        requestPayload: payload,
-        status: "Requesting (Waiting up to 60s for server)..."
-      });
-
       const res = await fetch(requestUrl, {
         method: 'POST',
         signal: controller.signal,
@@ -158,7 +148,6 @@ export default function CreateEventPage() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setDebugInfo((prev: any) => ({ ...prev, responseStatus: res.status, responseBody: err }));
         throw new Error(err.detail || `Server failed (HTTP ${res.status})`);
       }
 
@@ -166,12 +155,8 @@ export default function CreateEventPage() {
       const { id: apiEventId, created_by: apiCreatedBy } = extractCreatedEventPayload(responseData);
       const { data: authUserData } = await supabase.auth.getUser();
       const authUser = authUserData?.user;
-      // Prefer DB UUID from `created_by` so Profile "my events" matches `events.created_by`.
-      const organizerId =
-        apiCreatedBy ||
-        user?.id ||
-        authUser?.id ||
-        'current_user';
+
+      const organizerId = apiCreatedBy || user?.id || authUser?.id || 'current_user';
       const organizerName =
         user?.name ||
         (typeof authUser?.user_metadata?.full_name === 'string' ? authUser.user_metadata.full_name : undefined) ||
@@ -220,10 +205,9 @@ export default function CreateEventPage() {
       if (err.name === 'AbortError') {
         msg = "The server took too long to wake up. Please try again in 10 seconds.";
       } else if (msg === 'Failed to fetch') {
-        msg = "Network Error: The server is likely asleep or rejecting the connection. Check /docs tab.";
+        msg = "Network Error: The server is likely asleep or rejecting the connection.";
       }
 
-      setDebugInfo((prev: any) => ({ ...prev, errorMessage: msg }));
       setToast({ show: true, message: msg, type: 'error' });
     } finally {
       setIsSubmitting(false);
@@ -286,15 +270,6 @@ export default function CreateEventPage() {
             {isSubmitting ? 'Publishing...' : 'Publish Event'}
           </button>
         </div>
-
-        {debugInfo && (
-          <div className="mt-4 rounded-xl bg-secondary/50 p-3">
-            <p className="text-[10px] font-mono text-muted-foreground break-all text-center mb-1 underline uppercase">Debug Diagnostics</p>
-            <pre className="text-[10px] font-mono text-muted-foreground break-all">
-              {JSON.stringify(debugInfo, null, 2)}
-            </pre>
-          </div>
-        )}
       </motion.form>
       <BottomNav />
     </div>
