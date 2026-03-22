@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard } from 'lucide-react';
 import { getCurrentUser } from '@/lib/storage';
+import { UserAvatar } from '@/components/UserAvatar';
 
 export default function BottomNav() {
   const location = useLocation();
@@ -42,6 +43,16 @@ export default function BottomNav() {
                 <div className="flex items-center justify-center rounded-full gradient-primary h-14 w-14 shadow-glow -mt-6 border-4 border-background">
                   <Icon className="h-6 w-6 text-primary-foreground" />
                 </div>
+              ) : path === '/profile' && user ? (
+                <UserAvatar
+                  src={user.profilePhoto}
+                  srcSecondary={user.avatar}
+                  seed={user.id}
+                  name={user.name}
+                  email={user.email}
+                  size="sm"
+                  className={active ? 'ring-2 ring-primary' : ''}
+                />
               ) : (
                 <Icon className="h-5 w-5" />
               )}

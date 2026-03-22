@@ -1,15 +1,57 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getEvents, joinEvent, getCurrentUser, addTicket, addNotification } from '@/lib/storage';
+import { getEvents, joinEvent, getCurrentUser, addTicket, addNotification, upsertEvent, type EventItem } from '@/lib/storage';
 import { ArrowLeft, CreditCard, Smartphone, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import AppToast from '@/components/AppToast';
+import { getAuthToken } from '@/lib/auth';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
+const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
+
+function mapApiEventToItem(api: Record<string, unknown>): EventItem {
+  const start = api.start_datetime ? new Date(api.start_datetime as string) : new Date();
+  const dateStr = start.toISOString().slice(0, 10);
+  const timeStr = start.toTimeString().slice(0, 5);
+  const cost = Number(api.cost);
+  const capacity = Number(api.max_capacity);
+  const profiles = api.profiles as Record<string, unknown> | null | undefined;
+  const organizerName = profiles && typeof profiles === 'object' && profiles.full_name != null ? String(profiles.full_name) : '';
+  const organizerAvatar = profiles && typeof profiles === 'object' && profiles.avatar_url != null ? String(profiles.avatar_url) : '';
+  return {
+    id: (api.id as string) ?? '',
+    title: (api.title as string) ?? '',
+    description: (api.description as string) ?? '',
+    category: (api.category as string) ?? 'Other',
+    date: dateStr,
+    time: timeStr,
+    location: (api.location_name as string) ?? '',
+    lat: typeof api.latitude === 'number' ? api.latitude : 0,
+    lng: typeof api.longitude === 'number' ? api.longitude : 0,
+    budget: Number.isFinite(cost) ? cost : 0,
+    participantsLimit: Number.isFinite(capacity) ? capacity : 0,
+    participants: [],
+    image: DEFAULT_IMAGE,
+    organizer: organizerName,
+    organizerId: (api.created_by as string) ?? '',
+    organizerAvatar: organizerAvatar || DEFAULT_IMAGE,
+    isPrivate: false,
+    isDraft: false,
+    requiresApproval: false,
+    reviews: [],
+    reports: [],
+    collaborators: [],
+  };
+}
 
 export default function PaymentPage() {
   const { eventId } = useParams();
   const navigate = useNavigate();
-  const event = getEvents().find(e => e.id === eventId);
+  const [localEvents, setLocalEvents] = useState(getEvents());
+  const [apiEvent, setApiEvent] = useState<EventItem | null>(null);
+  const [loadingEvent, setLoadingEvent] = useState(false);
+  const event = useMemo(() => localEvents.find(e => e.id === eventId) ?? apiEvent, [localEvents, eventId, apiEvent]);
   const user = getCurrentUser();
   const [method, setMethod] = useState<'card' | 'apple' | 'google'>('card');
   const [cardNumber, setCardNumber] = useState('');
@@ -20,11 +62,36 @@ export default function PaymentPage() {
   const [generatedTicket, setGeneratedTicket] = useState<any>(null);
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
 
+  useEffect(() => {
+    if (!eventId) return;
+    if (localEvents.some((e) => e.id === eventId)) return;
+    setLoadingEvent(true);
+    fetch(`${API_BASE_URL}/api/events/${eventId}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        const mapped = mapApiEventToItem(data);
+        setApiEvent(mapped);
+        upsertEvent(mapped);
+        setLocalEvents(getEvents());
+      })
+      .catch(() => setApiEvent(null))
+      .finally(() => setLoadingEvent(false));
+  }, [eventId, localEvents]);
+
+  const getApiToken = async (): Promise<string | null> => {
+    const token = getAuthToken();
+    return token || null;
+  };
+
+  if (loadingEvent) {
+    return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading payment…</div>;
+  }
+
   if (!event || !user) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
   }
 
-  const handlePay = () => {
+  const handlePay = async () => {
     if (method === 'card') {
       if (!cardNumber || !expiry || !cvv) {
         setToast({ show: true, message: 'Please fill all card details', type: 'error' });
@@ -32,8 +99,36 @@ export default function PaymentPage() {
       }
     }
     setProcessing(true);
-    setTimeout(() => {
+    setTimeout(async () => {
+      const isRemoteEvent = Boolean(apiEvent);
+      if (isRemoteEvent) {
+        const token = await getApiToken();
+        if (!token) {
+          setProcessing(false);
+          setToast({ show: true, message: 'Session missing. Please login again.', type: 'error' });
+          return;
+        }
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/participants/${event.id}/join`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            setProcessing(false);
+            setToast({ show: true, message: (err.detail || 'Could not join this event') as string, type: 'error' });
+            return;
+          }
+        } catch {
+          setProcessing(false);
+          setToast({ show: true, message: 'Cannot reach server. Try again.', type: 'error' });
+          return;
+        }
+      }
+
+      // Keep local cache in sync for profile/home views.
       joinEvent(event.id, user.id);
+      setLocalEvents(getEvents());
       const ticket = {
         id: crypto.randomUUID(),
         eventId: event.id,

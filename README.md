@@ -40,18 +40,12 @@ npm install
 
 ### 3. Environment Variables
 
-Create a file named `.env.local` in the root directory for local development. This file is ignored by Git.
+Copy `.env.example` to `.env.local` in the root directory (this file is ignored by Git).
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
-VITE_ENV=development
-```
-
-For deployment (e.g. Render, Vercel), set `VITE_API_BASE_URL` in your hosting provider’s environment settings to the URL of your **backend/orchestrator**, for example:
-
-```env
-VITE_API_BASE_URL=https://your-backend-service.onrender.com
-VITE_ENV=production
+VITE_API_BASE_URL=http://127.0.0.1:8001
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 ### 4. Run Development Server
@@ -65,8 +59,18 @@ npm run dev
 The app will be available at:
 
 ```
-http://localhost:5173
+http://localhost:8080
 ```
+
+### 5. Backend Requirement
+
+The frontend expects backend API at:
+
+```
+http://127.0.0.1:8001
+```
+
+If your backend uses another port, update `VITE_API_BASE_URL` in `.env.local`.
 
 ---
 
