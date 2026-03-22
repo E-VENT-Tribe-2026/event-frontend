@@ -1,6 +1,7 @@
 import { type EventItem, getCurrentUser } from '@/lib/storage';
 import { MapPin, Clock, Users, UserCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { UserAvatar } from '@/components/UserAvatar';
 
 interface EventCardProps {
   event: EventItem;
@@ -42,6 +43,20 @@ export default function EventCard({ event, onJoin, showFriendBadge }: EventCardP
       </div>
       <div className="p-4 space-y-2">
         <h3 className="text-sm font-semibold text-foreground line-clamp-1">{event.title}</h3>
+        {(event.organizer || event.organizerId) && (
+          <div className="flex items-center gap-2 pt-0.5">
+            <UserAvatar
+              src={event.organizerAvatar}
+              seed={event.organizerId || event.organizer || event.id}
+              name={event.organizer || 'Organizer'}
+              size="xs"
+              className="ring-1 ring-primary/25"
+            />
+            <span className="text-[11px] text-muted-foreground truncate">
+              {event.organizer || 'Organizer'}
+            </span>
+          </div>
+        )}
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{event.date} · {event.time}</span>
         </div>
