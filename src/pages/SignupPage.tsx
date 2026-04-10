@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User, Camera, Calendar, ChevronDown } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, Camera, ChevronDown } from 'lucide-react';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
 import { setAuthToken } from '@/lib/auth';
+import { fetchAuthUserFromToken } from '@/lib/authProfile';
+import { supabase } from '@/lib/supabase';
 
 const ALL_INTERESTS = ['Music', 'Sports', 'Gaming', 'Movies', 'Study', 'Travel', 'Tech', 'Art', 'Fitness', 'Coffee', 'Networking', 'Food', 'Wellness'];
 const MIN_AGE = 18;
@@ -25,7 +26,7 @@ export default function SignupPage() {
   const [interests, setInterests] = useState<string[]>([]);
   const [profilePhoto, setProfilePhoto] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
+ const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showInterests, setShowInterests] = useState(false);
 
@@ -85,7 +86,6 @@ export default function SignupPage() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        // CHECK FOR EXISTING USER ERROR FROM BACKEND
         const isExisting = res.status === 409 || data.message?.toLowerCase().includes('exists');
         setToast({ 
           show: true, 
@@ -96,10 +96,42 @@ export default function SignupPage() {
         return;
       }
 
+      if (!data.access_token) {
+        setToast({
+          show: true,
+          message: data.message || 'Check your email to confirm your account, then sign in.',
+          type: 'success',
+        });
+        setIsSubmitting(false);
+        window.clearTimeout(timeout);
+        navigate('/login');
+        return;
+      }
+
       setAuthToken(data.access_token);
+      if (supabase) {
+        await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token || '',
+        });
+      }
+
+      const me = await fetchAuthUserFromToken(data.access_token);
+      if (!me?.id) {
+        setToast({
+          show: true,
+          message: 'Account created but profile id could not be loaded. Try signing in.',
+          type: 'error',
+        });
+        setIsSubmitting(false);
+        window.clearTimeout(timeout);
+        navigate('/login');
+        return;
+      }
+
       setCurrentUserFromOAuth({
-        id: String(data.user?.id || `email:${email}`),
-        email,
+        id: me.id,
+        email: me.email || email,
         name,
         avatar: profilePhoto || undefined,
       });
@@ -114,25 +146,21 @@ export default function SignupPage() {
   };
 
   const handleGoogleSignup = async () => {
-    if (!isSupabaseConfigured() || !supabase) {
-      setToast({ show: true, message: 'Google Auth not configured.', type: 'error' });
-      return;
-    }
-    // "type=signup" tells your callback to check if the user is new. 
-    // If they aren't new, the callback should redirect them to login with an error param.
-    const redirectTo = `${window.location.origin}/auth/callback?type=signup`;
-    await supabase.auth.signInWithOAuth({ 
-      provider: 'google', 
-      options: { 
-        redirectTo,
-        queryParams: { prompt: 'select_account' } // Forces account selection to avoid auto-logging into wrong one
-      } 
+    if (!supabase) return;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
     });
+    if (error) {
+      setToast({ show: true, message: 'Google sign-up failed', type: 'error' });
+    }
   };
 
   const inputCls = "w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 transition-all";
 
-  return (
+return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8 relative">
       <AppToast 
         message={toast.message} 
@@ -259,5 +287,5 @@ export default function SignupPage() {
         </p>
       </motion.div>
     </div>
-  );
+)
 }

@@ -11,6 +11,7 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
+import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 
 function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
   if (!res || typeof res !== 'object') return {};
@@ -60,6 +61,8 @@ export default function CreateEventPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pickedLat, setPickedLat] = useState<number | null>(null);
+  const [pickedLng, setPickedLng] = useState<number | null>(null);
 
   const update = (key: string, value: string | boolean) => {
     setForm(f => ({ ...f, [key]: value }));
@@ -67,6 +70,17 @@ export default function CreateEventPage() {
         const newErrs = {...prev};
         delete newErrs[key];
         return newErrs;
+    });
+  };
+
+  const onMapLocationChange = (lat: number, lng: number) => {
+    setPickedLat(lat);
+    setPickedLng(lng);
+    setErrors((prev) => {
+      if (!prev.mapLocation) return prev;
+      const next = { ...prev };
+      delete next.mapLocation;
+      return next;
     });
   };
 
@@ -78,7 +92,10 @@ export default function CreateEventPage() {
     if (!form.description.trim()) e.description = 'Description is required';
     if (!form.date) e.date = 'Date is required';
     if (!form.time) e.time = 'Time is required';
-    if (!form.location.trim()) e.location = 'Location is required';
+    if (!form.location.trim()) e.location = 'Location name is required';
+    if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
+      e.mapLocation = 'Click the map to set the event location';
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -114,8 +131,9 @@ export default function CreateEventPage() {
       const endObj = new Date(startObj.getTime() + 7200000); 
       const safeISO = (d: Date) => d.toISOString().split('.')[0] + "Z";
 
-      const calculatedLat = parseFloat((40.7128 + (Math.random() - 0.5) * 0.1).toFixed(6));
-      const calculatedLng = parseFloat((-74.006 + (Math.random() - 0.5) * 0.1).toFixed(6));
+      const locationName =
+        form.location.trim() ||
+        `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
       const payload = {
           title: form.title.trim(),
@@ -125,9 +143,9 @@ export default function CreateEventPage() {
           max_capacity: Math.floor(Number(form.limit)) || 50,
           start_datetime: safeISO(startObj),
           end_datetime: safeISO(endObj),
-          location_name: form.location.trim(),
-          latitude: calculatedLat,
-          longitude: calculatedLng
+          location_name: locationName,
+          latitude: pickedLat!,
+          longitude: pickedLng!
         };
 
       const requestUrl = getApiUrl(`${API_ENDPOINTS.EVENTS}/`);
@@ -175,7 +193,7 @@ export default function CreateEventPage() {
         ...payload,
         date: form.date,
         time: form.time,
-        location: form.location,
+        location: form.location.trim() || locationName,
         lat: payload.latitude,
         lng: payload.longitude,
         budget: payload.cost,
@@ -246,7 +264,21 @@ export default function CreateEventPage() {
             <input type="time" value={form.time} onChange={e => update('time', e.target.value)} className={inputCls('time')} />
           </div>
 
-          <input placeholder="Location" value={form.location} onChange={e => update('location', e.target.value)} className={inputCls('location')} />
+          <div>
+            <label className="mb-1 block text-xs font-medium text-foreground">Location name</label>
+            <input placeholder="e.g. Central Park" value={form.location} onChange={e => update('location', e.target.value)} className={inputCls('location')} />
+            {errors.location && <span className="text-[10px] text-destructive px-2">{errors.location}</span>}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-foreground">Pin on map</label>
+            <LocationPickerMap
+              latitude={pickedLat}
+              longitude={pickedLng}
+              onLocationChange={onMapLocationChange}
+            />
+            {errors.mapLocation && <span className="mt-1 block text-[10px] text-destructive px-2">{errors.mapLocation}</span>}
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <input type="number" placeholder="Budget ($)" value={form.budget} onChange={e => update('budget', e.target.value)} className={inputCls('budget')} />
