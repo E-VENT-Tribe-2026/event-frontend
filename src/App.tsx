@@ -20,6 +20,8 @@ import OrganizerDashboardPage from "./pages/OrganizerDashboardPage";
 import TicketPage from "./pages/TicketPage";
 import NotFound from "./pages/NotFound";
 import RouteDocumentTitle from "./components/RouteDocumentTitle";
+import AuthCallbackPage from '@/pages/AuthCallbackPage';
+
 
 const queryClient = new QueryClient();
 
@@ -47,6 +49,7 @@ const App = () => (
           <Route path="/dashboard" element={<OrganizerDashboardPage />} />
           <Route path="/ticket/:ticketId" element={<TicketPage />} />
           <Route path="*" element={<NotFound />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
