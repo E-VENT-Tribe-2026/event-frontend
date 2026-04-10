@@ -89,17 +89,11 @@ export default function HomePage() {
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedDate && e.date !== debouncedDate) return false;
       if (debouncedLocation && !e.location.toLowerCase().includes(debouncedLocation.toLowerCase())) return false;
-      if (
-        debouncedSearch &&
-        !e.title.toLowerCase().includes(debouncedSearch.toLowerCase()) &&
-        !e.location.toLowerCase().includes(debouncedSearch.toLowerCase())
-      ) {
-        return false;
-      }
+      // Skip client-side search filter — semantic search is handled by the API
       return true;
     });
-  }, [events, budgetMax, category, debouncedDate, debouncedLocation, debouncedSearch]);
-
+  }, [events, budgetMax, category, debouncedDate, debouncedLocation]);
+  
   const suggestedPeople = useMemo(() => allUsers.filter((u) => u.id !== user?.id).slice(0, 8), [allUsers, user]);
 
   const friendActivity = useMemo(() => {
@@ -247,12 +241,7 @@ export default function HomePage() {
             </div>
           ) : (
             <>
-              {usingLocalFallback && (
-                <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-500">
-                  Offline mode: Showing cached events.
-                </div>
-              )}
-
+              
               <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {filtered.map((event, i) => (
                   <motion.div

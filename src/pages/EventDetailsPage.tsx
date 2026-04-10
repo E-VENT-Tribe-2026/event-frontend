@@ -371,29 +371,29 @@ export default function EventDetailsPage() {
     if (isUpdatingParticipation) return;
     setIsUpdatingParticipation(true);
 
-    const tryJoinViaApi = async (): Promise<boolean> => {
-      const token = await getApiToken();
-      if (!token) {
-        setToast({ show: true, message: 'Session missing. Please sign in again.', type: 'error' });
-        return false;
-      }
-      try {
-        const res = await fetch(getApiUrl(`/api/participants/${event.id}/join`), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
-        if (!res.ok) {
-          setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
-          return false;
-        }
-        await syncParticipationFromBackend();
-        setToast({ show: true, message: 'Successfully joined!', type: 'success' });
-        return true;
-      } catch {
-        setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
-        return false;
-      }
-    };
+const tryJoinViaApi = async (): Promise<boolean> => {
+  const token = await getApiToken();
+  if (!token) {
+    setToast({ show: true, message: 'Session missing. Please sign in again.', type: 'error' });
+    return false;
+  }
+  try {
+    const res = await fetch(getApiUrl(`/api/participants/${event.id}/join`), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
+      return false;
+    }
+    await syncParticipationFromBackend();
+    setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+    return true;
+  } catch {
+    setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
+    return false;
+  }
+};
 
     if (hasJoined) {
       if (useApiParticipation) {
@@ -405,9 +405,9 @@ export default function EventDetailsPage() {
         }
         try {
           const res = await fetch(getApiUrl(`/api/participants/${event.id}/leave`), {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-          });
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+});
           if (!res.ok) {
             setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
             setIsUpdatingParticipation(false);
@@ -492,7 +492,7 @@ export default function EventDetailsPage() {
         const res = await fetch(getApiUrl(`/api/participants/${event.id}/participants/${participantId}`), {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
+});
         if (!res.ok) {
           setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
           return;
