@@ -22,6 +22,7 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
+import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 
 function calcAge(dob: string): number | null {
   if (!dob) return null;
@@ -48,7 +49,8 @@ export default function ProfilePage() {
   
   // State for API data
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
-  const [remoteCreatedEvents, setRemoteCreatedEvents] = useState<EventItem[]>([]);
+  const [remoteCreatedUpcoming, setRemoteCreatedUpcoming] = useState<EventItem[]>([]);
+  const [remoteCreatedPast, setRemoteCreatedPast] = useState<EventItem[]>([]);
   const [loadingCreatedEvents, setLoadingCreatedEvents] = useState(false);
   const [localEventsEpoch, setLocalEventsEpoch] = useState(0);
   const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
@@ -64,30 +66,46 @@ export default function ProfilePage() {
     return Array.from(byId.values());
   }, [joinedEvents, remoteJoinedEvents]);
 
-  const createdEvents = useMemo(() => {
+  const displayCreatedUpcoming = useMemo(() => {
     if (!user) return [];
-    const byId = new Map<string, EventItem>();
-    
-    // Load local storage events
+    const m = new Map<string, EventItem>();
+    remoteCreatedUpcoming.forEach((e) => m.set(e.id, e));
     events
-      .filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id))
-      .forEach((e) => byId.set(e.id, e));
+      .filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && isEventUpcoming(e))
+      .forEach((e) => m.set(e.id, e));
+    return Array.from(m.values()).sort((a, b) => eventStartMs(a) - eventStartMs(b));
+  }, [remoteCreatedUpcoming, events, user]);
 
-    // Merge with remote API events
-    remoteCreatedEvents.forEach((e) => {
-      const prev = byId.get(e.id);
-      byId.set(e.id, prev ? { ...prev, ...e } : e);
-    });
+  const displayCreatedPast = useMemo(() => {
+    if (!user) return [];
+    const m = new Map<string, EventItem>();
+    remoteCreatedPast.forEach((e) => m.set(e.id, e));
+    events
+      .filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && !isEventUpcoming(e))
+      .forEach((e) => m.set(e.id, e));
+    return Array.from(m.values()).sort((a, b) => eventStartMs(b) - eventStartMs(a));
+  }, [remoteCreatedPast, events, user]);
 
-    return Array.from(byId.values()).sort((a, b) => 
-      `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`)
-    );
-  }, [events, user, remoteCreatedEvents]);
+  const createdEvents = useMemo(() => {
+    const byId = new Map<string, EventItem>();
+    [...displayCreatedUpcoming, ...displayCreatedPast].forEach((e) => byId.set(e.id, e));
+    return Array.from(byId.values());
+  }, [displayCreatedUpcoming, displayCreatedPast]);
 
   const joinedEventsOnly = useMemo(() => {
     const createdIds = new Set(createdEvents.map((e) => e.id));
     return allJoinedEvents.filter((e) => !createdIds.has(e.id));
   }, [allJoinedEvents, createdEvents]);
+
+  const displayJoinedUpcoming = useMemo(
+    () => joinedEventsOnly.filter(isEventUpcoming).sort((a, b) => eventStartMs(a) - eventStartMs(b)),
+    [joinedEventsOnly],
+  );
+
+  const displayJoinedPast = useMemo(
+    () => joinedEventsOnly.filter((e) => !isEventUpcoming(e)).sort((a, b) => eventStartMs(b) - eventStartMs(a)),
+    [joinedEventsOnly],
+  );
 
   const reviewsReceived = useMemo(() => {
     if (!user) return [];
@@ -176,13 +194,20 @@ export default function ProfilePage() {
         if (resCreated.ok) {
           const createdBody = await resCreated.json();
           const rows = createdBody.data || [];
-          const mappedCreated = rows.map((row: any) => {
+          const mapRow = (row: any) => {
             const item = mapApiEventToItem(row);
             item.organizerId = user.id;
             return item;
-          });
-          setRemoteCreatedEvents(mappedCreated);
-          mappedCreated.forEach(evt => upsertEvent(evt));
+          };
+          if (Array.isArray(createdBody.upcoming) && Array.isArray(createdBody.past)) {
+            setRemoteCreatedUpcoming(createdBody.upcoming.map(mapRow));
+            setRemoteCreatedPast(createdBody.past.map(mapRow));
+          } else {
+            const mapped = rows.map(mapRow);
+            setRemoteCreatedUpcoming(mapped.filter(isEventUpcoming));
+            setRemoteCreatedPast(mapped.filter((e) => !isEventUpcoming(e)));
+          }
+          rows.map(mapRow).forEach((evt) => upsertEvent(evt));
         }
         
         setLocalEventsEpoch(n => n + 1);
@@ -334,40 +359,114 @@ export default function ProfilePage() {
 
         <div className="space-y-2 min-h-[200px]">
           {activeTab === 'events' && (
-            <div className="space-y-4">
-              {loadingCreatedEvents && createdEvents.length === 0 && <p className="text-center text-xs py-8">Loading...</p>}
-              
-              {createdEvents.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-[10px] font-semibold uppercase text-muted-foreground px-1">Created</p>
-                  {createdEvents.map((e) => (
-                    <button key={e.id} onClick={() => navigate(`/event/${e.id}`)} className="flex items-center gap-3 w-full text-left rounded-xl glass-card p-3 border border-primary/20">
-                      <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{e.title}</p>
-                        <p className="text-[10px] text-accent">{e.date} · {e.participants.length} joined</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+            <div className="space-y-6">
+              {loadingCreatedEvents && createdEvents.length === 0 && joinedEventsOnly.length === 0 && (
+                <p className="py-8 text-center text-xs text-muted-foreground">Loading…</p>
               )}
 
-              {joinedEventsOnly.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-[10px] font-semibold uppercase text-muted-foreground px-1">Joined</p>
-                  {joinedEventsOnly.map((e) => (
-                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
-                      <button onClick={() => navigate(`/event/${e.id}`)} className="flex-1 text-left min-w-0">
-                        <p className="text-xs font-medium truncate">{e.title}</p>
-                        <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                      </button>
-                      <button onClick={() => handleLeaveFromProfile(e.id)} disabled={leavingEventId === e.id} className="rounded-full bg-secondary px-3 py-1 text-[10px]">
-                        {leavingEventId === e.id ? '...' : 'Leave'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="space-y-3">
+                <h3 className="px-1 text-sm font-semibold text-foreground">Upcoming</h3>
+                {displayCreatedUpcoming.length + displayJoinedUpcoming.length === 0 ? (
+                  <p className="rounded-xl bg-secondary/40 py-8 text-center text-xs text-muted-foreground">No upcoming events.</p>
+                ) : (
+                  <>
+                    {displayCreatedUpcoming.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Created</p>
+                        {displayCreatedUpcoming.map((e) => (
+                          <button
+                            key={e.id}
+                            type="button"
+                            onClick={() => navigate(`/event/${e.id}`)}
+                            className="flex w-full items-center gap-3 rounded-xl border border-primary/20 bg-card/50 p-3 text-left glass-card"
+                          >
+                            <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium">{e.title}</p>
+                              <p className="text-[10px] text-accent">
+                                {e.date} · {e.location || '—'}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {displayJoinedUpcoming.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Joined</p>
+                        {displayJoinedUpcoming.map((e) => (
+                          <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
+                            <button type="button" onClick={() => navigate(`/event/${e.id}`)} className="min-w-0 flex-1 text-left">
+                              <p className="truncate text-xs font-medium">{e.title}</p>
+                              <p className="text-[10px] text-muted-foreground">{e.date} · {e.location || '—'}</p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleLeaveFromProfile(e.id)}
+                              disabled={leavingEventId === e.id}
+                              className="rounded-full bg-secondary px-3 py-1 text-[10px]"
+                            >
+                              {leavingEventId === e.id ? '...' : 'Leave'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="px-1 text-sm font-semibold text-foreground">Past</h3>
+                {displayCreatedPast.length + displayJoinedPast.length === 0 ? (
+                  <p className="rounded-xl bg-secondary/40 py-8 text-center text-xs text-muted-foreground">No past events.</p>
+                ) : (
+                  <>
+                    {displayCreatedPast.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Created</p>
+                        {displayCreatedPast.map((e) => (
+                          <button
+                            key={e.id}
+                            type="button"
+                            onClick={() => navigate(`/event/${e.id}`)}
+                            className="flex w-full items-center gap-3 rounded-xl border border-border/60 p-3 text-left glass-card opacity-90"
+                          >
+                            <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium">{e.title}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {e.date} · {e.location || '—'}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {displayJoinedPast.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Joined</p>
+                        {displayJoinedPast.map((e) => (
+                          <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 opacity-90">
+                            <button type="button" onClick={() => navigate(`/event/${e.id}`)} className="min-w-0 flex-1 text-left">
+                              <p className="truncate text-xs font-medium">{e.title}</p>
+                              <p className="text-[10px] text-muted-foreground">{e.date} · {e.location || '—'}</p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleLeaveFromProfile(e.id)}
+                              disabled={leavingEventId === e.id}
+                              className="rounded-full bg-secondary px-3 py-1 text-[10px]"
+                            >
+                              {leavingEventId === e.id ? '...' : 'Leave'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
           {activeTab === 'tickets' && <p className="text-center py-8 text-xs text-muted-foreground">No tickets yet.</p>}

@@ -11,10 +11,9 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
   const timeStr = start.toTimeString().slice(0, 5);
   const cost = Number(api.cost);
   const capacity = Number(api.max_capacity);
+  const rawCreator = api.created_by ?? api.createdBy;
   const createdBy =
-    (typeof api.created_by === 'string' && api.created_by) ||
-    (typeof api.createdBy === 'string' && api.createdBy) ||
-    '';
+    rawCreator != null && String(rawCreator).trim() !== '' ? String(rawCreator).trim() : '';
 
   const profiles = api.profiles as Record<string, unknown> | undefined;
   let organizerNameFromProfile = '';
