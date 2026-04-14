@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { Sparkles, Users, UserPlus, MapPin, Calendar } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
 
+
 export default function HomePage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
@@ -25,9 +26,27 @@ export default function HomePage() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [maxPrice, setMaxPrice] = useState(500);
   const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const user = getCurrentUser();
   const allUsers = getUsers();
+
+
+
+ useEffect(() => {
+ 
+  fetch(getApiUrl('/api/events/max-price')) 
+    .then((res) => res.ok ? res.json() : Promise.reject())
+    .then((data: { max_price: number }) => {
+      setMaxPrice(data.max_price);
+      setBudgetMax(data.max_price); 
+    })
+    .catch(() => {
+      // Silently fall back to default
+    });
+}, []);
+
+
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
@@ -180,17 +199,18 @@ export default function HomePage() {
           </label>
         </div>
 
-        <div className="flex items-center gap-3 rounded-2xl glass-card p-4">
+        <div className="flex items-center gap-3 rounded-2xl glass-card p-4">          
           <span className="shrink-0 text-xs font-medium text-muted-foreground">Budget: ${budgetMax}</span>
           <input
             type="range"
             min={0}
-            max={500}
+            max={maxPrice} 
             value={budgetMax}
             onChange={(e) => setBudgetMax(Number(e.target.value))}
-            className="h-1 flex-1 accent-primary"
+            className="h-1 flex-1 accent-primary cursor-pointer"
           />
         </div>
+
 
         {friendActivity.length > 0 && (
           <div className="space-y-1">
