@@ -21,9 +21,23 @@ export default function HomePage() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [maxPrice, setMaxPrice] = useState(500);
   const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const user = getCurrentUser();
   const allUsers = getUsers();
+
+  
+useEffect(() => {
+  fetch(`${API_BASE_URL}/api/events/max-price`)
+    .then((res) => res.ok ? res.json() : Promise.reject())
+    .then((data: { max_price: number }) => {
+      setMaxPrice(data.max_price);
+      setBudgetMax(data.max_price); // reset slider to new max
+    })
+    .catch(() => {
+      // silently fall back to default 500
+    });
+}, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,7 +130,14 @@ export default function HomePage() {
         {/* Budget filter */}
         <div className="flex items-center gap-3 glass-card p-4 rounded-2xl">
           <span className="text-xs text-muted-foreground shrink-0 font-medium">Budget: ${budgetMax}</span>
-          <input type="range" min={0} max={500} value={budgetMax} onChange={e => setBudgetMax(Number(e.target.value))} className="flex-1 accent-primary h-1" />
+          <input
+            type="range"
+            min={0}
+            max={maxPrice}          
+            value={budgetMax}
+            onChange={e => setBudgetMax(Number(e.target.value))}
+            className="flex-1 accent-primary h-1"
+          />
         </div>
 
         {/* Friend Activity */}
