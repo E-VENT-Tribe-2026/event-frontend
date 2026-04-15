@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getApiUrl, API_BASE_URL } from './api';
+import { getApiUrl, API_BASE_URL } from '@/lib/api';
 
 describe('getApiUrl', () => {
   it('prepends slash when path omits it', () => {

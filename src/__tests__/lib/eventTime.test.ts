@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { EventItem } from '@/lib/storage';
-import { eventStartMs, isEventUpcoming } from './eventTime';
+import { eventStartMs, isEventUpcoming } from '@/lib/eventTime';
 
 const baseEvent = (over: Partial<EventItem>): EventItem =>
   ({

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { User } from '@/lib/storage';
-import ChatPage from './ChatPage';
+import ChatPage from '@/pages/ChatPage';
 
 const { getCurrentUserMock } = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn<[], User | null>(),
