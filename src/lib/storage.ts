@@ -11,7 +11,7 @@ export interface User {
   avatar: string;
   profilePhoto: string;
   coverPhoto: string;
-  bio: string;
+  bio?: string;
   interests: string[];
   dob: string;
   gender: string;
@@ -162,39 +162,51 @@ export function setCurrentUser(id: string) {
 }
 
 /** Create or update a user from OAuth (e.g. Google) and set as current user. */
-export function setCurrentUserFromOAuth(data: { id: string; email: string; name?: string; avatar?: string }): void {
+export function setCurrentUserFromOAuth(data: { 
+  id: string; 
+  email: string; 
+  name?: string; 
+  avatar?: string;
+  bio?: string;    // Add this
+  dob?: string;    // Add this
+  gender?: string; // Add this
+  role?: string;   // Add this
+}): void {
   const users = getUsers();
   const existing = users.find((u) => u.email === data.email || u.id === data.id);
   const now = new Date().toISOString();
+  
   const name = data.name || data.email?.split('@')[0] || 'User';
-  const avatar =
-    data.avatar ||
-    `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(data.id)}`;
+  const avatar = data.avatar || `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(data.id)}`;
 
   if (existing) {
-    const updated = {
+    const updated: User = {
       ...existing,
       id: data.id,
       name,
       email: data.email,
       avatar,
+      bio: data.bio ?? existing.bio, // Preserve bio if provided
+      dob: data.dob ?? existing.dob,
+      gender: data.gender ?? existing.gender,
+      role: (data.role as UserRole) ?? existing.role,
       profilePhoto: data.avatar || existing.profilePhoto || avatar,
     };
     saveUsers(users.map((u) => (u.id === existing.id || u.email === data.email ? updated : u)));
   } else {
     const newUser: User = {
       id: data.id,
-      role: 'participant',
+      role: (data.role as UserRole) || 'participant',
       name,
       email: data.email,
       password: '',
       avatar,
       profilePhoto: data.avatar || avatar,
       coverPhoto: '',
-      bio: 'Hey there! I love events.',
+      bio: data.bio || 'Hey there! I love events.', // Use API bio if available
       interests: ['Music', 'Tech', 'Food'],
-      dob: '',
-      gender: '',
+      dob: data.dob || '',
+      gender: data.gender || '',
       isPremium: false,
       friends: [],
       createdAt: now,

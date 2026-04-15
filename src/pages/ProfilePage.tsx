@@ -40,11 +40,11 @@ export default function ProfilePage() {
   const user = getCurrentUser();
   
   // State for profile data and UI
-  const [profileLoading, setProfileLoading] = useState(true); // FIX: Added missing state
+  const [profileLoading, setProfileLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [bio, setBio] = useState(user?.bio || '');
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' as const });
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [activeTab, setActiveTab] = useState<'events' | 'tickets' | 'reviews' | 'friends'>('events');
   
   // State for API data
@@ -107,13 +107,7 @@ export default function ProfilePage() {
     [joinedEventsOnly],
   );
 
-  const reviewsReceived = useMemo(() => {
-    if (!user) return [];
-    return createdEvents.flatMap(e => (e.reviews || []).map(r => ({ ...r, eventTitle: e.title })));
-  }, [createdEvents, user]);
-
   const allUsers = getUsers();
-  const friends = useMemo(() => user?.friends?.map(fId => allUsers.find(u => u.id === fId)).filter(Boolean) || [], [user, allUsers]);
 
   const approvedRequests = useMemo(() => {
     if (!user) return [];
@@ -125,12 +119,8 @@ export default function ProfilePage() {
     }).filter(Boolean);
   }, [user, events]);
 
-  // EFFECT 1: Restore session from API (Crucial for page refreshes)
+  // EFFECT 1: Restore session from API and sync local state
   useEffect(() => {
-    if (getCurrentUser()) {
-      setProfileLoading(false);
-      return;
-    }
     const token = getAuthToken();
     if (!token) {
       setProfileLoading(false);
@@ -143,21 +133,31 @@ export default function ProfilePage() {
         const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
+        
         if (!res.ok || cancelled) return;
         const raw = await res.json().catch(() => null);
         if (!raw || cancelled) return;
 
-        const row = (raw.data || raw.user || raw) as Record<string, any>;
-        const id = row.id || row.user_id;
-        const email = row.email;
+        const data = raw.data || raw.user || raw;
+        
+        if (data.id) {
+          const mappedName = data.full_name || data.name || "";
+          const mappedBio = data.bio || "";
 
-        if (id && email) {
           setCurrentUserFromOAuth({
-            id: String(id),
-            email: String(email),
-            name: String(row.full_name || row.name || email.split('@')[0]),
-            avatar: row.avatar_url,
+            id: String(data.id),
+            email: String(data.email || ""),
+            name: mappedName,
+            bio: mappedBio,
+            avatar: data.avatar_url,
+            dob: data.dob,
+            gender: data.gender,
+            role: data.role || 'user'
           });
+          
+          // Sync local component state
+          setName(mappedName);
+          setBio(mappedBio);
         }
       } catch (err) {
         console.error("Session restore failed", err);
@@ -168,7 +168,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, []);
 
-  // EFFECT 2: Load API Data
+  // EFFECT 2: Load API Data for Events
   useEffect(() => {
     if (!user) return;
     const token = getAuthToken();
@@ -177,7 +177,6 @@ export default function ProfilePage() {
     const fetchData = async () => {
       setLoadingCreatedEvents(true);
       try {
-        // Load Joined Events
         const resJoined = await fetch(getApiUrl('/api/participants/my/events'), {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -187,7 +186,6 @@ export default function ProfilePage() {
           setRemoteJoinedEvents(mappedJoined);
         }
 
-        // Load Created Events
         const resCreated = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/my-events`), {
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
@@ -207,7 +205,7 @@ export default function ProfilePage() {
             setRemoteCreatedUpcoming(mapped.filter(isEventUpcoming));
             setRemoteCreatedPast(mapped.filter((e) => !isEventUpcoming(e)));
           }
-          rows.map(mapRow).forEach((evt) => upsertEvent(evt));
+          rows.map(mapRow).forEach((evt: any) => upsertEvent(evt));
         }
         
         setLocalEventsEpoch(n => n + 1);
@@ -222,11 +220,10 @@ export default function ProfilePage() {
   }, [user?.id]);
 
   const handleSave = async () => {
-    updateUser({ name, bio });
     const token = getAuthToken();
     if (token) {
       try {
-        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+        const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -234,10 +231,16 @@ export default function ProfilePage() {
           },
           body: JSON.stringify({ full_name: name, bio }),
         });
-      } catch (err) { console.error("Update error", err); }
+        if (!res.ok) throw new Error("Failed to update");
+        
+        updateUser({ name, bio });
+        setEditing(false);
+        setToast({ show: true, message: 'Profile updated!', type: 'success' });
+      } catch (err) { 
+        console.error("Update error", err);
+        setToast({ show: true, message: 'Failed to update.', type: 'error' });
+      }
     }
-    setEditing(false);
-    setToast({ show: true, message: 'Profile updated!', type: 'success' });
   };
 
   const handleLogout = () => {
@@ -263,7 +266,6 @@ export default function ProfilePage() {
     setToast({ show: true, message: 'Left event', type: 'success' });
   };
 
-  // RENDER CHECKS
   if (profileLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -276,9 +278,6 @@ export default function ProfilePage() {
     navigate('/login');
     return null;
   }
-
-  const eventsTabCount = createdEvents.length + joinedEventsOnly.length;
-  const age = calcAge(user.dob);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -298,14 +297,18 @@ export default function ProfilePage() {
             src={user.profilePhoto}
             srcSecondary={user.avatar}
             seed={user.id}
-            name={user.name}
+            name={name}
             size="xl"
             className="ring-4 ring-background shadow-glow"
           />
           {editing ? (
-            <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50" />
+            <input 
+              value={name} 
+              onChange={e => setName(e.target.value)} 
+              className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" 
+            />
           ) : (
-            <h2 className="text-xl font-bold">{user.name}</h2>
+            <h2 className="text-xl font-bold">{name || 'User'}</h2>
           )}
           <span className="rounded-full px-3 py-0.5 text-xs font-medium bg-primary/20 text-primary">
             {user.role === 'organizer' ? '🏢 Organizer' : 'Individual Account'}
@@ -316,14 +319,19 @@ export default function ProfilePage() {
         <div className="rounded-2xl glass-card p-4 space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Bio</h3>
-            <button onClick={editing ? handleSave : () => setEditing(true)} className="text-primary">
+            <button onClick={editing ? handleSave : () => setEditing(true)} className="text-primary p-1 hover:bg-primary/10 rounded-full transition-colors">
               {editing ? <Check className="h-4 w-4" /> : <Edit2 className="h-4 w-4" />}
             </button>
           </div>
           {editing ? (
-            <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm resize-none" />
+            <textarea 
+              value={bio} 
+              onChange={e => setBio(e.target.value)} 
+              rows={3} 
+              className="w-full rounded-lg bg-secondary p-3 text-sm resize-none outline-none focus:ring-1 focus:ring-primary/30" 
+            />
           ) : (
-            <p className="text-sm text-muted-foreground">{user.bio || 'No bio yet.'}</p>
+            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{bio || 'No bio yet.'}</p>
           )}
         </div>
 
@@ -360,10 +368,6 @@ export default function ProfilePage() {
         <div className="space-y-2 min-h-[200px]">
           {activeTab === 'events' && (
             <div className="space-y-6">
-              {loadingCreatedEvents && createdEvents.length === 0 && joinedEventsOnly.length === 0 && (
-                <p className="py-8 text-center text-xs text-muted-foreground">Loading…</p>
-              )}
-
               <div className="space-y-3">
                 <h3 className="px-1 text-sm font-semibold text-foreground">Upcoming</h3>
                 {displayCreatedUpcoming.length + displayJoinedUpcoming.length === 0 ? (
@@ -376,16 +380,13 @@ export default function ProfilePage() {
                         {displayCreatedUpcoming.map((e) => (
                           <button
                             key={e.id}
-                            type="button"
                             onClick={() => navigate(`/event/${e.id}`)}
                             className="flex w-full items-center gap-3 rounded-xl border border-primary/20 bg-card/50 p-3 text-left glass-card"
                           >
                             <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-xs font-medium">{e.title}</p>
-                              <p className="text-[10px] text-accent">
-                                {e.date} · {e.location || '—'}
-                              </p>
+                              <p className="text-[10px] text-accent">{e.date} · {e.location || '—'}</p>
                             </div>
                           </button>
                         ))}
@@ -396,67 +397,14 @@ export default function ProfilePage() {
                         <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Joined</p>
                         {displayJoinedUpcoming.map((e) => (
                           <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
-                            <button type="button" onClick={() => navigate(`/event/${e.id}`)} className="min-w-0 flex-1 text-left">
+                            <button onClick={() => navigate(`/event/${e.id}`)} className="min-w-0 flex-1 text-left">
                               <p className="truncate text-xs font-medium">{e.title}</p>
                               <p className="text-[10px] text-muted-foreground">{e.date} · {e.location || '—'}</p>
                             </button>
                             <button
-                              type="button"
                               onClick={() => handleLeaveFromProfile(e.id)}
                               disabled={leavingEventId === e.id}
-                              className="rounded-full bg-secondary px-3 py-1 text-[10px]"
-                            >
-                              {leavingEventId === e.id ? '...' : 'Leave'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <h3 className="px-1 text-sm font-semibold text-foreground">Past</h3>
-                {displayCreatedPast.length + displayJoinedPast.length === 0 ? (
-                  <p className="rounded-xl bg-secondary/40 py-8 text-center text-xs text-muted-foreground">No past events.</p>
-                ) : (
-                  <>
-                    {displayCreatedPast.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Created</p>
-                        {displayCreatedPast.map((e) => (
-                          <button
-                            key={e.id}
-                            type="button"
-                            onClick={() => navigate(`/event/${e.id}`)}
-                            className="flex w-full items-center gap-3 rounded-xl border border-border/60 p-3 text-left glass-card opacity-90"
-                          >
-                            <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium">{e.title}</p>
-                              <p className="text-[10px] text-muted-foreground">
-                                {e.date} · {e.location || '—'}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {displayJoinedPast.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Joined</p>
-                        {displayJoinedPast.map((e) => (
-                          <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 opacity-90">
-                            <button type="button" onClick={() => navigate(`/event/${e.id}`)} className="min-w-0 flex-1 text-left">
-                              <p className="truncate text-xs font-medium">{e.title}</p>
-                              <p className="text-[10px] text-muted-foreground">{e.date} · {e.location || '—'}</p>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleLeaveFromProfile(e.id)}
-                              disabled={leavingEventId === e.id}
-                              className="rounded-full bg-secondary px-3 py-1 text-[10px]"
+                              className="rounded-full bg-secondary px-3 py-1 text-[10px] hover:bg-destructive hover:text-white transition-colors"
                             >
                               {leavingEventId === e.id ? '...' : 'Leave'}
                             </button>
