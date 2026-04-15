@@ -1,4 +1,4 @@
-# Запускает Vitest при push и в PR в основные ветки репозитория.
+# Run Vitest on push and on pull requests into main, dev, or UAT.
 name: Unit tests
 
 on:
