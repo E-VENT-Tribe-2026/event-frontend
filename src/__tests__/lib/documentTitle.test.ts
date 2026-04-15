@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { APP_NAME, DEFAULT_DOCUMENT_TITLE, formatPageTitle } from './documentTitle';
+import { APP_NAME, DEFAULT_DOCUMENT_TITLE, formatPageTitle } from '@/lib/documentTitle';
 
 describe('formatPageTitle', () => {
   it('returns default title for empty or whitespace', () => {
