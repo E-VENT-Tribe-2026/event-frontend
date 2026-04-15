@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasValidEventCoordinates } from './LocationPickerMap';
+import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 
 describe('hasValidEventCoordinates', () => {
   it('rejects null, NaN, and 0,0 placeholder', () => {
