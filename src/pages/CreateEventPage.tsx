@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
@@ -171,8 +171,8 @@ export default function CreateEventPage() {
 
       const responseData = await res.json();
       const { id: apiEventId, created_by: apiCreatedBy } = extractCreatedEventPayload(responseData);
-      const { data: authUserData } = await supabase.auth.getUser();
-      const authUser = authUserData?.user;
+      const authUser =
+        supabase == null ? undefined : (await supabase.auth.getUser()).data?.user ?? undefined;
 
       const organizerId = apiCreatedBy || user?.id || authUser?.id || 'current_user';
       const organizerName =
