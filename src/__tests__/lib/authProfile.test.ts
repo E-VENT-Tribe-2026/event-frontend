@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchAuthUserFromToken, sameAuthUserId } from './authProfile';
+import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 
 describe('sameAuthUserId', () => {
   it('returns false for missing values', () => {
