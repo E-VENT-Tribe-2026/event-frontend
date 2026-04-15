@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import SignupPage from './SignupPage';
+import SignupPage from '@/pages/SignupPage';
 import { clearAuthToken } from '@/lib/auth';
 
 const { mockNavigate } = vi.hoisted(() => ({

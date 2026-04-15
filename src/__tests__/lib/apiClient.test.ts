@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiClient } from './apiClient';
+import { apiClient } from '@/lib/apiClient';
 
 function jsonResponse(body: unknown, init: ResponseInit & { json?: boolean } = {}) {
   const headers = new Headers(init.headers);

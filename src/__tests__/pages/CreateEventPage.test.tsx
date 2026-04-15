@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import type { User } from '@/lib/storage';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import CreateEventPage from './CreateEventPage';
+import CreateEventPage from '@/pages/CreateEventPage';
 
 const { addEventMock, mockNavigate } = vi.hoisted(() => ({
   addEventMock: vi.fn(),
