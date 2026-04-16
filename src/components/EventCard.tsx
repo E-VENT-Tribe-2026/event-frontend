@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { type EventItem, getCurrentUser } from '@/lib/storage';
 import { MapPin, Clock, Users, UserCheck, Heart } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
@@ -10,31 +10,51 @@ interface EventCardProps {
   event: EventItem;
   onJoin?: (id: string) => void;
   showFriendBadge?: boolean;
-  isFavorite?: boolean; // Prop to receive initial favorite status
+  isFavorite?: boolean; 
 }
 
 export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: initialIsFavorite = false }: EventCardProps) {
+  const navigate = useNavigate();
   const user = getCurrentUser();
+  
   const [favorite, setFavorite] = useState(initialIsFavorite);
   const [loadingFav, setLoadingFav] = useState(false);
+  const [attendeeCount, setAttendeeCount] = useState<number>(event.participants?.length || 0);
 
-  // Sync state if initialIsFavorite changes (important for search/filter updates)
+  // Sync favorite state from props
   useEffect(() => {
     setFavorite(initialIsFavorite);
   }, [initialIsFavorite]);
 
-  const friendJoined = user?.isPremium && user?.friends?.some(fId => event.participants.includes(fId));
+  // Fetch Exact Attendee Count
+  useEffect(() => {
+    if (!event.id) return;
+
+    fetch(getApiUrl(`/api/participants/${event.id}/participants/count`))
+      .then((res) => res.ok ? res.json() : Promise.reject())
+      .then((data) => {
+        if (typeof data.count === 'number') {
+          setAttendeeCount(data.count);
+        }
+      })
+      .catch(() => {
+        setAttendeeCount(event.participants?.length || 0);
+      });
+  }, [event.id, event.participants?.length]);
+
+  const friendJoined = user?.isPremium && user?.friends?.some(fId => event.participants?.includes(fId));
 
   const handleFavorite = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     
     const token = getAuthToken();
-    if (!token) return;
+    if (!token) {
+      navigate('/login');
+      return;
+    }
 
     setLoadingFav(true);
-    
-    // Toggle method based on current state
     const method = favorite ? 'DELETE' : 'POST';
     const endpoint = favorite 
       ? `/api/favorites/unsave-events/${event.id}` 
@@ -59,13 +79,32 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     }
   };
 
+  const handleJoinClick = (e: React.MouseEvent) => {
+    // CRITICAL: Stop the parent Link from navigating
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    if (onJoin) {
+      onJoin(event.id);
+    }
+  };
+
   return (
     <Link
       to={`/event/${event.id}`}
       className="block rounded-2xl overflow-hidden glass-card card-lift animate-fade-in relative"
     >
       <div className="relative h-40 overflow-hidden">
-        <img src={event.image} alt={event.title} className="h-full w-full object-cover transition-transform duration-500 hover:scale-110" />
+        <img 
+          src={event.image} 
+          alt={event.title} 
+          className="h-full w-full object-cover transition-transform duration-500 hover:scale-110" 
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
         <div className="absolute top-2 right-2 rounded-full bg-primary/90 px-3 py-1 text-xs font-semibold text-primary-foreground backdrop-blur-sm">
           {event.category}
@@ -86,7 +125,13 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
         <h3 className="text-sm font-semibold text-foreground line-clamp-1">{event.title}</h3>
         {(event.organizer || event.organizerId) && (
           <div className="flex items-center gap-2 pt-0.5">
-            <UserAvatar src={event.organizerAvatar} seed={event.organizerId || event.organizer || event.id} name={event.organizer || 'Organizer'} size="xs" className="ring-1 ring-primary/25" />
+            <UserAvatar 
+              src={event.organizerAvatar} 
+              seed={event.organizerId || event.organizer || event.id} 
+              name={event.organizer || 'Organizer'} 
+              size="xs" 
+              className="ring-1 ring-primary/25" 
+            />
             <span className="text-[11px] text-muted-foreground truncate">{event.organizer || 'Organizer'}</span>
           </div>
         )}
@@ -96,21 +141,26 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1 truncate"><MapPin className="h-3 w-3 shrink-0" />{event.location}</span>
         </div>
+        
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Users className="h-3 w-3" />
-            <span>{event.participants.length}/{event.participantsLimit}</span>
+            <span>{attendeeCount}/{event.participantsLimit}</span>
           </div>
+          
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleFavorite}
               disabled={loadingFav}
               className={`p-2 rounded-full transition-all active:scale-90 ${favorite ? 'text-primary' : 'text-muted-foreground hover:bg-secondary/50'}`}
             >
               <Heart className={`h-5 w-5 ${favorite ? 'fill-current' : ''} ${loadingFav ? 'animate-pulse' : ''}`} />
             </button>
+            
             <button
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onJoin?.(event.id); }}
+              type="button"
+              onClick={handleJoinClick}
               className="gradient-primary rounded-full px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow transition-transform active:scale-95"
             >
               Join
