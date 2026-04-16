@@ -293,7 +293,7 @@ export default function CreateEventPage() {
         </div>
 
         {/* Map — centres on mapCenter, marker on pickedLat/Lng */}
-        <div className="space-y-1">
+        <div className="relative z-10 space-y-1">
           <label className="block text-xs font-medium text-foreground">
             Pin on map
             <span className="ml-1 text-[10px] text-muted-foreground">(search above or click to set manually)</span>

@@ -13,6 +13,7 @@ import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 
@@ -21,6 +22,9 @@ type ApiEventRow = Record<string, unknown>;
 function safeISO(d: Date) {
   return d.toISOString().split('.')[0] + 'Z';
 }
+
+// Germany centre fallback
+const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
 
 export default function EditEventPage() {
   const { id } = useParams();
@@ -44,36 +48,50 @@ export default function EditEventPage() {
 
   const [pickedLat, setPickedLat] = useState<number | null>(null);
   const [pickedLng, setPickedLng] = useState<number | null>(null);
-  const [mapDefaultCenter, setMapDefaultCenter] = useState<[number, number]>([40.7128, -74.006]);
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>(GERMANY_DEFAULT);
   const [durationMs, setDurationMs] = useState(7200000);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [isSubmitting, setIsSubmitting] = useState(false);
-
   const [cachedItem, setCachedItem] = useState<EventItem | null>(null);
 
   const update = (key: string, value: string | boolean) => {
     setForm((f) => ({ ...f, [key]: value }));
     if (errors[key]) {
-      setErrors((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
+      setErrors((prev) => { const n = { ...prev }; delete n[key]; return n; });
     }
   };
 
+  // Manual map click
   const onMapLocationChange = useCallback((lat: number, lng: number) => {
     setPickedLat(lat);
     setPickedLng(lng);
     setErrors((prev) => {
       if (!prev.mapLocation) return prev;
-      const next = { ...prev };
-      delete next.mapLocation;
-      return next;
+      const n = { ...prev };
+      delete n.mapLocation;
+      return n;
     });
   }, []);
+
+  // Search result selected
+  const handleLocationSelect = (result: LocationResult) => {
+    setPickedLat(result.lat);
+    setPickedLng(result.lng);
+    setMapCenter({ lat: result.lat, lng: result.lng });
+    update('location', result.displayName);
+    setErrors((prev) => { const n = { ...prev }; delete n.mapLocation; return n; });
+  };
+
+  // Geolocation resolved — only update map center, don't override existing marker
+  const handleUserLocation = (coords: { lat: number; lng: number }) => {
+    // If no marker has been set yet and no saved coords, center the map on user
+    setMapCenter((prev) => {
+      const hasExisting = pickedLat !== null && pickedLng !== null;
+      return hasExisting ? prev : coords;
+    });
+  };
 
   const resolveApiToken = async (): Promise<string | null> => {
     const existing = getAuthToken();
@@ -81,23 +99,16 @@ export default function EditEventPage() {
     if (supabase) {
       const { data } = await supabase.auth.getSession();
       const token = data?.session?.access_token ?? null;
-      if (token) {
-        setAuthToken(token);
-        return token;
-      }
+      if (token) { setAuthToken(token); return token; }
     }
     return null;
   };
 
+  // Load event data
   useEffect(() => {
-    if (!id) {
-      setLoadState('error');
-      setLoadMessage('Missing event id');
-      return;
-    }
+    if (!id) { setLoadState('error'); setLoadMessage('Missing event id'); return; }
 
     let cancelled = false;
-
     (async () => {
       setLoadState('loading');
       try {
@@ -111,16 +122,12 @@ export default function EditEventPage() {
         }
         const raw = (await res.json()) as ApiEventRow;
         const rawCreator = raw.created_by ?? raw.createdBy;
-        const createdBy =
-          rawCreator != null && String(rawCreator).trim() !== '' ? String(rawCreator).trim() : '';
+        const createdBy = rawCreator != null && String(rawCreator).trim() !== '' ? String(rawCreator).trim() : '';
         const token = await resolveApiToken();
         const me = token ? await fetchAuthUserFromToken(token) : null;
         const uid = me?.id || user?.id || '';
         if (!uid || !sameAuthUserId(createdBy, uid)) {
-          if (!cancelled) {
-            setLoadState('error');
-            setLoadMessage('You can only edit events you created.');
-          }
+          if (!cancelled) { setLoadState('error'); setLoadMessage('You can only edit events you created.'); }
           return;
         }
 
@@ -128,9 +135,6 @@ export default function EditEventPage() {
         const start = raw.start_datetime ? new Date(raw.start_datetime as string) : new Date();
         const end = raw.end_datetime ? new Date(raw.end_datetime as string) : new Date(start.getTime() + 7200000);
         const dMs = Math.max(0, end.getTime() - start.getTime()) || 7200000;
-
-        const dateStr = start.toISOString().slice(0, 10);
-        const timeStr = start.toTimeString().slice(0, 5);
 
         if (cancelled) return;
 
@@ -140,8 +144,8 @@ export default function EditEventPage() {
           title: item.title,
           description: item.description,
           category: item.category || 'Music',
-          date: dateStr,
-          time: timeStr,
+          date: start.toISOString().slice(0, 10),
+          time: start.toTimeString().slice(0, 5),
           location: item.location,
           budget: String(item.budget ?? 0),
           limit: String(item.participantsLimit ?? 50),
@@ -151,31 +155,20 @@ export default function EditEventPage() {
         if (hasValidEventCoordinates(item.lat, item.lng)) {
           setPickedLat(item.lat);
           setPickedLng(item.lng);
-          setMapDefaultCenter([item.lat, item.lng]);
-        } else {
-          setPickedLat(null);
-          setPickedLng(null);
+          // Centre map on the saved location
+          setMapCenter({ lat: item.lat, lng: item.lng });
         }
 
         setLoadState('ready');
       } catch {
-        if (!cancelled) {
-          setLoadState('error');
-          setLoadMessage('Could not load event');
-        }
+        if (!cancelled) { setLoadState('error'); setLoadMessage('Could not load event'); }
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id, user?.id]);
 
   useEffect(() => {
-    if (loadState === 'error') {
-      document.title = formatPageTitle('Edit event');
-      return;
-    }
+    if (loadState === 'error') { document.title = formatPageTitle('Edit event'); return; }
     if (loadState !== 'ready') return;
     const t = form.title.trim();
     document.title = formatPageTitle(t ? `Edit: ${t}` : 'Edit event');
@@ -189,7 +182,7 @@ export default function EditEventPage() {
     if (!form.time) e.time = 'Time is required';
     if (!form.location.trim()) e.location = 'Location name is required';
     if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
-      e.mapLocation = 'Click the map to set the event location';
+      e.mapLocation = 'Search for a location or click the map to set the event pin';
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -211,9 +204,7 @@ export default function EditEventPage() {
 
       const startObj = new Date(`${form.date}T${form.time}:00`);
       const endObj = new Date(startObj.getTime() + durationMs);
-      const locationName =
-        form.location.trim() ||
-        `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
+      const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
       const payload = {
         title: form.title.trim(),
@@ -249,7 +240,6 @@ export default function EditEventPage() {
 
       const updatedRow = (await res.json()) as ApiEventRow;
       const item = mapApiEventToItem(updatedRow);
-
       const base = cachedItem;
       const organizerId = base?.organizerId ?? user?.id ?? '';
       const organizerName = base?.organizer ?? user?.name ?? 'Organizer';
@@ -264,7 +254,7 @@ export default function EditEventPage() {
         id,
         date: form.date,
         time: form.time,
-        location: form.location.trim() || locationName,
+        location: locationName,
         lat: pickedLat!,
         lng: pickedLng!,
         budget: payload.cost,
@@ -298,11 +288,7 @@ export default function EditEventPage() {
     } transition-all`;
 
   if (loadState === 'loading') {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-        Loading…
-      </div>
-    );
+    return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
   }
 
   if (loadState === 'error') {
@@ -342,112 +328,71 @@ export default function EditEventPage() {
         onSubmit={handleSubmit}
         className="mx-auto max-w-lg space-y-4 px-4 pt-4"
       >
-        <div className="space-y-4">
-          <div>
-            <input
-              placeholder="Event Title"
-              value={form.title}
-              onChange={(e) => update('title', e.target.value)}
-              className={inputCls('title')}
-            />
-            {errors.title && <span className="px-2 text-[10px] text-destructive">{errors.title}</span>}
-          </div>
+        {/* Title */}
+        <div>
+          <input placeholder="Event Title" value={form.title} onChange={(e) => update('title', e.target.value)} className={inputCls('title')} />
+          {errors.title && <span className="px-2 text-[10px] text-destructive">{errors.title}</span>}
+        </div>
 
-          <div>
-            <textarea
-              placeholder="Description"
-              rows={3}
-              value={form.description}
-              onChange={(e) => update('description', e.target.value)}
-              className={`${inputCls('description')} resize-none`}
-            />
-            {errors.description && (
-              <span className="px-2 text-[10px] text-destructive">{errors.description}</span>
-            )}
-          </div>
+        {/* Description */}
+        <div>
+          <textarea placeholder="Description" rows={3} value={form.description} onChange={(e) => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
+          {errors.description && <span className="px-2 text-[10px] text-destructive">{errors.description}</span>}
+        </div>
 
-          <select
-            value={form.category}
-            onChange={(e) => update('category', e.target.value)}
-            className={inputCls('category')}
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+        {/* Category */}
+        <select value={form.category} onChange={(e) => update('category', e.target.value)} className={inputCls('category')}>
+          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
 
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              type="date"
-              value={form.date}
-              onChange={(e) => update('date', e.target.value)}
-              className={inputCls('date')}
-            />
-            <input
-              type="time"
-              value={form.time}
-              onChange={(e) => update('time', e.target.value)}
-              className={inputCls('time')}
-            />
-          </div>
-          {(errors.date || errors.time) && (
-            <span className="block px-2 text-[10px] text-destructive">
-              {errors.date || errors.time}
-            </span>
+        {/* Date + Time */}
+        <div className="grid grid-cols-2 gap-3">
+          <input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} className={inputCls('date')} />
+          <input type="time" value={form.time} onChange={(e) => update('time', e.target.value)} className={inputCls('time')} />
+        </div>
+        {(errors.date || errors.time) && (
+          <span className="block px-2 text-[10px] text-destructive">{errors.date || errors.time}</span>
+        )}
+
+        {/* Location search */}
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-foreground">Location</label>
+          <LocationSearchInput
+            value={form.location}
+            onChange={(v) => update('location', v)}
+            onSelect={handleLocationSelect}
+            onUserLocation={handleUserLocation}
+            placeholder="Search venue, address or city…"
+            error={errors.location}
+          />
+        </div>
+
+        {/* Map */}
+        <div className="relative z-10 space-y-1">
+          <label className="block text-xs font-medium text-foreground">
+            Pin on map
+            <span className="ml-1 text-[10px] text-muted-foreground">(search above or click to adjust manually)</span>
+          </label>
+          <LocationPickerMap
+            latitude={pickedLat}
+            longitude={pickedLng}
+            onLocationChange={onMapLocationChange}
+          />
+          {errors.mapLocation && (
+            <span className="mt-1 block px-2 text-[10px] text-destructive">{errors.mapLocation}</span>
           )}
+        </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Location name</label>
-            <input
-              placeholder="e.g. Central Park"
-              value={form.location}
-              onChange={(e) => update('location', e.target.value)}
-              className={inputCls('location')}
-            />
-            {errors.location && (
-              <span className="px-2 text-[10px] text-destructive">{errors.location}</span>
-            )}
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Pin on map</label>
-            <LocationPickerMap
-              latitude={pickedLat}
-              longitude={pickedLng}
-              onLocationChange={onMapLocationChange}
-              defaultCenter={mapDefaultCenter}
-            />
-            {errors.mapLocation && (
-              <span className="mt-1 block px-2 text-[10px] text-destructive">{errors.mapLocation}</span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              type="number"
-              placeholder="Budget ($)"
-              value={form.budget}
-              onChange={(e) => update('budget', e.target.value)}
-              className={inputCls('budget')}
-            />
-            <div className="flex flex-col justify-center px-2">
-              <label className="mb-1 text-[10px] font-bold uppercase text-muted-foreground">
-                Capacity: {form.limit}
-              </label>
-              <input
-                type="range"
-                min="10"
-                max="500"
-                value={form.limit}
-                onChange={(e) => update('limit', e.target.value)}
-                className="h-1.5 w-full accent-primary"
-              />
-            </div>
+        {/* Budget + Capacity */}
+        <div className="grid grid-cols-2 gap-3">
+          <input type="number" placeholder="Budget ($)" value={form.budget} onChange={(e) => update('budget', e.target.value)} className={inputCls('budget')} />
+          <div className="flex flex-col justify-center px-2">
+            <label className="mb-1 text-[10px] font-bold uppercase text-muted-foreground">Capacity: {form.limit}</label>
+            <input type="range" min="10" max="500" value={form.limit} onChange={(e) => update('limit', e.target.value)} className="h-1.5 w-full accent-primary" />
           </div>
         </div>
 
+        {/* Requires approval */}
         <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-foreground">
             <ShieldCheck className="h-4 w-4" /> Require Approval
@@ -457,25 +402,14 @@ export default function EditEventPage() {
             onClick={() => update('requiresApproval', !form.requiresApproval)}
             className={`h-6 w-11 rounded-full transition-colors ${form.requiresApproval ? 'bg-primary' : 'bg-muted'}`}
           >
-            <div
-              className={`h-5 w-5 rounded-full bg-white transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`}
-            />
+            <div className={`h-5 w-5 rounded-full bg-white transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`} />
           </button>
         </div>
 
+        {/* Actions */}
         <div className="flex gap-3 pt-4">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50"
-          >
+          <button type="button" onClick={() => navigate(-1)} className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground">Cancel</button>
+          <button type="submit" disabled={isSubmitting} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50">
             {isSubmitting ? 'Saving…' : 'Save changes'}
           </button>
         </div>
