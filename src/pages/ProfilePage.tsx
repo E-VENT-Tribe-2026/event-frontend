@@ -13,7 +13,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, Star, Ticket, UserPlus, CreditCard, Heart, Trash2 } from 'lucide-react';
+import { LogOut, Edit2, Check, Star, Ticket, UserPlus, CreditCard, Heart, Trash2, Lock, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -40,6 +40,14 @@ export default function ProfilePage() {
   const [bio, setBio] = useState(user?.bio || '');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [activeTab, setActiveTab] = useState<'events' | 'favorites' | 'tickets' | 'friends'>('events');
+
+  // Password State
+  const [showPasswordSection, setShowPasswordSection] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
   
   // Data State
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
@@ -191,6 +199,44 @@ export default function ProfilePage() {
     }
   };
 
+  const handleChangePassword = async () => {
+    if (newPassword.length < 8) {
+      setToast({ show: true, message: 'Password must be at least 8 characters.', type: 'error' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setToast({ show: true, message: 'Passwords do not match.', type: 'error' });
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) return;
+
+    setPasswordLoading(true);
+    try {
+      const res = await fetch(getApiUrl('/api/auth/reset-password'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ access_token: token, new_password: newPassword }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setToast({ show: true, message: 'Password updated successfully.', type: 'success' });
+        setNewPassword('');
+        setConfirmPassword('');
+        setShowPasswordSection(false);
+      } else {
+        setToast({ show: true, message: data.detail || 'Failed to update password.', type: 'error' });
+      }
+    } catch {
+      setToast({ show: true, message: 'Something went wrong. Please try again.', type: 'error' });
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
   const handleLogout = () => { logout(); clearAuthToken(); navigate('/login'); };
 
   if (profileLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" /></div>;
@@ -211,11 +257,101 @@ export default function ProfilePage() {
           <p className="text-sm text-muted-foreground">{user.email}</p>
         </div>
 
+        {/* Bio */}
         <div className="rounded-2xl glass-card p-4 space-y-2">
           <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">Bio</h3><button onClick={editing ? handleSave : () => setEditing(true)} className="text-primary p-1">{editing ? <Check className="h-4 w-4" /> : <Edit2 className="h-4 w-4" />}</button></div>
           {editing ? <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm resize-none outline-none" /> : <p className="text-sm text-muted-foreground">{bio || 'No bio yet.'}</p>}
         </div>
 
+        {/* Change Password */}
+        <div className="rounded-2xl glass-card p-4 space-y-3">
+          <button
+            onClick={() => setShowPasswordSection(v => !v)}
+            className="flex w-full items-center justify-between"
+          >
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Lock className="h-4 w-4 text-primary" /> Change Password
+            </h3>
+            <span className="text-xs text-muted-foreground">{showPasswordSection ? 'Cancel' : 'Update'}</span>
+          </button>
+
+          {showPasswordSection && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="space-y-3 pt-1"
+            >
+              {/* New Password */}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-semibold uppercase text-muted-foreground">New Password</span>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="Min. 8 characters"
+                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <button type="button" onClick={() => setShowNewPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {showNewPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </label>
+
+              {/* Confirm Password */}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-semibold uppercase text-muted-foreground">Confirm Password</span>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
+                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <button type="button" onClick={() => setShowConfirmPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {showConfirmPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </label>
+
+              {/* Strength indicator */}
+              {newPassword.length > 0 && (
+                <div className="space-y-1">
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4].map(level => (
+                      <div
+                        key={level}
+                        className={`h-1 flex-1 rounded-full transition-colors ${
+                          newPassword.length >= level * 3
+                            ? level <= 1 ? 'bg-destructive'
+                              : level === 2 ? 'bg-yellow-500'
+                              : level === 3 ? 'bg-blue-500'
+                              : 'bg-green-500'
+                            : 'bg-secondary'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {newPassword.length < 4 ? 'Too short' : newPassword.length < 7 ? 'Weak' : newPassword.length < 10 ? 'Fair' : 'Strong'}
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={handleChangePassword}
+                disabled={passwordLoading || !newPassword || !confirmPassword}
+                className="w-full gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              >
+                {passwordLoading ? 'Updating…' : 'Update Password'}
+              </button>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Pending Payments */}
         {approvedRequests.length > 0 && (
           <div className="rounded-2xl glass-card p-4 space-y-3 glow-border">
             <h3 className="text-sm font-semibold flex items-center gap-2"><CreditCard className="h-4 w-4 text-accent" /> Pending Payments</h3>
@@ -229,6 +365,7 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {/* Tabs */}
         <div className="flex rounded-xl glass-card p-1">
           {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }, { id: 'tickets', label: 'Tickets', icon: Ticket }, { id: 'friends', label: 'Friends', icon: UserPlus }].map((tab) => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex-1 flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-all ${activeTab === tab.id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'}`}><tab.icon className="h-3.5 w-3.5" />{tab.label}</button>
@@ -238,7 +375,6 @@ export default function ProfilePage() {
         <div className="space-y-4 min-h-[300px]">
           {activeTab === 'events' && (
             <div className="space-y-6">
-              {/* Upcoming Section */}
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold px-1">Upcoming</h3>
                 {[...displayCreatedUpcoming, ...displayJoinedUpcoming].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No upcoming events.</p>}
@@ -271,7 +407,6 @@ export default function ProfilePage() {
                 ))}
               </div>
 
-              {/* Past Section */}
               <div className="space-y-3 pt-2">
                 <h3 className="text-sm font-semibold opacity-70 px-1">Past Events</h3>
                 {[...displayCreatedPast, ...displayJoinedPast].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No past events recorded.</p>}

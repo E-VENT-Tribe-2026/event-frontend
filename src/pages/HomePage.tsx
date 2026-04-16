@@ -29,6 +29,8 @@ export default function HomePage() {
   const [maxPrice, setMaxPrice] = useState(500);
   const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const today = new Date();
+  const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   // ── Favorites & Recommendations ──────────────────────────────────────────
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -219,7 +221,13 @@ export default function HomePage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5 rounded-2xl glass-card p-3">
             <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground"><Calendar className="h-3 w-3" /> Event date</span>
-            <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="rounded-lg bg-secondary/80 px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40" />
+            <input 
+              type="date" 
+              value={filterDate} 
+              min={minDate} 
+              onChange={(e) => setFilterDate(e.target.value)} 
+              className="rounded-lg bg-secondary/80 px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40" 
+            />
           </label>
           <label className="flex flex-col gap-1.5 rounded-2xl glass-card p-3">
             <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground"><MapPin className="h-3 w-3" /> Location</span>
