@@ -81,7 +81,15 @@ export interface ChatMessage {
 
 export interface Notification {
   id: string;
-  type: 'join' | 'reminder' | 'message' | 'trending' | 'approval' | 'payment';
+  type:
+    | 'join'
+    | 'reminder'
+    | 'message'
+    | 'trending'
+    | 'approval'
+    | 'payment'
+    | 'update'
+    | 'cancellation';
   title: string;
   description: string;
   time: string;
