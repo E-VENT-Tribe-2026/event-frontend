@@ -118,7 +118,7 @@ describe('CreateEventPage', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: /publish event/i }));
     expect(await screen.findByText('Title is required')).toBeInTheDocument();
-    expect(screen.getByText('Click the map to set the event location')).toBeInTheDocument();
+    expect(screen.getByText(/Search for a location or click the map to set the event pin/i)).toBeInTheDocument();
     expect(addEventMock).not.toHaveBeenCalled();
   });
 
@@ -143,7 +143,7 @@ describe('CreateEventPage', () => {
     const times = document.querySelectorAll('input[type="time"]');
     fireEvent.change(dates[0], { target: { value: tomorrowIsoDate() } });
     fireEvent.change(times[0], { target: { value: '15:00' } });
-    fireEvent.change(screen.getByPlaceholderText(/central park/i), { target: { value: 'Central Park' } });
+    fireEvent.change(screen.getByPlaceholderText(/Search venue, address or city/i), { target: { value: 'Central Park' } });
     fireEvent.click(screen.getByRole('button', { name: /set-map-pin/i }));
 
     fireEvent.click(screen.getByRole('button', { name: /publish event/i }));
