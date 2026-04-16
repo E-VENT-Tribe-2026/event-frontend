@@ -13,7 +13,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, Star, Ticket, UserPlus, CreditCard } from 'lucide-react';
+import { LogOut, Edit2, Check, Star, Ticket, UserPlus, CreditCard, Heart, Trash2, Lock, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -24,12 +24,6 @@ import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 
-function calcAge(dob: string): number | null {
-  if (!dob) return null;
-  const diff = Date.now() - new Date(dob).getTime();
-  return Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
-}
-
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
   return a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -39,25 +33,33 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const user = getCurrentUser();
   
-  // State for profile data and UI
-  const [profileLoading, setProfileLoading] = useState(true); // FIX: Added missing state
+  // UI State
+  const [profileLoading, setProfileLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [bio, setBio] = useState(user?.bio || '');
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' as const });
-  const [activeTab, setActiveTab] = useState<'events' | 'tickets' | 'reviews' | 'friends'>('events');
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
+  const [activeTab, setActiveTab] = useState<'events' | 'favorites' | 'tickets' | 'friends'>('events');
+
+  // Password State
+  const [showPasswordSection, setShowPasswordSection] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
   
-  // State for API data
+  // Data State
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
   const [remoteCreatedUpcoming, setRemoteCreatedUpcoming] = useState<EventItem[]>([]);
   const [remoteCreatedPast, setRemoteCreatedPast] = useState<EventItem[]>([]);
+  const [favorites, setFavorites] = useState<EventItem[]>([]);
   const [loadingCreatedEvents, setLoadingCreatedEvents] = useState(false);
   const [localEventsEpoch, setLocalEventsEpoch] = useState(0);
   const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
 
-  // Memoized data
+  // Memoized Data
   const events = useMemo(() => getEvents(), [localEventsEpoch]);
-  const tickets = useMemo(() => user ? getTickets().filter(t => t.userId === user.id) : [], [user, localEventsEpoch]);
   const joinedEvents = useMemo(() => user ? events.filter(e => e.participants.includes(user.id)) : [], [events, user]);
   
   const allJoinedEvents = useMemo(() => {
@@ -70,9 +72,7 @@ export default function ProfilePage() {
     if (!user) return [];
     const m = new Map<string, EventItem>();
     remoteCreatedUpcoming.forEach((e) => m.set(e.id, e));
-    events
-      .filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && isEventUpcoming(e))
-      .forEach((e) => m.set(e.id, e));
+    events.filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && isEventUpcoming(e)).forEach((e) => m.set(e.id, e));
     return Array.from(m.values()).sort((a, b) => eventStartMs(a) - eventStartMs(b));
   }, [remoteCreatedUpcoming, events, user]);
 
@@ -80,181 +80,93 @@ export default function ProfilePage() {
     if (!user) return [];
     const m = new Map<string, EventItem>();
     remoteCreatedPast.forEach((e) => m.set(e.id, e));
-    events
-      .filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && !isEventUpcoming(e))
-      .forEach((e) => m.set(e.id, e));
+    events.filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && !isEventUpcoming(e)).forEach((e) => m.set(e.id, e));
     return Array.from(m.values()).sort((a, b) => eventStartMs(b) - eventStartMs(a));
   }, [remoteCreatedPast, events, user]);
 
-  const createdEvents = useMemo(() => {
-    const byId = new Map<string, EventItem>();
-    [...displayCreatedUpcoming, ...displayCreatedPast].forEach((e) => byId.set(e.id, e));
-    return Array.from(byId.values());
-  }, [displayCreatedUpcoming, displayCreatedPast]);
+  const createdIds = useMemo(() => new Set([...displayCreatedUpcoming, ...displayCreatedPast].map(e => e.id)), [displayCreatedUpcoming, displayCreatedPast]);
+  const joinedEventsOnly = useMemo(() => allJoinedEvents.filter(e => !createdIds.has(e.id)), [allJoinedEvents, createdIds]);
 
-  const joinedEventsOnly = useMemo(() => {
-    const createdIds = new Set(createdEvents.map((e) => e.id));
-    return allJoinedEvents.filter((e) => !createdIds.has(e.id));
-  }, [allJoinedEvents, createdEvents]);
-
-  const displayJoinedUpcoming = useMemo(
-    () => joinedEventsOnly.filter(isEventUpcoming).sort((a, b) => eventStartMs(a) - eventStartMs(b)),
-    [joinedEventsOnly],
-  );
-
-  const displayJoinedPast = useMemo(
-    () => joinedEventsOnly.filter((e) => !isEventUpcoming(e)).sort((a, b) => eventStartMs(b) - eventStartMs(a)),
-    [joinedEventsOnly],
-  );
-
-  const reviewsReceived = useMemo(() => {
-    if (!user) return [];
-    return createdEvents.flatMap(e => (e.reviews || []).map(r => ({ ...r, eventTitle: e.title })));
-  }, [createdEvents, user]);
-
-  const allUsers = getUsers();
-  const friends = useMemo(() => user?.friends?.map(fId => allUsers.find(u => u.id === fId)).filter(Boolean) || [], [user, allUsers]);
+  const displayJoinedUpcoming = useMemo(() => joinedEventsOnly.filter(isEventUpcoming).sort((a, b) => eventStartMs(a) - eventStartMs(b)), [joinedEventsOnly]);
+  const displayJoinedPast = useMemo(() => joinedEventsOnly.filter(e => !isEventUpcoming(e)).sort((a, b) => eventStartMs(b) - eventStartMs(a)), [joinedEventsOnly]);
 
   const approvedRequests = useMemo(() => {
     if (!user) return [];
-    const reqs = getJoinRequests();
-    return reqs.filter(r => r.userId === user.id && r.status === 'approved').map(r => {
+    return getJoinRequests().filter(r => r.userId === user.id && r.status === 'approved').map(r => {
       const evt = events.find(e => e.id === r.eventId);
-      const alreadyJoined = evt?.participants.includes(user.id);
-      return evt && !alreadyJoined ? { request: r, event: evt } : null;
+      return evt && !evt.participants.includes(user.id) ? { request: r, event: evt } : null;
     }).filter(Boolean);
   }, [user, events]);
 
-  // EFFECT 1: Restore session from API (Crucial for page refreshes)
+  // Initial Load: Profile & Favorites
   useEffect(() => {
-    if (getCurrentUser()) {
-      setProfileLoading(false);
-      return;
-    }
     const token = getAuthToken();
-    if (!token) {
-      setProfileLoading(false);
-      return;
-    }
+    if (!token) { setProfileLoading(false); return; }
     
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
-        if (!res.ok || cancelled) return;
-        const raw = await res.json().catch(() => null);
-        if (!raw || cancelled) return;
-
-        const row = (raw.data || raw.user || raw) as Record<string, any>;
-        const id = row.id || row.user_id;
-        const email = row.email;
-
-        if (id && email) {
-          setCurrentUserFromOAuth({
-            id: String(id),
-            email: String(email),
-            name: String(row.full_name || row.name || email.split('@')[0]),
-            avatar: row.avatar_url,
-          });
+        const [resProf, resFavs] = await Promise.all([
+          fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }),
+          fetch(getApiUrl('/api/favorites/all'), { headers: { Authorization: `Bearer ${token}` } })
+        ]);
+        
+        if (resProf.ok && !cancelled) {
+          const raw = await resProf.json();
+          const data = raw.data || raw.user || raw;
+          if (data.id) {
+            setCurrentUserFromOAuth({ id: String(data.id), email: String(data.email || ""), name: String(data.full_name || data.name || ""), bio: String(data.bio || ""), avatar: data.avatar_url });
+            setName(data.full_name || data.name || "");
+            setBio(data.bio || "");
+          }
         }
-      } catch (err) {
-        console.error("Session restore failed", err);
-      } finally {
-        if (!cancelled) setProfileLoading(false);
-      }
+
+        if (resFavs.ok && !cancelled) {
+          const favData = await resFavs.json();
+          setFavorites((favData || []).map(mapApiEventToItem));
+        }
+      } catch (err) { console.error(err); } finally { if (!cancelled) setProfileLoading(false); }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // EFFECT 2: Load API Data
+  // Event Data Load
   useEffect(() => {
     if (!user) return;
     const token = getAuthToken();
     if (!token) return;
 
-    const fetchData = async () => {
+    (async () => {
       setLoadingCreatedEvents(true);
       try {
-        // Load Joined Events
-        const resJoined = await fetch(getApiUrl('/api/participants/my/events'), {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const [resJoined, resCreated] = await Promise.all([
+          fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/my-events`), { headers: { Authorization: `Bearer ${token}` } })
+        ]);
+
         if (resJoined.ok) {
           const joinedBody = await resJoined.json();
-          const mappedJoined = (joinedBody || []).map((row: any) => mapApiEventToItem(row.events)).filter(Boolean);
-          setRemoteJoinedEvents(mappedJoined);
+          setRemoteJoinedEvents((joinedBody || []).map((row: any) => mapApiEventToItem(row.events)).filter(Boolean));
         }
 
-        // Load Created Events
-        const resCreated = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/my-events`), {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
         if (resCreated.ok) {
           const createdBody = await resCreated.json();
           const rows = createdBody.data || [];
-          const mapRow = (row: any) => {
-            const item = mapApiEventToItem(row);
-            item.organizerId = user.id;
-            return item;
-          };
-          if (Array.isArray(createdBody.upcoming) && Array.isArray(createdBody.past)) {
-            setRemoteCreatedUpcoming(createdBody.upcoming.map(mapRow));
-            setRemoteCreatedPast(createdBody.past.map(mapRow));
-          } else {
-            const mapped = rows.map(mapRow);
-            setRemoteCreatedUpcoming(mapped.filter(isEventUpcoming));
-            setRemoteCreatedPast(mapped.filter((e) => !isEventUpcoming(e)));
-          }
-          rows.map(mapRow).forEach((evt) => upsertEvent(evt));
+          setRemoteCreatedUpcoming(rows.map(mapApiEventToItem).filter(isEventUpcoming));
+          setRemoteCreatedPast(rows.map(mapApiEventToItem).filter((e: any) => !isEventUpcoming(e)));
+          rows.forEach((evt: any) => upsertEvent(mapApiEventToItem(evt)));
         }
-        
         setLocalEventsEpoch(n => n + 1);
-      } catch (err) {
-        console.error("Data fetch error", err);
-      } finally {
-        setLoadingCreatedEvents(false);
-      }
-    };
-
-    fetchData();
+      } catch (err) { console.error(err); } finally { setLoadingCreatedEvents(false); }
+    })();
   }, [user?.id]);
-
-  const handleSave = async () => {
-    updateUser({ name, bio });
-    const token = getAuthToken();
-    if (token) {
-      try {
-        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({ full_name: name, bio }),
-        });
-      } catch (err) { console.error("Update error", err); }
-    }
-    setEditing(false);
-    setToast({ show: true, message: 'Profile updated!', type: 'success' });
-  };
-
-  const handleLogout = () => {
-    logout();
-    clearAuthToken();
-    navigate('/login');
-  };
 
   const handleLeaveFromProfile = async (eventId: string) => {
     const token = getAuthToken();
     setLeavingEventId(eventId);
     if (token) {
       try {
-        await fetch(getApiUrl(`/api/participants/${eventId}/leave`), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        await fetch(getApiUrl(`/api/participants/${eventId}/leave`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       } catch (err) { console.error(err); }
     }
     leaveEvent(eventId, user!.id);
@@ -263,214 +175,282 @@ export default function ProfilePage() {
     setToast({ show: true, message: 'Left event', type: 'success' });
   };
 
-  // RENDER CHECKS
-  if (profileLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary"></div>
-      </div>
-    );
-  }
+  const handleRemoveFavorite = async (eventId: string) => {
+    const token = getAuthToken();
+    if (!token) return;
+    try {
+      const res = await fetch(getApiUrl(`/api/favorites/unsave-events/${eventId}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        setFavorites(prev => prev.filter(e => e.id !== eventId));
+        setToast({ show: true, message: 'Removed from favorites', type: 'success' });
+      }
+    } catch (err) { console.error(err); }
+  };
 
-  if (!user) {
-    navigate('/login');
-    return null;
-  }
+  const handleSave = async () => {
+    const token = getAuthToken();
+    if (token) {
+      try {
+        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ full_name: name, bio }) });
+        updateUser({ name, bio });
+        setEditing(false);
+        setToast({ show: true, message: 'Profile updated!', type: 'success' });
+      } catch (err) { console.error(err); }
+    }
+  };
 
-  const eventsTabCount = createdEvents.length + joinedEventsOnly.length;
-  const age = calcAge(user.dob);
+  const handleChangePassword = async () => {
+    if (newPassword.length < 8) {
+      setToast({ show: true, message: 'Password must be at least 8 characters.', type: 'error' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setToast({ show: true, message: 'Passwords do not match.', type: 'error' });
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) return;
+
+    setPasswordLoading(true);
+    try {
+      const res = await fetch(getApiUrl('/api/auth/reset-password'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ access_token: token, new_password: newPassword }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setToast({ show: true, message: 'Password updated successfully.', type: 'success' });
+        setNewPassword('');
+        setConfirmPassword('');
+        setShowPasswordSection(false);
+      } else {
+        setToast({ show: true, message: data.detail || 'Failed to update password.', type: 'error' });
+      }
+    } catch {
+      setToast({ show: true, message: 'Something went wrong. Please try again.', type: 'error' });
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleLogout = () => { logout(); clearAuthToken(); navigate('/login'); };
+
+  if (profileLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" /></div>;
+  if (!user) { navigate('/login'); return null; }
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
 
       <div className="relative h-36 bg-gradient-to-r from-primary/30 to-accent/30">
-        <div className="absolute top-3 right-3 z-10">
-          <button onClick={handleLogout} className="flex items-center gap-1 text-xs text-foreground/80 glass-card rounded-full px-3 py-1.5">
-            <LogOut className="h-3 w-3" /> Logout
-          </button>
-        </div>
+        <button onClick={handleLogout} className="absolute top-3 right-3 z-10 flex items-center gap-1 text-xs text-foreground/80 glass-card rounded-full px-3 py-1.5 transition-transform active:scale-95"><LogOut className="h-3 w-3" /> Logout</button>
       </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-14 relative z-10 space-y-5">
         <div className="flex flex-col items-center gap-2">
-          <UserAvatar
-            src={user.profilePhoto}
-            srcSecondary={user.avatar}
-            seed={user.id}
-            name={user.name}
-            size="xl"
-            className="ring-4 ring-background shadow-glow"
-          />
-          {editing ? (
-            <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50" />
-          ) : (
-            <h2 className="text-xl font-bold">{user.name}</h2>
-          )}
-          <span className="rounded-full px-3 py-0.5 text-xs font-medium bg-primary/20 text-primary">
-            {user.role === 'organizer' ? '🏢 Organizer' : 'Individual Account'}
-          </span>
+          <UserAvatar src={user.avatar} seed={user.id} name={name} size="xl" className="ring-4 ring-background shadow-glow" />
+          {editing ? <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" /> : <h2 className="text-xl font-bold">{name || 'User'}</h2>}
           <p className="text-sm text-muted-foreground">{user.email}</p>
         </div>
 
+        {/* Bio */}
         <div className="rounded-2xl glass-card p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Bio</h3>
-            <button onClick={editing ? handleSave : () => setEditing(true)} className="text-primary">
-              {editing ? <Check className="h-4 w-4" /> : <Edit2 className="h-4 w-4" />}
-            </button>
-          </div>
-          {editing ? (
-            <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm resize-none" />
-          ) : (
-            <p className="text-sm text-muted-foreground">{user.bio || 'No bio yet.'}</p>
+          <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">Bio</h3><button onClick={editing ? handleSave : () => setEditing(true)} className="text-primary p-1">{editing ? <Check className="h-4 w-4" /> : <Edit2 className="h-4 w-4" />}</button></div>
+          {editing ? <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm resize-none outline-none" /> : <p className="text-sm text-muted-foreground">{bio || 'No bio yet.'}</p>}
+        </div>
+
+        {/* Change Password */}
+        <div className="rounded-2xl glass-card p-4 space-y-3">
+          <button
+            onClick={() => setShowPasswordSection(v => !v)}
+            className="flex w-full items-center justify-between"
+          >
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Lock className="h-4 w-4 text-primary" /> Change Password
+            </h3>
+            <span className="text-xs text-muted-foreground">{showPasswordSection ? 'Cancel' : 'Update'}</span>
+          </button>
+
+          {showPasswordSection && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="space-y-3 pt-1"
+            >
+              {/* New Password */}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-semibold uppercase text-muted-foreground">New Password</span>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="Min. 8 characters"
+                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <button type="button" onClick={() => setShowNewPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {showNewPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </label>
+
+              {/* Confirm Password */}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-semibold uppercase text-muted-foreground">Confirm Password</span>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
+                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <button type="button" onClick={() => setShowConfirmPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {showConfirmPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </label>
+
+              {/* Strength indicator */}
+              {newPassword.length > 0 && (
+                <div className="space-y-1">
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4].map(level => (
+                      <div
+                        key={level}
+                        className={`h-1 flex-1 rounded-full transition-colors ${
+                          newPassword.length >= level * 3
+                            ? level <= 1 ? 'bg-destructive'
+                              : level === 2 ? 'bg-yellow-500'
+                              : level === 3 ? 'bg-blue-500'
+                              : 'bg-green-500'
+                            : 'bg-secondary'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {newPassword.length < 4 ? 'Too short' : newPassword.length < 7 ? 'Weak' : newPassword.length < 10 ? 'Fair' : 'Strong'}
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={handleChangePassword}
+                disabled={passwordLoading || !newPassword || !confirmPassword}
+                className="w-full gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              >
+                {passwordLoading ? 'Updating…' : 'Update Password'}
+              </button>
+            </motion.div>
           )}
         </div>
 
+        {/* Pending Payments */}
         {approvedRequests.length > 0 && (
           <div className="rounded-2xl glass-card p-4 space-y-3 glow-border">
             <h3 className="text-sm font-semibold flex items-center gap-2"><CreditCard className="h-4 w-4 text-accent" /> Pending Payments</h3>
             {approvedRequests.map((item: any) => (
               <div key={item.request.id} className="flex items-center gap-3 rounded-xl bg-secondary/50 p-3">
-                <img src={item.event.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{item.event.title}</p>
-                  <p className="text-[10px] text-accent">Approved — Pay to join</p>
-                </div>
-                <button onClick={() => navigate(`/payment/${item.event.id}`)} className="gradient-primary rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow">
-                  Pay ${item.event.budget}
-                </button>
+                <img src={item.event.image} className="h-10 w-10 rounded-lg object-cover" />
+                <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{item.event.title}</p><p className="text-[10px] text-accent">Approved — Pay to join</p></div>
+                <button onClick={() => navigate(`/payment/${item.event.id}`)} className="gradient-primary rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow">Pay ${item.event.budget}</button>
               </div>
             ))}
           </div>
         )}
 
+        {/* Tabs */}
         <div className="flex rounded-xl glass-card p-1">
-          {['events', 'tickets', 'reviews', 'friends'].map((key) => (
-            <button 
-              key={key} 
-              onClick={() => setActiveTab(key as any)}
-              className={`flex-1 rounded-lg py-2 text-xs font-medium transition-all ${activeTab === key ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'}`}
-            >
-              {key.charAt(0).toUpperCase() + key.slice(1)}
-            </button>
+          {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }, { id: 'tickets', label: 'Tickets', icon: Ticket }, { id: 'friends', label: 'Friends', icon: UserPlus }].map((tab) => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex-1 flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-all ${activeTab === tab.id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'}`}><tab.icon className="h-3.5 w-3.5" />{tab.label}</button>
           ))}
         </div>
 
-        <div className="space-y-2 min-h-[200px]">
+        <div className="space-y-4 min-h-[300px]">
           {activeTab === 'events' && (
             <div className="space-y-6">
-              {loadingCreatedEvents && createdEvents.length === 0 && joinedEventsOnly.length === 0 && (
-                <p className="py-8 text-center text-xs text-muted-foreground">Loading…</p>
-              )}
-
               <div className="space-y-3">
-                <h3 className="px-1 text-sm font-semibold text-foreground">Upcoming</h3>
-                {displayCreatedUpcoming.length + displayJoinedUpcoming.length === 0 ? (
-                  <p className="rounded-xl bg-secondary/40 py-8 text-center text-xs text-muted-foreground">No upcoming events.</p>
-                ) : (
-                  <>
-                    {displayCreatedUpcoming.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Created</p>
-                        {displayCreatedUpcoming.map((e) => (
-                          <button
-                            key={e.id}
-                            type="button"
-                            onClick={() => navigate(`/event/${e.id}`)}
-                            className="flex w-full items-center gap-3 rounded-xl border border-primary/20 bg-card/50 p-3 text-left glass-card"
-                          >
-                            <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium">{e.title}</p>
-                              <p className="text-[10px] text-accent">
-                                {e.date} · {e.location || '—'}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {displayJoinedUpcoming.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Joined</p>
-                        {displayJoinedUpcoming.map((e) => (
-                          <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
-                            <button type="button" onClick={() => navigate(`/event/${e.id}`)} className="min-w-0 flex-1 text-left">
-                              <p className="truncate text-xs font-medium">{e.title}</p>
-                              <p className="text-[10px] text-muted-foreground">{e.date} · {e.location || '—'}</p>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleLeaveFromProfile(e.id)}
-                              disabled={leavingEventId === e.id}
-                              className="rounded-full bg-secondary px-3 py-1 text-[10px]"
-                            >
-                              {leavingEventId === e.id ? '...' : 'Leave'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
+                <h3 className="text-sm font-semibold px-1">Upcoming</h3>
+                {[...displayCreatedUpcoming, ...displayJoinedUpcoming].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No upcoming events.</p>}
+                
+                {displayCreatedUpcoming.map(e => (
+                   <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 border border-primary/20" onClick={() => navigate(`/event/${e.id}`)}>
+                     <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
+                     <div className="flex-1">
+                       <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                       <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-bold uppercase">Created</span>
+                     </div>
+                     <div className="text-right">
+                       <p className="text-[10px] text-muted-foreground">{e.date}</p>
+                     </div>
+                   </div>
+                ))}
+
+                {displayJoinedUpcoming.map(e => (
+                   <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
+                     <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
+                     <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                       <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                       <div className="flex items-center gap-2">
+                         <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent font-bold uppercase">Joined</span>
+                         <p className="text-[10px] text-muted-foreground">{e.date}</p>
+                       </div>
+                     </div>
+                     <button onClick={() => handleLeaveFromProfile(e.id)} disabled={leavingEventId === e.id} className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-full transition-colors">{leavingEventId === e.id ? '...' : 'Leave'}</button>
+                   </div>
+                ))}
               </div>
 
-              <div className="space-y-3">
-                <h3 className="px-1 text-sm font-semibold text-foreground">Past</h3>
-                {displayCreatedPast.length + displayJoinedPast.length === 0 ? (
-                  <p className="rounded-xl bg-secondary/40 py-8 text-center text-xs text-muted-foreground">No past events.</p>
-                ) : (
-                  <>
-                    {displayCreatedPast.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Created</p>
-                        {displayCreatedPast.map((e) => (
-                          <button
-                            key={e.id}
-                            type="button"
-                            onClick={() => navigate(`/event/${e.id}`)}
-                            className="flex w-full items-center gap-3 rounded-xl border border-border/60 p-3 text-left glass-card opacity-90"
-                          >
-                            <img src={e.image} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium">{e.title}</p>
-                              <p className="text-[10px] text-muted-foreground">
-                                {e.date} · {e.location || '—'}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
+              <div className="space-y-3 pt-2">
+                <h3 className="text-sm font-semibold opacity-70 px-1">Past Events</h3>
+                {[...displayCreatedPast, ...displayJoinedPast].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No past events recorded.</p>}
+                {[...displayCreatedPast, ...displayJoinedPast].map(e => {
+                  const isCreated = createdIds.has(e.id);
+                  return (
+                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 opacity-60 grayscale-[0.5]" onClick={() => navigate(`/event/${e.id}`)}>
+                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
+                      <div className="flex-1">
+                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${isCreated ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
+                          {isCreated ? 'Created' : 'Joined'}
+                        </span>
                       </div>
-                    )}
-                    {displayJoinedPast.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="px-1 text-[10px] font-semibold uppercase text-muted-foreground">Joined</p>
-                        {displayJoinedPast.map((e) => (
-                          <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 opacity-90">
-                            <button type="button" onClick={() => navigate(`/event/${e.id}`)} className="min-w-0 flex-1 text-left">
-                              <p className="truncate text-xs font-medium">{e.title}</p>
-                              <p className="text-[10px] text-muted-foreground">{e.date} · {e.location || '—'}</p>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleLeaveFromProfile(e.id)}
-                              disabled={leavingEventId === e.id}
-                              className="rounded-full bg-secondary px-3 py-1 text-[10px]"
-                            >
-                              {leavingEventId === e.id ? '...' : 'Leave'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
+                      <p className="text-[10px] text-muted-foreground">{e.date}</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
-          {activeTab === 'tickets' && <p className="text-center py-8 text-xs text-muted-foreground">No tickets yet.</p>}
-          {activeTab === 'friends' && <p className="text-center py-8 text-xs text-muted-foreground">No friends yet.</p>}
+
+          {activeTab === 'favorites' && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold px-1">Saved Events</h3>
+              {favorites.length === 0 ? (
+                <p className="text-center py-8 text-xs text-muted-foreground">You haven't saved any events yet.</p>
+              ) : (
+                favorites.map(e => (
+                  <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
+                    <img src={e.image} className="h-10 w-10 rounded-lg object-cover cursor-pointer" onClick={() => navigate(`/event/${e.id}`)} />
+                    <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                      <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                      <p className="text-[10px] text-muted-foreground">{e.date} · {e.location}</p>
+                    </div>
+                    <button onClick={() => handleRemoveFavorite(e.id)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {activeTab === 'tickets' && <p className="text-center py-8 text-xs text-muted-foreground">No digital tickets available yet.</p>}
+          {activeTab === 'friends' && <p className="text-center py-8 text-xs text-muted-foreground">No connections found.</p>}
         </div>
       </motion.div>
       <BottomNav />
