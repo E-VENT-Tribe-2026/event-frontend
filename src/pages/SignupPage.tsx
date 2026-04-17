@@ -209,7 +209,15 @@ return (
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50" />
+              <input
+                  type="text"
+                  value={dob}
+                  placeholder="Date of Birth"
+                  onFocus={(e) => (e.target.type = "date")}
+                  onBlur={(e) => (e.target.type = dob ? "date" : "text")}
+                  onChange={(e) => setDob(e.target.value)}
+                  className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50"
+                />
               {errors.dob && <p className="text-xs text-destructive mt-1">{errors.dob}</p>}
             </div>
             <select value={gender} onChange={e => setGender(e.target.value)} className="rounded-xl bg-secondary px-3 text-xs outline-none focus:ring-2 focus:ring-primary/50 appearance-none">

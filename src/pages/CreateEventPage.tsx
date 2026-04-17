@@ -1,337 +1,299 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ShieldCheck } from 'lucide-react';
-import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
-import { supabase } from '@/lib/supabase';
-import { CATEGORIES } from '@/lib/seedData';
-import { motion } from 'framer-motion';
+import { useState, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, Mail, Lock, User, Camera, ChevronDown } from 'lucide-react';
+import { setCurrentUserFromOAuth } from '@/lib/storage';
+import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
-import BottomNav from '@/components/BottomNav';
 import { getApiUrl } from '@/lib/api';
-import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { getAuthToken, setAuthToken } from '@/lib/auth';
-import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
-import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
-import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
+import { setAuthToken } from '@/lib/auth';
+import { fetchAuthUserFromToken } from '@/lib/authProfile';
+import { supabase } from '@/lib/supabase';
 
-function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
-  if (!res || typeof res !== 'object') return {};
-  const r = res as Record<string, unknown>;
-  const fromObj = (o: Record<string, unknown>) => {
-    const id = o.id;
-    const created =
-      (typeof o.created_by === 'string' && o.created_by) ||
-      (typeof o.createdBy === 'string' && o.createdBy) ||
-      undefined;
-    return { id: typeof id === 'string' ? id : undefined, created_by: created };
-  };
-  const top = fromObj(r);
-  if (top.created_by || top.id) return top;
-  const data = r.data;
-  if (data && typeof data === 'object') return fromObj(data as Record<string, unknown>);
-  return {};
-}
+const ALL_INTERESTS = ['Music', 'Sports', 'Gaming', 'Movies', 'Study', 'Travel', 'Tech', 'Art', 'Fitness', 'Coffee', 'Networking', 'Food', 'Wellness'];
+const MIN_AGE = 18;
 
-const EVENT_IMAGES = [
-  'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80',
-  'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600&q=80',
-  'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=600&q=80',
-  'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=600&q=80',
-];
-
-// Germany centre fallback
-const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
-
-export default function CreateEventPage() {
+export default function SignupPage() {
   const navigate = useNavigate();
-  const user = getCurrentUser();
-
-  const [form, setForm] = useState({
-    title: '',
-    description: '',
-    category: 'Music',
-    date: '',
-    time: '',
-    location: '',
-    budget: '0',
-    limit: '50',
-    isPrivate: false,
-    requiresApproval: false,
-  });
-
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [dob, setDob] = useState('');
+  const [gender, setGender] = useState('');
+  const [interests, setInterests] = useState<string[]>([]);
+  const [profilePhoto, setProfilePhoto] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
+ const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showInterests, setShowInterests] = useState(false);
 
-  // Coordinates — start at Germany until user grants geolocation or picks a location
-  const [pickedLat, setPickedLat] = useState<number | null>(null);
-  const [pickedLng, setPickedLng] = useState<number | null>(null);
-  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>(GERMANY_DEFAULT);
-
-  const update = (key: string, value: string | boolean) => {
-    setForm(f => ({ ...f, [key]: value }));
-    if (errors[key]) setErrors(prev => { const n = { ...prev }; delete n[key]; return n; });
+  const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => setProfilePhoto(reader.result as string);
+    reader.readAsDataURL(file);
   };
 
-  // Called by LocationSearchInput when the user selects a search result
-  const handleLocationSelect = (result: LocationResult) => {
-    setPickedLat(result.lat);
-    setPickedLng(result.lng);
-    setMapCenter({ lat: result.lat, lng: result.lng });
-    update('location', result.displayName);
-    setErrors(prev => { const n = { ...prev }; delete n.mapLocation; return n; });
+  const toggleInterest = (i: string) => {
+    setInterests(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]);
   };
 
-  // Called by LocationSearchInput once geolocation resolves
-  const handleUserLocation = (coords: { lat: number; lng: number }) => {
-    setMapCenter(coords);
-    // Only set the marker if the user hasn't already picked one
-    setPickedLat(prev => prev ?? null);
-    setPickedLng(prev => prev ?? null);
+  const isAtLeastAge = (isoDate: string, minAge: number) => {
+    const [y, m, d] = isoDate.split('-').map(Number);
+    if (!y || !m || !d) return false;
+    const dobDate = new Date(y, m - 1, d);
+    if (Number.isNaN(dobDate.getTime())) return false;
+    const today = new Date();
+    const cutoff = new Date(today.getFullYear() - minAge, today.getMonth(), today.getDate());
+    return dobDate <= cutoff;
   };
-
-  // Manual map click still works
-  const onMapLocationChange = (lat: number, lng: number) => {
-    setPickedLat(lat);
-    setPickedLng(lng);
-    setErrors(prev => { const n = { ...prev }; delete n.mapLocation; return n; });
-  };
-
-  const todayIso = new Date().toISOString().split('T')[0];
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!form.title.trim()) e.title = 'Title is required';
-    if (!form.description.trim()) e.description = 'Description is required';
-    if (!form.date) e.date = 'Date is required';
-    if (!form.time) e.time = 'Time is required';
-    if (!form.location.trim()) e.location = 'Location name is required';
-    if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
-      e.mapLocation = 'Search for a location or click the map to set the event pin';
-    }
+    if (!name.trim()) e.name = 'Name is required';
+    if (!email.trim()) e.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
+    if (!password) e.password = 'Password is required';
+    else if (password.length < 6) e.password = 'Minimum 6 characters';
+    if (password !== confirmPw) e.confirmPw = 'Passwords do not match';
+    if (!dob) e.dob = 'Date of birth is required';
+    else if (!isAtLeastAge(dob, MIN_AGE)) e.dob = `You must be at least ${MIN_AGE} years old`;
+    if (!gender) e.gender = 'Gender is required';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
-  const resolveApiToken = async (): Promise<string | null> => {
-    const existing = getAuthToken();
-    if (existing) return existing;
-    if (supabase) {
-      const { data } = await supabase.auth.getSession();
-      const token = data?.session?.access_token ?? null;
-      if (token) { setAuthToken(token); return token; }
-    }
-    return null;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
-    if (!validate()) return;
-
+    if (!validate() || isSubmitting) return;
     setIsSubmitting(true);
+
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
-
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    
     try {
-      const token = await resolveApiToken();
-      if (!token) throw new Error('You must be logged in to publish an event.');
-
-      const startObj = new Date(`${form.date}T${form.time}:00`);
-      const endObj = new Date(startObj.getTime() + 7200000);
-      const safeISO = (d: Date) => d.toISOString().split('.')[0] + 'Z';
-
-      const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
-
-      const payload = {
-        title: form.title.trim(),
-        description: form.description.trim(),
-        category: form.category,
-        cost: Math.round(Number(form.budget)) || 0,
-        max_capacity: Math.floor(Number(form.limit)) || 50,
-        start_datetime: safeISO(startObj),
-        end_datetime: safeISO(endObj),
-        location_name: locationName,
-        latitude: pickedLat!,
-        longitude: pickedLng!,
-      };
-
-      const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/`), {
+      const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, full_name: name, dob, gender, interests }),
         signal: controller.signal,
-        mode: 'cors',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token.trim()}`,
-        },
-        body: JSON.stringify(payload),
       });
 
-      clearTimeout(timeoutId);
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Server failed (HTTP ${res.status})`);
+        const isExisting = res.status === 409 || data.message?.toLowerCase().includes('exists');
+        setToast({ 
+          show: true, 
+          message: isExisting ? 'An account with this email already exists.' : (data.detail || data.message || 'Signup failed'), 
+          type: 'error' 
+        });
+        setIsSubmitting(false);
+        return;
       }
 
-      const responseData = await res.json();
-      const { id: apiEventId, created_by: apiCreatedBy } = extractCreatedEventPayload(responseData);
-      const authUser = supabase == null ? undefined : (await supabase.auth.getUser()).data?.user ?? undefined;
+      if (!data.access_token) {
+        setToast({
+          show: true,
+          message: data.message || 'Check your email to confirm your account, then sign in.',
+          type: 'success',
+        });
+        setIsSubmitting(false);
+        window.clearTimeout(timeout);
+        navigate('/login');
+        return;
+      }
 
-      const organizerId = apiCreatedBy || user?.id || authUser?.id || 'current_user';
-      const organizerName =
-        user?.name ||
-        (typeof authUser?.user_metadata?.full_name === 'string' ? authUser.user_metadata.full_name : undefined) ||
-        (typeof authUser?.user_metadata?.name === 'string' ? authUser.user_metadata.name : undefined) ||
-        (authUser?.email ? authUser.email.split('@')[0] : undefined) ||
-        'Organizer';
-      const organizerAvatar =
-        pickImageUrl(
-          user?.profilePhoto,
-          user?.avatar,
-          typeof authUser?.user_metadata?.avatar_url === 'string' ? authUser.user_metadata.avatar_url : null,
-        ) ?? getGeneratedAvatarUrl(organizerId);
+      setAuthToken(data.access_token);
+      if (supabase) {
+        await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token || '',
+        });
+      }
 
-      const localEvent: EventItem = {
-        id: apiEventId || crypto.randomUUID(),
-        ...payload,
-        date: form.date,
-        time: form.time,
-        location: locationName,
-        lat: payload.latitude,
-        lng: payload.longitude,
-        budget: payload.cost,
-        participantsLimit: payload.max_capacity,
-        participants: [],
-        image: EVENT_IMAGES[0],
-        organizer: organizerName,
-        organizerId,
-        organizerAvatar,
-        isPrivate: form.isPrivate,
-        requiresApproval: form.requiresApproval,
-        isDraft: false,
-        reviews: [],
-        reports: [],
-        collaborators: [],
-      };
+      const me = await fetchAuthUserFromToken(data.access_token);
+      if (!me?.id) {
+        setToast({
+          show: true,
+          message: 'Account created but profile id could not be loaded. Try signing in.',
+          type: 'error',
+        });
+        setIsSubmitting(false);
+        window.clearTimeout(timeout);
+        navigate('/login');
+        return;
+      }
 
-      addEvent(localEvent);
-      setToast({ show: true, message: 'Event Published Successfully!', type: 'success' });
-      setTimeout(() => navigate('/home'), 1500);
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      let msg = err.message;
-      if (err.name === 'AbortError') msg = 'The server took too long to wake up. Please try again in 10 seconds.';
-      else if (msg === 'Failed to fetch') msg = 'Network Error: The server is likely asleep or rejecting the connection.';
-      setToast({ show: true, message: msg, type: 'error' });
-    } finally {
+      setCurrentUserFromOAuth({
+        id: me.id,
+        email: me.email || email,
+        name,
+        avatar: profilePhoto || undefined,
+      });
+
+      navigate('/home');
+    } catch {
+      setToast({ show: true, message: 'Server unreachable. Please try again later.', type: 'error' });
       setIsSubmitting(false);
+    } finally {
+      window.clearTimeout(timeout);
     }
   };
 
-  const inputCls = (field: string) =>
-    `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none focus:ring-2 ${
-      errors[field] ? 'ring-1 ring-destructive' : 'focus:ring-primary/50'
-    } transition-all`;
+  const handleGoogleSignup = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) {
+      setToast({ show: true, message: 'Google sign-up failed', type: 'error' });
+    }
+  };
 
-  return (
-    <div className="min-h-screen bg-background pb-20">
-      <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
+  const inputCls = "w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 transition-all";
 
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-        <button onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5 text-foreground" /></button>
-        <h1 className="text-lg font-bold text-foreground">Create Event</h1>
-      </header>
-
-      <motion.form
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        onSubmit={handleSubmit}
-        className="mx-auto max-w-lg space-y-4 px-4 pt-4"
-      >
-        {/* Title */}
-        <div>
-          <input placeholder="Event Title" value={form.title} onChange={e => update('title', e.target.value)} className={inputCls('title')} />
-          {errors.title && <span className="text-[10px] text-destructive px-2">{errors.title}</span>}
+return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8 relative">
+      <AppToast 
+        message={toast.message} 
+        type={toast.type} 
+        show={toast.show} 
+        onClose={() => setToast(t => ({ ...t, show: false }))} 
+      />
+      
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Join E-VENT and discover events</p>
         </div>
 
-        {/* Description */}
-        <div>
-          <textarea placeholder="Description" rows={3} value={form.description} onChange={e => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
-          {errors.description && <span className="text-[10px] text-destructive px-2">{errors.description}</span>}
-        </div>
-
-        {/* Category */}
-        <select value={form.category} onChange={e => update('category', e.target.value)} className={inputCls('category')}>
-          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-
-        {/* Date + Time */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <input type="date" min={todayIso} value={form.date} onChange={e => update('date', e.target.value)} className={inputCls('date')} />
-            {errors.date && <span className="text-[10px] text-destructive px-2">{errors.date}</span>}
-          </div>
-          <div>
-            <input type="time" value={form.time} onChange={e => update('time', e.target.value)} className={inputCls('time')} />
-            {errors.time && <span className="text-[10px] text-destructive px-2">{errors.time}</span>}
-          </div>
-        </div>
-
-        {/* Location search */}
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-foreground">Location</label>
-          <LocationSearchInput
-            value={form.location}
-            onChange={(v) => update('location', v)}
-            onSelect={handleLocationSelect}
-            onUserLocation={handleUserLocation}
-            placeholder="Search venue, address or city…"
-            error={errors.location}
-          />
-        </div>
-
-        {/* Map — centres on mapCenter, marker on pickedLat/Lng */}
-        <div className="relative z-10 space-y-1">
-          <label className="block text-xs font-medium text-foreground">
-            Pin on map
-            <span className="ml-1 text-[10px] text-muted-foreground">(search above or click to set manually)</span>
-          </label>
-          <LocationPickerMap
-            latitude={pickedLat}
-            longitude={pickedLng}
-            onLocationChange={onMapLocationChange}
-          />
-          {errors.mapLocation && <span className="block text-[10px] text-destructive px-2">{errors.mapLocation}</span>}
-        </div>
-
-        {/* Budget + Capacity */}
-        <div className="grid grid-cols-2 gap-3">
-          <input type="number" placeholder="Budget ($)" value={form.budget} onChange={e => update('budget', e.target.value)} className={inputCls('budget')} />
-          <div className="px-2 flex flex-col justify-center">
-            <label className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Capacity: {form.limit}</label>
-            <input type="range" min="10" max="500" value={form.limit} onChange={e => update('limit', e.target.value)} className="w-full accent-primary h-1.5" />
-          </div>
-        </div>
-
-        {/* Requires approval toggle */}
-        <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-          <div className="flex items-center gap-2 text-sm text-foreground"><ShieldCheck className="h-4 w-4" /> Require Approval</div>
-          <button type="button" onClick={() => update('requiresApproval', !form.requiresApproval)} className={`h-6 w-11 rounded-full transition-colors ${form.requiresApproval ? 'bg-primary' : 'bg-muted'}`}>
-            <div className={`h-5 w-5 rounded-full bg-white transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        {/* Profile Photo */}
+        <div className="flex justify-center">
+          <button type="button" onClick={() => fileRef.current?.click()} className="relative h-20 w-20 rounded-full bg-secondary ring-2 ring-primary/30 overflow-hidden group">
+            {profilePhoto ? (
+              <img src={profilePhoto} alt="Profile" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <Camera className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
+              </div>
+            )}
+            <div className="absolute inset-0 bg-background/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <Camera className="h-5 w-5 text-foreground" />
+            </div>
           </button>
+          <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-3 pt-4">
-          <button type="button" onClick={() => navigate(-1)} className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground">Cancel</button>
-          <button type="submit" disabled={isSubmitting} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50">
-            {isSubmitting ? 'Publishing...' : 'Publish Event'}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {/* Name */}
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type="text" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className={inputCls} />
+          </div>
+          {errors.name && <p className="text-xs text-destructive px-1">{errors.name}</p>}
+
+          {/* Email */}
+          <div className="relative">
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
+          </div>
+          {errors.email && <p className="text-xs text-destructive px-1">{errors.email}</p>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <input
+                  type="text"
+                  value={dob}
+                  placeholder="Date of Birth"
+                  onFocus={(e) => (e.target.type = "date")}
+                  onBlur={(e) => (e.target.type = dob ? "date" : "text")}
+                  onChange={(e) => setDob(e.target.value)}
+                  className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              {errors.dob && <p className="text-xs text-destructive mt-1">{errors.dob}</p>}
+            </div>
+            <select value={gender} onChange={e => setGender(e.target.value)} className="rounded-xl bg-secondary px-3 text-xs outline-none focus:ring-2 focus:ring-primary/50 appearance-none">
+              <option value="">Gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          {/* Interests */}
+          <button type="button" onClick={() => setShowInterests(!showInterests)} className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors">
+            <span className="truncate">
+              {interests.length ? interests.join(', ') : 'Select Interests'}
+            </span>
+            <ChevronDown className={`h-4 w-4 transition-transform ${showInterests ? 'rotate-180' : ''}`} />
           </button>
+          
+          <AnimatePresence>
+            {showInterests && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="flex flex-wrap gap-2 p-3 bg-secondary/50 rounded-xl border border-border/50">
+                  {ALL_INTERESTS.map(i => (
+                    <button key={i} type="button" onClick={() => toggleInterest(i)} className={`px-3 py-1 text-[10px] font-medium rounded-full transition-all ${interests.includes(i) ? 'bg-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+                      {i}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Password */}
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} />
+            <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+              {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          {errors.password && <p className="text-xs text-destructive px-1">{errors.password}</p>}
+
+          {/* Confirm Password */}
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input type={showConfirmPw ? 'text' : 'password'} placeholder="Confirm Password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} className={inputCls} />
+            <button type="button" onClick={() => setShowConfirmPw(!showConfirmPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+              {showConfirmPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          {errors.confirmPw && <p className="text-xs text-destructive px-1">{errors.confirmPw}</p>}
+
+          <button type="submit" disabled={isSubmitting} className="w-full gradient-primary rounded-xl py-3 text-sm font-bold text-primary-foreground shadow-glow transition-all active:scale-[0.98] disabled:opacity-70">
+            {isSubmitting ? 'Creating Account...' : 'Create Account'}
+          </button>
+        </form>
+
+        <div className="relative py-2">
+          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border"></div></div>
+          <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">or join with</span></div>
         </div>
-      </motion.form>
-      <BottomNav />
+        
+        <button onClick={handleGoogleSignup} className="w-full flex items-center justify-center gap-3 rounded-xl glass-card py-3 hover:shadow-glow transition-all active:scale-[0.98]">
+          <svg width="18" height="18" viewBox="0 0 24 24">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+          </svg>
+          <span className="text-sm font-medium">Google</span>
+        </button>
+
+        <p className="text-center text-sm text-muted-foreground">
+          Already have an account? <Link to="/login" className="text-primary font-medium hover:underline">Sign In</Link>
+        </p>
+      </motion.div>
     </div>
-  );
+)
 }
