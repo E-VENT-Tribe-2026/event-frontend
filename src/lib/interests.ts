@@ -1,0 +1,15 @@
+export const ALL_INTERESTS = [
+  'Music',
+  'Sports',
+  'Gaming',
+  'Movies',
+  'Study',
+  'Travel',
+  'Tech',
+  'Art',
+  'Fitness',
+  'Coffee',
+  'Networking',
+  'Food',
+  'Wellness',
+] as const;

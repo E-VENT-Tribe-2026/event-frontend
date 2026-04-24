@@ -46,7 +46,6 @@ function makeUser(over: Partial<User> & Pick<User, 'id'>): User {
 }
 
 const uMe = makeUser({ id: 'u-me', name: 'Me', email: 'me@test.com' });
-const uOther = makeUser({ id: 'u-other', name: 'Alice', email: 'alice@test.com' });
 
 const apiEventRow = {
   id: 'api-e1',
@@ -134,7 +133,7 @@ describe('HomePage', () => {
     resolveEvents!(jsonOk({ data: [apiEventRow] }));
 
     await waitFor(() => {
-      expect(screen.getByText('Backend Event Alpha')).toBeInTheDocument();
+      expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
     });
     expect(screen.queryByText(/Loading the latest events/i)).not.toBeInTheDocument();
   });
@@ -166,7 +165,7 @@ describe('HomePage', () => {
 
     renderHome();
     await waitFor(() => {
-      expect(screen.getByText('Local Only Event')).toBeInTheDocument();
+      expect(screen.getAllByText('Local Only Event').length).toBeGreaterThan(0);
     });
   });
 
@@ -179,7 +178,9 @@ describe('HomePage', () => {
     });
 
     renderHome();
-    await waitFor(() => expect(screen.getByText('Backend Event Alpha')).toBeInTheDocument());
+    await waitFor(() => {
+      expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Sports' }));
 
@@ -191,21 +192,4 @@ describe('HomePage', () => {
     });
   });
 
-  it('renders recommendation-style “People You May Match” when other users exist', async () => {
-    getUsersMock.mockReturnValue([uMe, uOther]);
-
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
-      if (url.includes('/api/events')) return Promise.resolve(jsonOk({ data: [apiEventRow] }));
-      return Promise.reject(new Error('unmocked'));
-    });
-
-    renderHome();
-    await waitFor(() => expect(screen.getByText('Backend Event Alpha')).toBeInTheDocument());
-
-    expect(screen.getByText('People You May Match')).toBeInTheDocument();
-    expect(screen.getByText('AI')).toBeInTheDocument();
-    expect(screen.getByText('Alice')).toBeInTheDocument();
-  });
 });

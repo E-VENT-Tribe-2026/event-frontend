@@ -1,6 +1,6 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { getEvents, getCurrentUser, addReview, reportEvent, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, deleteEvent, type EventItem } from '@/lib/storage';
-import { ArrowLeft, MapPin, Clock, Users, Star, Flag, Send, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Trash2 } from 'lucide-react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { getEvents, getCurrentUser, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, deleteEvent, type EventItem } from '@/lib/storage';
+import { ArrowLeft, MapPin, Clock, Users, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import AppToast from '@/components/AppToast';
@@ -15,6 +15,7 @@ import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 import EventLocationMap from '@/components/EventLocationMap';
+import { isEventUpcoming } from '@/lib/eventTime';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
@@ -31,21 +32,19 @@ async function readApiErrorMessage(res: Response): Promise<string> {
 export default function EventDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [events, setEventsState] = useState(getEvents());
   const [apiEvent, setApiEvent] = useState<EventItem | null>(null);
+  const [apiEventStatus, setApiEventStatus] = useState<string | null>(null);
   const [loadingApi, setLoadingApi] = useState(true);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [showReviewForm, setShowReviewForm] = useState(false);
-  const [reviewText, setReviewText] = useState('');
-  const [reviewRating, setReviewRating] = useState(5);
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportReason, setReportReason] = useState('');
   const [showVenuePaymentModal, setShowVenuePaymentModal] = useState(false);
   const [apiParticipants, setApiParticipants] = useState<Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }>>([]);
   const [isUpdatingParticipation, setIsUpdatingParticipation] = useState(false);
   const [attendeeCount, setAttendeeCount] = useState<number | null>(null);
   const [myParticipationStatus, setMyParticipationStatus] = useState<ParticipationStatus | null>(null);
   const [participationKnown, setParticipationKnown] = useState(false);
+  const [organizerNameOverride, setOrganizerNameOverride] = useState<string>('');
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
   const [backendAuthUserId, setBackendAuthUserId] = useState<string | null>(null);
@@ -53,7 +52,12 @@ export default function EventDetailsPage() {
   const allUsers = getUsers();
 
   const localEvent = useMemo(() => events.find((e) => e.id === id) ?? null, [events, id]);
-  const event = apiEvent ?? localEvent ?? null;
+  const routeEvent = useMemo(() => {
+    const state = location.state as { event?: EventItem } | null;
+    if (!state?.event || !id) return null;
+    return state.event.id === id ? state.event : null;
+  }, [location.state, id]);
+  const event = apiEvent ?? routeEvent ?? localEvent ?? null;
   const useApiParticipation = apiEvent !== null;
 
   const getApiToken = async (): Promise<string | null> => {
@@ -104,19 +108,36 @@ export default function EventDetailsPage() {
       return;
     }
 
+    let participantsList: Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }> = [];
     try {
-      const cRes = await fetch(getApiUrl(`/api/participants/${id}/participants/count`));
-      if (cRes.ok) {
-        const c = await cRes.json().catch(() => ({}));
-        if (typeof c.count === 'number') setAttendeeCount(c.count);
-        else setAttendeeCount(null);
+      const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), {
+        headers: { Accept: 'application/json' },
+      });
+      if (pRes.ok) {
+        const list = await pRes.json().catch(() => []);
+        participantsList = Array.isArray(list) ? list : [];
+        setAttendeeCount(participantsList.length);
+        if (apiEvent?.organizerId) {
+          const ownerRow = participantsList.find((p) => sameAuthUserId(p.user_id, apiEvent.organizerId));
+          const ownerName = String(ownerRow?.profiles?.full_name || '').trim();
+          setOrganizerNameOverride(ownerName);
+        } else {
+          setOrganizerNameOverride('');
+        }
       }
     } catch {
-      setAttendeeCount(null);
+      // Keep previous attendee count if backend temporarily fails.
     }
 
     const token = await getApiToken();
-    if (!token || !user?.id) {
+    let authUserId: string | null = backendAuthUserId;
+    if (token && !authUserId) {
+      const me = await fetchAuthUserFromToken(token);
+      authUserId = me?.id ?? null;
+    }
+    if (!authUserId) authUserId = user?.id ?? null;
+
+    if (!authUserId) {
       setMyParticipationStatus('none');
       setParticipationKnown(true);
       setApiParticipants([]);
@@ -124,36 +145,39 @@ export default function EventDetailsPage() {
     }
 
     let status: ParticipationStatus = 'none';
-    try {
-      const sRes = await fetch(getApiUrl(`/api/participants/${id}/my-status`), {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      });
-      if (sRes.ok) {
-        const data = await sRes.json().catch(() => ({}));
-        if (data.status === 'going') status = 'going';
-        else if (data.status === 'removed') status = 'removed';
+    const inferredJoined = Boolean(
+      participantsList.some(
+        (p) =>
+          sameAuthUserId(p.user_id, authUserId) && String(p.status || 'going').toLowerCase() !== 'removed',
+      ),
+    );
+    if (token) {
+      try {
+        const sRes = await fetch(getApiUrl(`/api/participants/${id}/my-status`), {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        });
+        if (sRes.ok) {
+          const data = await sRes.json().catch(() => ({}));
+          const st = typeof data?.status === 'string' ? data.status : '';
+          if (st === 'going') status = 'going';
+          else if (st === 'removed') status = 'removed';
+          else if (st === 'none') status = 'none';
+          else if (inferredJoined) status = 'going';
+        } else if (inferredJoined) {
+          status = 'going';
+        }
+      } catch {
+        status = inferredJoined ? 'going' : 'none';
       }
-    } catch {
-      status = 'none';
+    } else {
+      status = inferredJoined ? 'going' : 'none';
     }
     setMyParticipationStatus(status);
 
     const isOwner =
-      sameAuthUserId(apiEvent.organizerId, backendAuthUserId) || sameAuthUserId(apiEvent.organizerId, user?.id);
+      sameAuthUserId(apiEvent.organizerId, authUserId) || sameAuthUserId(apiEvent.organizerId, user?.id);
     if (isOwner || status === 'going') {
-      try {
-        const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
-        if (pRes.ok) {
-          const list = await pRes.json().catch(() => []);
-          setApiParticipants(Array.isArray(list) ? list : []);
-        } else {
-          setApiParticipants([]);
-        }
-      } catch {
-        setApiParticipants([]);
-      }
+      setApiParticipants(participantsList);
     } else {
       setApiParticipants([]);
     }
@@ -186,10 +210,16 @@ export default function EventDetailsPage() {
     fetch(getApiUrl(`/api/events/${id}`))
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => {
-        if (!cancelled) setApiEvent(mapApiEventToItem(data));
+        if (!cancelled) {
+          setApiEvent(mapApiEventToItem(data));
+          setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setApiEvent(null);
+        if (!cancelled) {
+          setApiEvent(null);
+          setApiEventStatus(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingApi(false);
@@ -241,9 +271,9 @@ export default function EventDetailsPage() {
   const wasRemovedFromEvent = Boolean(
     useApiParticipation && user && participationKnown && myParticipationStatus === 'removed',
   );
+  const isCancelledEvent = String(apiEventStatus || '').toLowerCase() === 'cancelled';
+  const canAccessEventChat = Boolean(user && !isCancelledEvent && (isEventOwner || hasJoined));
 
-  const alreadyReviewed = user && event ? (event.reviews || []).some(r => r.userId === user?.id) : false;
-  const alreadyReported = user && event ? (event.reports || []).some(r => r.userId === user?.id) : false;
   const existingRequest = user && event ? getJoinRequests().find(r => r.eventId === event.id && r.userId === user.id) : null;
 
   const participantUsers = useMemo(() => {
@@ -302,7 +332,7 @@ export default function EventDetailsPage() {
       return;
     }
     document.title = formatPageTitle(ev.title);
-  }, [loadingApi, localEvent, apiEvent, apiEvent?.id, apiEvent?.title, localEvent?.id, localEvent?.title]);
+  }, [loadingApi, localEvent, routeEvent, apiEvent, apiEvent?.id, apiEvent?.title, localEvent?.id, localEvent?.title, routeEvent?.id, routeEvent?.title]);
 
   if (loadingApi && !localEvent) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
@@ -310,6 +340,8 @@ export default function EventDetailsPage() {
   if (!event) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
   }
+
+  const isPastEvent = !isEventUpcoming(event);
 
   if (wasRemovedFromEvent) {
     return (
@@ -349,6 +381,10 @@ export default function EventDetailsPage() {
   const handleVenuePaymentConfirm = async () => {
     setShowVenuePaymentModal(false);
     if (!event || !user) return;
+    if (isPastEvent) {
+      setToast({ show: true, message: 'This event has already ended.', type: 'error' });
+      return;
+    }
     setIsUpdatingParticipation(true);
     if (useApiParticipation) {
       await tryJoinViaApi();
@@ -363,18 +399,13 @@ export default function EventDetailsPage() {
   const handleJoinOrRequest = async () => {
     if (!user) { navigate('/login'); return; }
     if (!event) return;
-    if (isEventOwner) {
-      setToast({ show: true, message: 'You are hosting this event.', type: 'error' });
+    if (isPastEvent) {
+      setToast({ show: true, message: 'You cannot join or leave a past event.', type: 'error' });
       return;
     }
-    if (isOrganizer) {
-      setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
-      return;
-    }
-    if (isUpdatingParticipation) return;
-    setIsUpdatingParticipation(true);
-
     if (hasJoined) {
+      if (isUpdatingParticipation) return;
+      setIsUpdatingParticipation(true);
       if (useApiParticipation) {
         const token = await getApiToken();
         if (!token) {
@@ -393,6 +424,8 @@ export default function EventDetailsPage() {
             return;
           }
           await syncParticipationFromBackend();
+          leaveEvent(event.id, user.id);
+          setEventsState(getEvents());
           setToast({ show: true, message: 'You left the event.', type: 'success' });
         } catch {
           setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
@@ -407,6 +440,16 @@ export default function EventDetailsPage() {
       setIsUpdatingParticipation(false);
       return;
     }
+    if (isEventOwner) {
+      setToast({ show: true, message: 'You are hosting this event.', type: 'error' });
+      return;
+    }
+    if (isOrganizer) {
+      setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
+      return;
+    }
+    if (isUpdatingParticipation) return;
+    setIsUpdatingParticipation(true);
 
     if (event.requiresApproval) {
       if (existingRequest) {
@@ -528,43 +571,26 @@ export default function EventDetailsPage() {
     }
   };
 
-  const handleReview = () => {
-    if (!user || !reviewText.trim()) return;
-    addReview(event.id, { userId: user.id, user: user.name, text: reviewText, rating: reviewRating });
-    setEventsState(getEvents());
-    setReviewText('');
-    setShowReviewForm(false);
-    setToast({ show: true, message: 'Review submitted!', type: 'success' });
-  };
-
-  const handleReport = () => {
-    if (!user || !reportReason.trim()) return;
-    reportEvent(event.id, { userId: user.id, reason: reportReason, time: new Date().toISOString() });
-    setEventsState(getEvents());
-    setReportReason('');
-    setShowReportModal(false);
-    setToast({ show: true, message: 'Report submitted.', type: 'success' });
-  };
-
-  const reviews = event.reviews || [];
+  const isFreeEvent = !(Number(event.budget) > 0);
 
   const getJoinButtonText = () => {
     if (isUpdatingParticipation) return 'Please wait...';
     if (participationLoading) return 'Checking attendance…';
+    if (isPastEvent) return 'Event Ended';
     if (isEventOwner) return "You're hosting";
     if (hasJoined) return 'Leave Event';
     if (isOrganizer) return "Organizers can't join";
     if (event.requiresApproval) {
       if (existingRequest?.status === 'pending') return 'Request Pending...';
-      if (existingRequest?.status === 'approved') return event.budget > 0 ? 'Approved — Pay at Venue' : 'Approved — Join Now';
+      if (existingRequest?.status === 'approved') return !isFreeEvent ? 'Approved — Pay at Venue' : 'Approved — Join Now';
       if (existingRequest?.status === 'rejected') return 'Request Rejected';
       return 'Request to Join';
     }
-    return event.budget > 0 ? `Join — Pay $${event.budget} at Venue` : 'Join Event';
+    return !isFreeEvent ? `Join — Pay $${event.budget} at Venue` : 'Join Event';
   };
 
   const showSplitJoinLeave =
-    useApiParticipation && !event.requiresApproval && event.budget === 0 && !isEventOwner && !isOrganizer;
+    !event.requiresApproval && isFreeEvent && !isEventOwner && !isOrganizer && !isPastEvent;
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -606,7 +632,7 @@ export default function EventDetailsPage() {
           <div className="flex items-center gap-3">
             <img src={event.organizerAvatar} alt="" className="h-10 w-10 rounded-full bg-secondary ring-2 ring-primary/30" />
             <div>
-              <p className="text-sm font-medium text-foreground">{event.organizer}</p>
+              <p className="text-sm font-medium text-foreground">{event.organizer || organizerNameOverride || 'Organizer'}</p>
               <p className="text-xs text-muted-foreground">Organizer</p>
             </div>
           </div>
@@ -618,7 +644,7 @@ export default function EventDetailsPage() {
             <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4 text-accent" /><span className="truncate">{event.location}</span></div>
             <div className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4 text-primary" />{attendeeDisplayCount}/{event.participantsLimit}</div>
             <div className="flex items-center gap-2 text-foreground font-semibold">
-              {event.budget === 0 ? 'Free' : `$${event.budget} at venue`}
+              {isFreeEvent ? 'Free' : `$${event.budget} at venue`}
             </div>
           </div>
 
@@ -730,47 +756,6 @@ export default function EventDetailsPage() {
           <p className="text-xs text-muted-foreground">{event.location}</p>
         </div>
 
-        {/* Reviews */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-foreground">Reviews ({reviews.length})</h2>
-            {hasJoined && !alreadyReviewed && (
-              <button onClick={() => setShowReviewForm(!showReviewForm)} className="text-xs text-primary font-medium">Write Review</button>
-            )}
-          </div>
-
-          <AnimatePresence>
-            {showReviewForm && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="rounded-2xl glass-card p-4 space-y-3">
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map(s => (
-                    <button key={s} onClick={() => setReviewRating(s)}>
-                      <Star className={`h-5 w-5 ${s <= reviewRating ? 'fill-accent text-accent' : 'text-muted-foreground'}`} />
-                    </button>
-                  ))}
-                </div>
-                <textarea value={reviewText} onChange={e => setReviewText(e.target.value)} placeholder="Share your experience..." rows={2}
-                  className="w-full rounded-lg bg-secondary p-3 text-sm text-foreground outline-none resize-none focus:ring-2 focus:ring-primary/50" />
-                <button onClick={handleReview} className="flex items-center gap-2 gradient-primary rounded-lg px-4 py-2 text-xs font-semibold text-primary-foreground">
-                  <Send className="h-3 w-3" /> Submit
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {reviews.length > 0 ? reviews.map((r, i) => (
-            <div key={i} className="rounded-2xl glass-card p-4 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">{r.user}</span>
-                <div className="flex">{Array.from({ length: r.rating }, (_, j) => <Star key={j} className="h-3 w-3 fill-accent text-accent" />)}</div>
-              </div>
-              <p className="text-xs text-muted-foreground">{r.text}</p>
-            </div>
-          )) : (
-            <p className="text-xs text-muted-foreground">No reviews yet.</p>
-          )}
-        </div>
-
         {/* Join / Leave */}
         <div className="space-y-2">
           <h2 className="text-base font-semibold text-foreground">
@@ -782,10 +767,32 @@ export default function EventDetailsPage() {
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              {showSplitJoinLeave
+              {isPastEvent
+                ? 'This event already happened. You can still view all event details.'
+                : showSplitJoinLeave
                 ? 'Use Join to attend or Leave to cancel your spot.'
                 : 'One action below handles join, pay, approval, or leave depending on this event.'}
             </p>
+          )}
+        </div>
+
+        {/* Event Chat Access */}
+        <div className="space-y-2">
+          <h2 className="text-base font-semibold text-foreground">Event chat</h2>
+          {!user ? (
+            <p className="text-xs text-muted-foreground">Sign in and join this event to access the event chat.</p>
+          ) : isCancelledEvent ? (
+            <p className="text-xs text-muted-foreground">This event is canceled. Chat is no longer available.</p>
+          ) : canAccessEventChat ? (
+            <button
+              type="button"
+              onClick={() => navigate(`/chat?eventId=${event.id}`)}
+              className="w-full rounded-xl bg-secondary/80 py-3 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+            >
+              Open Event Chat
+            </button>
+          ) : (
+            <p className="text-xs text-muted-foreground">Join this event to access its chat.</p>
           )}
         </div>
 
@@ -809,14 +816,6 @@ export default function EventDetailsPage() {
                 <Trash2 className="h-4 w-4 shrink-0" />
                 {isDeletingEvent ? 'Deleting…' : 'Delete'}
               </button>
-              <button
-                type="button"
-                onClick={() => alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)}
-                className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-destructive"
-                aria-label="Report event"
-              >
-                <Flag className="h-4 w-4" />
-              </button>
             </>
           ) : showSplitJoinLeave ? (
             <>
@@ -835,7 +834,9 @@ export default function EventDetailsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => { if (hasJoined && !isUpdatingParticipation) void handleJoinOrRequest(); }}
+                onClick={() => {
+                  if (hasJoined && !isUpdatingParticipation && !participationLoading) void handleJoinOrRequest();
+                }}
                 disabled={!hasJoined || participationLoading || isUpdatingParticipation}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl border border-border py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
                   !hasJoined || participationLoading || isUpdatingParticipation
@@ -846,42 +847,41 @@ export default function EventDetailsPage() {
                 <LogOut className="h-4 w-4 shrink-0" />
                 Leave Event
               </button>
-              <button
-                type="button"
-                onClick={() => alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)}
-                className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-destructive"
-                aria-label="Report event"
-              >
-                <Flag className="h-4 w-4" />
-              </button>
             </>
           ) : (
             <>
               <button
                 type="button"
                 onClick={() => void handleJoinOrRequest()}
-                disabled={isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
+                disabled={isPastEvent || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
+                  isPastEvent || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : hasJoined
                       ? 'border border-border bg-secondary text-foreground hover:bg-secondary/80'
                       : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
-                {useApiParticipation && !event.requiresApproval && event.budget === 0 ? (
+                {useApiParticipation && !event.requiresApproval && isFreeEvent ? (
                   hasJoined ? <LogOut className="h-4 w-4 shrink-0" /> : <UserPlus className="h-4 w-4 shrink-0" />
                 ) : null}
                 {getJoinButtonText()}
               </button>
-              <button
-                type="button"
-                onClick={() => alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)}
-                className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-destructive"
-                aria-label="Report event"
-              >
-                <Flag className="h-4 w-4" />
-              </button>
+              {hasJoined && !isPastEvent && (
+                <button
+                  type="button"
+                  onClick={() => void handleJoinOrRequest()}
+                  disabled={isUpdatingParticipation || participationLoading}
+                  className={`flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
+                    isUpdatingParticipation || participationLoading
+                      ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
+                      : 'bg-secondary text-foreground hover:bg-secondary/80'
+                  }`}
+                >
+                  <LogOut className="h-4 w-4 shrink-0" />
+                  Leave
+                </button>
+              )}
             </>
           )}
         </div>
@@ -928,34 +928,6 @@ export default function EventDetailsPage() {
           </motion.div>
         )}
 
-        {showReportModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm px-6"
-          >
-            <motion.div
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.9 }}
-              className="w-full max-w-sm rounded-2xl glass-card p-6 space-y-4"
-            >
-              <h3 className="text-lg font-bold text-foreground">Report Event</h3>
-              <textarea
-                value={reportReason}
-                onChange={e => setReportReason(e.target.value)}
-                placeholder="Describe the issue..."
-                rows={3}
-                className="w-full rounded-lg bg-secondary p-3 text-sm text-foreground outline-none resize-none focus:ring-2 focus:ring-primary/50"
-              />
-              <div className="flex gap-3">
-                <button onClick={handleReport} className="flex-1 gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground">Submit</button>
-                <button onClick={() => setShowReportModal(false)} className="flex-1 rounded-xl bg-secondary py-2.5 text-sm text-muted-foreground">Cancel</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
       </AnimatePresence>
 
       <BottomNav />

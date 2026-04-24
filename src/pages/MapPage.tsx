@@ -8,6 +8,7 @@ import { CATEGORIES } from '@/lib/seedData';
 import { getApiUrl } from '@/lib/api';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
+import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 
 function escapeHtml(s: string) {
   return s
@@ -55,11 +56,10 @@ export default function MapPage() {
 
   const [category, setCategory] = useState('All');
   const [filterDate, setFilterDate] = useState('');
-  const [locationQuery, setLocationQuery] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
   const [titleSearch, setTitleSearch] = useState('');
   const [debouncedTitle, setDebouncedTitle] = useState('');
   const [debouncedFilterDate, setDebouncedFilterDate] = useState('');
-  const [debouncedLocation, setDebouncedLocation] = useState('');
   const [rawEvents, setRawEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [geoStatus, setGeoStatus] = useState<'idle' | 'pending' | 'granted' | 'denied' | 'unavailable'>('idle');
@@ -77,11 +77,6 @@ export default function MapPage() {
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedLocation(locationQuery.trim()), 350);
-    return () => window.clearTimeout(t);
-  }, [locationQuery]);
-
   const loadEvents = useCallback(async () => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 12000);
@@ -90,8 +85,7 @@ export default function MapPage() {
       const params = new URLSearchParams({ page: '1', limit: '50' });
       if (category !== 'All') params.set('category', category);
       if (debouncedTitle) params.set('search', debouncedTitle);
-      if (debouncedFilterDate) params.set('event_date', debouncedFilterDate);
-      if (debouncedLocation) params.set('location', debouncedLocation);
+      if (debouncedFilterDate) params.set('date', debouncedFilterDate);
       const res = await fetch(getApiUrl(`/api/events?${params}`), { signal: controller.signal });
       if (!res.ok) throw new Error('fetch failed');
       const body = await res.json();
@@ -113,7 +107,9 @@ export default function MapPage() {
       window.clearTimeout(timeout);
       setLoading(false);
     }
-  }, [category, debouncedTitle, debouncedFilterDate, debouncedLocation, refreshKey]);
+  }, [category, debouncedTitle, debouncedFilterDate, refreshKey]);
+
+  const availableCities = useMemo(() => getEventCities(rawEvents), [rawEvents]);
 
   useEffect(() => {
     loadEvents();
@@ -132,12 +128,14 @@ export default function MapPage() {
   const filteredEvents = useMemo(() => {
     return rawEvents.filter((e) => {
       if (category !== 'All' && e.category !== category) return false;
-      if (filterDate && e.date !== filterDate) return false;
-      const q = locationQuery.trim().toLowerCase();
-      if (q && !e.location.toLowerCase().includes(q)) return false;
+      if (debouncedFilterDate && e.date !== debouncedFilterDate) return false;
+      const city = extractCityFromLocation(e.location || '');
+      if (selectedCity && city !== selectedCity) return false;
+      const titleQ = debouncedTitle.toLowerCase();
+      if (titleQ && !e.title.toLowerCase().includes(titleQ)) return false;
       return true;
     });
-  }, [rawEvents, category, filterDate, locationQuery]);
+  }, [rawEvents, category, debouncedFilterDate, selectedCity, debouncedTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -226,7 +224,8 @@ export default function MapPage() {
         'click',
         (ev) => {
           ev.preventDefault();
-          navigate(`/event/${id}`);
+          const selectedEvent = filteredEvents.find((entry) => entry.id === id) ?? null;
+          navigate(`/event/${id}`, { state: selectedEvent ? { event: selectedEvent } : undefined });
         },
         { once: true },
       );
@@ -236,7 +235,7 @@ export default function MapPage() {
     return () => {
       map.off('popupopen', onPopupOpen);
     };
-  }, [navigate, mapReady]);
+  }, [navigate, mapReady, filteredEvents]);
 
   const locateUser = () => {
     const map = mapInstance.current;
@@ -337,14 +336,28 @@ export default function MapPage() {
             aria-label="Filter by event date"
           />
         </div>
-        <input
-          type="text"
-          value={locationQuery}
-          onChange={(e) => setLocationQuery(e.target.value)}
-          placeholder="Filter by location text…"
-          className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none"
-          aria-label="Filter by location"
-        />
+        <div className="space-y-1">
+          <label htmlFor="map-city-filter" className="block text-[10px] font-semibold uppercase text-muted-foreground">
+            City (from events)
+          </label>
+          <select
+            id="map-city-filter"
+            value={selectedCity}
+            onChange={(e) => setSelectedCity(e.target.value)}
+            className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground outline-none"
+            aria-label="Filter events by city"
+          >
+            <option value="">All cities</option>
+            {availableCities.map((city) => (
+              <option key={city} value={city}>
+                {city}
+              </option>
+            ))}
+          </select>
+          {!loading && availableCities.length === 0 && (
+            <p className="text-[10px] text-muted-foreground">No city list yet — load events or add locations with a city name.</p>
+          )}
+        </div>
         <input
           type="search"
           value={titleSearch}
