@@ -13,6 +13,7 @@ import { Sparkles, Users, MapPin, Calendar } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
+import { isEventUpcoming } from '@/lib/eventTime';
 
 export default function HomePage() {
   const INTEREST_PROMPT_DISMISSED_KEY = 'event_interest_prompt_dismissed';
@@ -33,10 +34,8 @@ export default function HomePage() {
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-  // ── Favorites & Recommendations ──────────────────────────────────────────
+  // ── Favorites ────────────────────────────────────────────────────────────
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
-  const [recommendations, setRecommendations] = useState<EventItem[]>([]);
-  const [recsLoading, setRecsLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [interestsRefreshTick, setInterestsRefreshTick] = useState(0);
   const [showInterestPrompt, setShowInterestPrompt] = useState(false);
@@ -127,25 +126,7 @@ export default function HomePage() {
       .catch(() => console.error("Failed to load favorites"));
   }, [user?.id, interestsRefreshTick]);
 
-  // ── 3. Load Recommendations ────────────────────────────────────────────────
-  useEffect(() => {
-    if (!user) return;
-    const token = getAuthToken();
-    if (!token) return;
-
-    setRecsLoading(true);
-    fetch(getApiUrl('/api/recommendations?limit=6'), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.ok ? res.json() : Promise.reject())
-      .then((data: { data: unknown[] }) =>
-        setRecommendations((data.data || []).map(mapApiEventToItem))
-      )
-      .catch(() => setRecommendations([]))
-      .finally(() => setRecsLoading(false));
-  }, [user?.id]);
-
-  // ── 4. Debouncing ─────────────────────────────────────────────────────────
+  // ── 3. Debouncing ─────────────────────────────────────────────────────────
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => window.clearTimeout(t);
@@ -156,7 +137,7 @@ export default function HomePage() {
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
-  // ── 5. Main Events Fetch ──────────────────────────────────────────────────
+  // ── 4. Main Events Fetch ──────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const params = new URLSearchParams({ limit: '50', page: '1' });
@@ -175,13 +156,13 @@ export default function HomePage() {
         const list = parseEventsApiList(data).map(mapApiEventToItem);
         const local = getLocalEvents().filter((e) => !e.isDraft);
         const byId = new Map<string, EventItem>();
-        [...list, ...local].forEach((e) => byId.set(e.id, e));
+        [...list, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
         setEvents(Array.from(byId.values()));
         setUsingLocalFallback(false);
       })
       .catch(() => {
         if (!cancelled) {
-          const local = getLocalEvents().filter((e) => !e.isDraft);
+          const local = getLocalEvents().filter((e) => !e.isDraft && isEventUpcoming(e));
           setEvents(local);
           setUsingLocalFallback(true);
         }
@@ -195,9 +176,10 @@ export default function HomePage() {
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
-  // ── 6. Filtered Events logic ──────────────────────────────────────────────
+  // ── 5. Filtered Events logic ──────────────────────────────────────────────
   const filtered = useMemo(() => {
     return events.filter((e) => {
+      if (!isEventUpcoming(e)) return false;
       if (e.budget > budgetMax) return false;
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedDate && e.date !== debouncedDate) return false;
@@ -239,7 +221,7 @@ export default function HomePage() {
     navigate(`/event/${id}`, { state: selectedEvent ? { event: selectedEvent } : undefined });
   };
 
-  // ── 7. Components ──────────────────────────────────────────────────────────
+  // ── 6. Components ──────────────────────────────────────────────────────────
   const SectionHeader = ({ icon: Icon, title, badge, sectionKey }: { icon: any; title: string; badge?: string; sectionKey: string }) => (
     <button type="button" onClick={() => toggleSection(sectionKey)} className="flex w-full items-center gap-2 pt-6 pb-2">
       <Icon className="h-5 w-5 text-primary shrink-0" />
@@ -247,12 +229,6 @@ export default function HomePage() {
       {badge && <span className="ml-2 rounded-full bg-primary/20 px-2.5 py-0.5 text-[10px] font-semibold text-primary">{badge}</span>}
       <motion.span className="ml-auto text-muted-foreground" animate={{ rotate: collapsed[sectionKey] ? -90 : 0 }} transition={{ duration: 0.2 }}>▾</motion.span>
     </button>
-  );
-
-  const RecommendationsSkeleton = () => (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-52 animate-pulse rounded-2xl glass-card" />)}
-    </div>
   );
 
   return (
@@ -316,16 +292,16 @@ export default function HomePage() {
           </label>
           <label className="flex flex-col gap-1.5 rounded-2xl glass-card p-3">
             <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
-              <MapPin className="h-3 w-3" /> City
+              <MapPin className="h-3 w-3" /> Location
             </span>
             <select
               id="home-city-filter"
               value={selectedCity}
               onChange={(e) => setSelectedCity(e.target.value)}
               className="rounded-lg bg-secondary/80 px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              aria-label="Filter events by city"
+              aria-label="Filter events by location"
             >
-              <option value="">All cities</option>
+              <option value="">All locations</option>
               {availableCities.map((city) => (
                 <option key={city} value={city}>
                   {city}
@@ -333,7 +309,7 @@ export default function HomePage() {
               ))}
             </select>
             {!loading && availableCities.length === 0 && (
-              <span className="text-[10px] text-muted-foreground">Cities are built from event addresses (first part before a comma).</span>
+              <span className="text-[10px] text-muted-foreground">Locations are built from event addresses (first part before a comma).</span>
             )}
           </label>
         </div>
@@ -357,24 +333,6 @@ export default function HomePage() {
                   </div>
                 ))}
               </motion.div>
-            )}
-          </div>
-        )}
-
-        {/* Recommendations Section */}
-        {user && (recsLoading || recommendations.length > 0) && (
-          <div className="space-y-2">
-            <SectionHeader icon={Sparkles} title="Recommended For You" badge="AI" sectionKey="recs" />
-            {!collapsed['recs'] && (
-              recsLoading ? <RecommendationsSkeleton /> : (
-                <div className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4">
-                  {recommendations.map((event, i) => (
-                    <motion.div key={event.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }} className="w-72 shrink-0 snap-start">
-                      <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
-                    </motion.div>
-                  ))}
-                </div>
-              )
             )}
           </div>
         )}

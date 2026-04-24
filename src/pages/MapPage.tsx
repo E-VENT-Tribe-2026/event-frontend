@@ -338,16 +338,16 @@ export default function MapPage() {
         </div>
         <div className="space-y-1">
           <label htmlFor="map-city-filter" className="block text-[10px] font-semibold uppercase text-muted-foreground">
-            City (from events)
+            Location
           </label>
           <select
             id="map-city-filter"
             value={selectedCity}
             onChange={(e) => setSelectedCity(e.target.value)}
             className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground outline-none"
-            aria-label="Filter events by city"
+            aria-label="Filter events by location"
           >
-            <option value="">All cities</option>
+            <option value="">All locations</option>
             {availableCities.map((city) => (
               <option key={city} value={city}>
                 {city}
@@ -355,14 +355,14 @@ export default function MapPage() {
             ))}
           </select>
           {!loading && availableCities.length === 0 && (
-            <p className="text-[10px] text-muted-foreground">No city list yet — load events or add locations with a city name.</p>
+            <p className="text-[10px] text-muted-foreground">No location list yet — load events or add event locations.</p>
           )}
         </div>
         <input
           type="search"
           value={titleSearch}
           onChange={(e) => setTitleSearch(e.target.value)}
-          placeholder="Search title (server)…"
+          placeholder="Search title…"
           className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none"
           aria-label="Search events by title"
         />
