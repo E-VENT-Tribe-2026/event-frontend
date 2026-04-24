@@ -139,10 +139,12 @@ describe('CreateEventPage', () => {
 
     fireEvent.change(screen.getByPlaceholderText('Event Title'), { target: { value: 'Meetup' } });
     fireEvent.change(screen.getByPlaceholderText('Description'), { target: { value: 'Details here' } });
-    const dates = document.querySelectorAll('input[type="date"]');
-    const times = document.querySelectorAll('input[type="time"]');
-    fireEvent.change(dates[0], { target: { value: tomorrowIsoDate() } });
-    fireEvent.change(times[0], { target: { value: '15:00' } });
+    const dateInput = screen.getByLabelText(/event date/i) as HTMLInputElement;
+    const timeInput = screen.getByLabelText(/event time/i) as HTMLInputElement;
+    fireEvent.focus(dateInput);
+    fireEvent.change(dateInput, { target: { value: tomorrowIsoDate() } });
+    fireEvent.focus(timeInput);
+    fireEvent.change(timeInput, { target: { value: '15:00' } });
     fireEvent.change(screen.getByPlaceholderText(/Search venue, address or city/i), { target: { value: 'Central Park' } });
     fireEvent.click(screen.getByRole('button', { name: /set-map-pin/i }));
 
