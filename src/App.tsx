@@ -37,7 +37,6 @@ const App = () => (
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/home" element={<HomePage />} />
           <Route path="/event/:id/edit" element={<EditEventPage />} />
           <Route path="/event/:id" element={<EventDetailsPage />} />
@@ -50,6 +49,7 @@ const App = () => (
           <Route path="/dashboard" element={<OrganizerDashboardPage />} />
           <Route path="/ticket/:ticketId" element={<TicketPage />} />
           <Route path="*" element={<NotFound />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
         </Routes>
       </BrowserRouter>
     </TooltipProvider>

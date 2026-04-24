@@ -16,23 +16,15 @@ interface EventCardProps {
 export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: initialIsFavorite = false }: EventCardProps) {
   const navigate = useNavigate();
   const user = getCurrentUser();
-  const isAlreadyJoined = Boolean(user && event.participants?.includes(user.id));
   
   const [favorite, setFavorite] = useState(initialIsFavorite);
   const [loadingFav, setLoadingFav] = useState(false);
   const [attendeeCount, setAttendeeCount] = useState<number>(event.participants?.length || 0);
-  const [joinLocked, setJoinLocked] = useState(false);
 
   // Sync favorite state from props
   useEffect(() => {
     setFavorite(initialIsFavorite);
   }, [initialIsFavorite]);
-
-  useEffect(() => {
-    if (!isAlreadyJoined) {
-      setJoinLocked(false);
-    }
-  }, [isAlreadyJoined, event.id]);
 
   // Fetch Exact Attendee Count
   useEffect(() => {
@@ -92,16 +84,11 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     e.preventDefault();
     e.stopPropagation();
 
-    if (isAlreadyJoined || joinLocked) {
-      return;
-    }
-
     if (!user) {
       navigate('/login');
       return;
     }
 
-    setJoinLocked(true);
     if (onJoin) {
       onJoin(event.id);
     }
@@ -110,7 +97,6 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
   return (
     <Link
       to={`/event/${event.id}`}
-      state={{ event }}
       className="block rounded-2xl overflow-hidden glass-card card-lift animate-fade-in relative"
     >
       <div className="relative h-40 overflow-hidden">
@@ -175,14 +161,9 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
             <button
               type="button"
               onClick={handleJoinClick}
-              disabled={isAlreadyJoined || joinLocked}
-              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-transform active:scale-95 ${
-                isAlreadyJoined || joinLocked
-                  ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                  : 'gradient-primary text-primary-foreground shadow-glow'
-              }`}
+              className="gradient-primary rounded-full px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow transition-transform active:scale-95"
             >
-              {isAlreadyJoined ? 'Joined' : joinLocked ? 'Opening...' : 'Join'}
+              Join
             </button>
           </div>
         </div>

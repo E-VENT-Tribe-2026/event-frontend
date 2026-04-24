@@ -71,8 +71,7 @@ describe('SignupPage', () => {
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret1' } });
     fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'secret1' } });
-    const dobInput = screen.getByLabelText(/birthdate/i) as HTMLInputElement;
-    fireEvent.focus(dobInput);
+    const dobInput = document.querySelector('input[type="date"]') as HTMLInputElement;
     fireEvent.change(dobInput, { target: { value: '2000-01-15' } });
     const genderSelect = screen.getByRole('combobox');
     fireEvent.change(genderSelect, { target: { value: 'Male' } });
@@ -107,8 +106,7 @@ describe('SignupPage', () => {
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret1' } });
     fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'secret1' } });
-    const dobInput = screen.getByLabelText(/birthdate/i) as HTMLInputElement;
-    fireEvent.focus(dobInput);
+    const dobInput = document.querySelector('input[type="date"]') as HTMLInputElement;
     fireEvent.change(dobInput, { target: { value: '2000-01-15' } });
     const genderSelect = screen.getByRole('combobox');
     fireEvent.change(genderSelect, { target: { value: 'Female' } });

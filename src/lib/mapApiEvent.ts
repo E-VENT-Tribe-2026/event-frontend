@@ -4,15 +4,9 @@ import { getGeneratedAvatarUrl, pickImageUrl } from '@/lib/avatars';
 export const DEFAULT_EVENT_IMAGE =
   'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
 
-function parseEventStart(raw: unknown): Date {
-  if (typeof raw !== 'string' || !raw.trim()) return new Date();
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
-}
-
 /** Map backend event row to frontend EventItem */
 export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
-  const start = parseEventStart(api.start_datetime);
+  const start = api.start_datetime ? new Date(api.start_datetime as string) : new Date();
   const dateStr = start.toISOString().slice(0, 10);
   const timeStr = start.toTimeString().slice(0, 5);
   const cost = Number(api.cost);
