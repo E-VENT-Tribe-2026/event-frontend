@@ -56,7 +56,7 @@ describe('LoginPage', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it('shows backend login error when login returns non-OK', async () => {
+  it('shows invalid credentials when login returns non-OK', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ detail: 'bad' }), {
@@ -70,7 +70,7 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } });
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    expect(await screen.findByText('bad')).toBeInTheDocument();
+    expect(await screen.findByText('Invalid credentials')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 

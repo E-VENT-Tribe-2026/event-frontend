@@ -4,6 +4,7 @@ import {
   setCurrentUserFromOAuth,
   updateUser, 
   getEvents, 
+  getTickets, 
   getUsers, 
   getJoinRequests, 
   leaveEvent, 
@@ -12,8 +13,8 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, Star, UserPlus, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronDown } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { LogOut, Edit2, Check, Star, Ticket, UserPlus, CreditCard, Heart, Trash2, Lock, Eye, EyeOff } from 'lucide-react';
+import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { getAuthToken, clearAuthToken } from '@/lib/auth';
@@ -22,7 +23,6 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
-import { ALL_INTERESTS } from '@/lib/interests';
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -38,17 +38,13 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [bio, setBio] = useState(user?.bio || '');
-  const [interests, setInterests] = useState<string[]>(user?.interests || []);
-  const [showInterests, setShowInterests] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [activeTab, setActiveTab] = useState<'events' | 'favorites' | 'friends'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'favorites' | 'tickets' | 'friends'>('events');
 
   // Password State
   const [showPasswordSection, setShowPasswordSection] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -119,17 +115,9 @@ export default function ProfilePage() {
           const raw = await resProf.json();
           const data = raw.data || raw.user || raw;
           if (data.id) {
-            setCurrentUserFromOAuth({
-              id: String(data.id),
-              email: String(data.email || ""),
-              name: String(data.full_name || data.name || ""),
-              bio: String(data.bio || ""),
-              avatar: data.avatar_url,
-              interests: Array.isArray(data.interests) ? data.interests : [],
-            });
+            setCurrentUserFromOAuth({ id: String(data.id), email: String(data.email || ""), name: String(data.full_name || data.name || ""), bio: String(data.bio || ""), avatar: data.avatar_url });
             setName(data.full_name || data.name || "");
             setBio(data.bio || "");
-            setInterests(Array.isArray(data.interests) ? data.interests : []);
           }
         }
 
@@ -203,34 +191,17 @@ export default function ProfilePage() {
     const token = getAuthToken();
     if (token) {
       try {
-        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ full_name: name, bio, interests }) });
-        updateUser({ name, bio, interests });
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ full_name: name, bio }) });
+        updateUser({ name, bio });
         setEditing(false);
         setToast({ show: true, message: 'Profile updated!', type: 'success' });
       } catch (err) { console.error(err); }
     }
   };
 
-  const toggleInterest = (interest: string) => {
-    setInterests((prev) => (
-      prev.includes(interest)
-        ? prev.filter((entry) => entry !== interest)
-        : [...prev, interest]
-    ));
-  };
-
   const handleChangePassword = async () => {
-    if (!currentPassword) {
-      setToast({ show: true, message: 'Please enter your current password.', type: 'error' });
-      return;
-    }
     if (newPassword.length < 8) {
       setToast({ show: true, message: 'Password must be at least 8 characters.', type: 'error' });
-      return;
-    }
-    if (newPassword === currentPassword) {
-      setToast({ show: true, message: 'New password must be different from current password.', type: 'error' });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -246,19 +217,13 @@ export default function ProfilePage() {
       const res = await fetch(getApiUrl('/api/auth/reset-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          access_token: token,
-          current_password: currentPassword,
-          new_password: newPassword,
-          confirm_password: confirmPassword,
-        }),
+        body: JSON.stringify({ access_token: token, new_password: newPassword }),
       });
 
       const data = await res.json();
 
       if (res.ok) {
         setToast({ show: true, message: 'Password updated successfully.', type: 'success' });
-        setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
         setShowPasswordSection(false);
@@ -298,50 +263,6 @@ export default function ProfilePage() {
           {editing ? <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm resize-none outline-none" /> : <p className="text-sm text-muted-foreground">{bio || 'No bio yet.'}</p>}
         </div>
 
-        {/* Interests */}
-        <div className="rounded-2xl glass-card p-4 space-y-2">
-          <h3 className="text-sm font-semibold">Interests</h3>
-          {editing ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowInterests((prev) => !prev)}
-                className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors"
-              >
-                <span className="truncate">{interests.length ? interests.join(', ') : 'Select Interests'}</span>
-                <ChevronDown className={`h-4 w-4 transition-transform ${showInterests ? 'rotate-180' : ''}`} />
-              </button>
-              <AnimatePresence>
-                {showInterests && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="flex flex-wrap gap-2 p-3 bg-secondary/50 rounded-xl border border-border/50">
-                      {ALL_INTERESTS.map((interest) => (
-                        <button
-                          key={interest}
-                          type="button"
-                          onClick={() => toggleInterest(interest)}
-                          className={`px-3 py-1 text-[10px] font-medium rounded-full transition-all ${interests.includes(interest) ? 'bg-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
-                        >
-                          {interest}
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {interests.length ? interests.join(', ') : 'No interests selected yet.'}
-            </p>
-          )}
-        </div>
-
         {/* Change Password */}
         <div className="rounded-2xl glass-card p-4 space-y-3">
           <button
@@ -361,23 +282,6 @@ export default function ProfilePage() {
               exit={{ opacity: 0, height: 0 }}
               className="space-y-3 pt-1"
             >
-              {/* Current Password */}
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-semibold uppercase text-muted-foreground">Current Password</span>
-                <div className="relative">
-                  <input
-                    type={showCurrentPassword ? 'text' : 'password'}
-                    value={currentPassword}
-                    onChange={e => setCurrentPassword(e.target.value)}
-                    placeholder="Enter current password"
-                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  <button type="button" onClick={() => setShowCurrentPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    {showCurrentPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              </label>
-
               {/* New Password */}
               <label className="flex flex-col gap-1.5">
                 <span className="text-[10px] font-semibold uppercase text-muted-foreground">New Password</span>
@@ -438,7 +342,7 @@ export default function ProfilePage() {
 
               <button
                 onClick={handleChangePassword}
-                disabled={passwordLoading || !currentPassword || !newPassword || !confirmPassword}
+                disabled={passwordLoading || !newPassword || !confirmPassword}
                 className="w-full gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
                 {passwordLoading ? 'Updating…' : 'Update Password'}
@@ -463,7 +367,7 @@ export default function ProfilePage() {
 
         {/* Tabs */}
         <div className="flex rounded-xl glass-card p-1">
-          {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }, { id: 'friends', label: 'Friends', icon: UserPlus }].map((tab) => (
+          {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }, { id: 'tickets', label: 'Tickets', icon: Ticket }, { id: 'friends', label: 'Friends', icon: UserPlus }].map((tab) => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex-1 flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-all ${activeTab === tab.id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'}`}><tab.icon className="h-3.5 w-3.5" />{tab.label}</button>
           ))}
         </div>
@@ -545,6 +449,7 @@ export default function ProfilePage() {
             </div>
           )}
 
+          {activeTab === 'tickets' && <p className="text-center py-8 text-xs text-muted-foreground">No digital tickets available yet.</p>}
           {activeTab === 'friends' && <p className="text-center py-8 text-xs text-muted-foreground">No connections found.</p>}
         </div>
       </motion.div>

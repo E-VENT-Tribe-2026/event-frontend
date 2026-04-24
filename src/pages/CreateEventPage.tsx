@@ -53,7 +53,7 @@ export default function CreateEventPage() {
     date: '',
     time: '',
     location: '',
-    budget: '',
+    budget: '0',
     limit: '50',
     isPrivate: false,
     requiresApproval: false,
@@ -62,8 +62,6 @@ export default function CreateEventPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dateInputType, setDateInputType] = useState<'text' | 'date'>('text');
-  const [timeInputType, setTimeInputType] = useState<'text' | 'time'>('text');
 
   // Coordinates — start at Germany until user grants geolocation or picks a location
   const [pickedLat, setPickedLat] = useState<number | null>(null);
@@ -111,10 +109,6 @@ export default function CreateEventPage() {
     if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
       e.mapLocation = 'Search for a location or click the map to set the event pin';
     }
-    const cap = Math.floor(Number(form.limit));
-    if (!form.limit.trim() || Number.isNaN(cap)) e.limit = 'Enter participant capacity';
-    else if (cap < 10 || cap > 500) e.limit = 'Capacity must be between 10 and 500';
-    if (form.budget.trim() !== '' && Number(form.budget) < 0) e.budget = 'Budget cannot be negative';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -154,7 +148,7 @@ export default function CreateEventPage() {
         description: form.description.trim(),
         category: form.category,
         cost: Math.round(Number(form.budget)) || 0,
-        max_capacity: Math.floor(Number(form.limit)),
+        max_capacity: Math.floor(Number(form.limit)) || 50,
         start_datetime: safeISO(startObj),
         end_datetime: safeISO(endObj),
         location_name: locationName,
@@ -237,7 +231,7 @@ export default function CreateEventPage() {
   };
 
   const inputCls = (field: string) =>
-    `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 ${
+    `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none focus:ring-2 ${
       errors[field] ? 'ring-1 ring-destructive' : 'focus:ring-primary/50'
     } transition-all`;
 
@@ -275,49 +269,12 @@ export default function CreateEventPage() {
 
         {/* Date + Time */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="create-event-date" className="block text-xs font-medium text-foreground">
-              Event date
-            </label>
-            <input
-              id="create-event-date"
-              type={dateInputType}
-              min={dateInputType === 'date' ? todayIso : undefined}
-              placeholder="YYYY-MM-DD"
-              value={form.date}
-              onFocus={() => setDateInputType('date')}
-              onBlur={() => {
-                if (!form.date) setDateInputType('text');
-              }}
-              onChange={e => update('date', e.target.value)}
-              className={inputCls('date')}
-              aria-describedby="create-event-date-hint"
-            />
-            <p id="create-event-date-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Tap to pick from calendar.
-            </p>
+          <div>
+            <input type="date" min={todayIso} value={form.date} onChange={e => update('date', e.target.value)} className={inputCls('date')} />
             {errors.date && <span className="text-[10px] text-destructive px-2">{errors.date}</span>}
           </div>
-          <div className="space-y-1">
-            <label htmlFor="create-event-time" className="block text-xs font-medium text-foreground">
-              Event time
-            </label>
-            <input
-              id="create-event-time"
-              type={timeInputType}
-              placeholder="HH:MM (24h)"
-              value={form.time}
-              onFocus={() => setTimeInputType('time')}
-              onBlur={() => {
-                if (!form.time) setTimeInputType('text');
-              }}
-              onChange={e => update('time', e.target.value)}
-              className={inputCls('time')}
-              aria-describedby="create-event-time-hint"
-            />
-            <p id="create-event-time-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Tap to pick start time.
-            </p>
+          <div>
+            <input type="time" value={form.time} onChange={e => update('time', e.target.value)} className={inputCls('time')} />
             {errors.time && <span className="text-[10px] text-destructive px-2">{errors.time}</span>}
           </div>
         </div>
@@ -351,46 +308,10 @@ export default function CreateEventPage() {
 
         {/* Budget + Capacity */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="create-event-budget" className="block text-xs font-medium text-foreground">
-              Budget (USD)
-            </label>
-            <input
-              id="create-event-budget"
-              type="number"
-              min={0}
-              step="1"
-              placeholder="0 = free event"
-              value={form.budget}
-              onChange={e => update('budget', e.target.value)}
-              className={inputCls('budget')}
-              aria-describedby="create-event-budget-hint"
-            />
-            <p id="create-event-budget-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Leave empty or enter 0 for free.
-            </p>
-            {errors.budget && <span className="text-[10px] text-destructive px-2">{errors.budget}</span>}
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="create-event-capacity" className="block text-xs font-medium text-foreground">
-              Max participants
-            </label>
-            <input
-              id="create-event-capacity"
-              type="number"
-              min={10}
-              max={500}
-              step={1}
-              placeholder="10–500 people"
-              value={form.limit}
-              onChange={e => update('limit', e.target.value)}
-              className={inputCls('limit')}
-              aria-describedby="create-event-capacity-hint"
-            />
-            <p id="create-event-capacity-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Type a whole number (no slider).
-            </p>
-            {errors.limit && <span className="text-[10px] text-destructive px-2">{errors.limit}</span>}
+          <input type="number" placeholder="Budget ($)" value={form.budget} onChange={e => update('budget', e.target.value)} className={inputCls('budget')} />
+          <div className="px-2 flex flex-col justify-center">
+            <label className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Capacity: {form.limit}</label>
+            <input type="range" min="10" max="500" value={form.limit} onChange={e => update('limit', e.target.value)} className="w-full accent-primary h-1.5" />
           </div>
         </div>
 
