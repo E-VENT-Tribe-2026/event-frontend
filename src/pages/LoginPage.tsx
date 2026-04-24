@@ -8,6 +8,7 @@ import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
+import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -37,14 +38,19 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
 
       if (!res.ok) {
-        setToast({ show: true, message: 'Invalid credentials', type: 'error' });
+        const detail = String((data as any)?.detail || (data as any)?.message || '').trim();
+        const lowered = detail.toLowerCase();
+        const message = lowered.includes('not confirmed')
+          ? 'Your email is not confirmed yet. Check your inbox/spam for the verification email.'
+          : detail || 'Invalid credentials';
+        setToast({ show: true, message, type: 'error' });
         setIsSubmitting(false);
         return;
       }
 
-      const data = await res.json();
       setAuthToken(data.access_token);
       if (supabase) {
         await supabase.auth.setSession({
@@ -73,7 +79,8 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: getOAuthCallbackUrl('/home'),
+        queryParams: { prompt: 'select_account' },
       },
     });
     if (error) {
@@ -106,6 +113,11 @@ export default function LoginPage() {
               <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">{showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
             </div>
             {errors.password && <p className="mt-1 text-xs text-destructive">{errors.password}</p>}
+            <div className="mt-2 text-right">
+              <Link to="/forgot-password" className="text-sm text-primary font-semibold hover:underline">
+                Forgot my password?
+              </Link>
+            </div>
           </div>
           <button type="submit" disabled={isSubmitting} className="w-full gradient-primary rounded-xl py-3.5 text-sm font-bold text-white shadow-glow">
             {isSubmitting ? 'Signing In...' : 'Sign In'}

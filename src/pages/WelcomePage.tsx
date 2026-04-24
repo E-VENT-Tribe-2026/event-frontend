@@ -1,13 +1,25 @@
 import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MapPin, Sparkles, UserPlus } from 'lucide-react';
 import { seedDatabase, CATEGORIES } from '@/lib/seedData';
 
 export default function WelcomePage() {
+  const navigate = useNavigate();
+
   useEffect(() => {
     seedDatabase();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const isRecovery = (hashParams.get('type') || '').toLowerCase() === 'recovery';
+    const accessToken = hashParams.get('access_token') || hashParams.get('token') || '';
+    if (isRecovery && accessToken.trim()) {
+      navigate(`/forgot-password?access_token=${encodeURIComponent(accessToken.trim())}`, { replace: true });
+    }
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">

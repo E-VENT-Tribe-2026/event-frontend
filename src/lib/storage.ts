@@ -175,10 +175,11 @@ export function setCurrentUserFromOAuth(data: {
   email: string; 
   name?: string; 
   avatar?: string;
-  bio?: string;    // Add this
-  dob?: string;    // Add this
-  gender?: string; // Add this
-  role?: string;   // Add this
+  bio?: string;
+  dob?: string;
+  gender?: string;
+  role?: string;
+  interests?: string[];
 }): void {
   const users = getUsers();
   const existing = users.find((u) => u.email === data.email || u.id === data.id);
@@ -198,6 +199,7 @@ export function setCurrentUserFromOAuth(data: {
       dob: data.dob ?? existing.dob,
       gender: data.gender ?? existing.gender,
       role: (data.role as UserRole) ?? existing.role,
+      interests: data.interests ?? existing.interests,
       profilePhoto: data.avatar || existing.profilePhoto || avatar,
     };
     saveUsers(users.map((u) => (u.id === existing.id || u.email === data.email ? updated : u)));
@@ -212,7 +214,7 @@ export function setCurrentUserFromOAuth(data: {
       profilePhoto: data.avatar || avatar,
       coverPhoto: '',
       bio: data.bio || 'Hey there! I love events.', // Use API bio if available
-      interests: ['Music', 'Tech', 'Food'],
+      interests: data.interests && data.interests.length > 0 ? data.interests : ['Music', 'Tech', 'Food'],
       dob: data.dob || '',
       gender: data.gender || '',
       isPremium: false,
