@@ -36,6 +36,8 @@ export default function HomePage() {
 
   // ── Favorites ────────────────────────────────────────────────────────────
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [interestRecommendations, setInterestRecommendations] = useState<EventItem[]>([]);
+  const [interestRecommendationsLoading, setInterestRecommendationsLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [interestsRefreshTick, setInterestsRefreshTick] = useState(0);
   const [showInterestPrompt, setShowInterestPrompt] = useState(false);
@@ -126,7 +128,39 @@ export default function HomePage() {
       .catch(() => console.error("Failed to load favorites"));
   }, [user?.id, interestsRefreshTick]);
 
-  // ── 3. Debouncing ─────────────────────────────────────────────────────────
+  // ── 3. Load Interest Recommendations ─────────────────────────────────────
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!user?.id || !token || !user.interests?.length) {
+      setInterestRecommendations([]);
+      setInterestRecommendationsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setInterestRecommendationsLoading(true);
+    fetch(getApiUrl('/api/recommendations?limit=6'), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data: { data?: unknown[] }) => {
+        if (cancelled) return;
+        const rows = Array.isArray(data.data) ? data.data : [];
+        setInterestRecommendations(rows.map((row) => mapApiEventToItem(row as Record<string, unknown>)).filter(isEventUpcoming));
+      })
+      .catch(() => {
+        if (!cancelled) setInterestRecommendations([]);
+      })
+      .finally(() => {
+        if (!cancelled) setInterestRecommendationsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.interests, interestsRefreshTick]);
+
+  // ── 4. Debouncing ─────────────────────────────────────────────────────────
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => window.clearTimeout(t);
@@ -137,7 +171,7 @@ export default function HomePage() {
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
-  // ── 4. Main Events Fetch ──────────────────────────────────────────────────
+  // ── 5. Main Events Fetch ──────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const params = new URLSearchParams({ limit: '50', page: '1' });
@@ -176,7 +210,7 @@ export default function HomePage() {
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
-  // ── 5. Filtered Events logic ──────────────────────────────────────────────
+  // ── 6. Filtered Events logic ──────────────────────────────────────────────
   const filtered = useMemo(() => {
     return events.filter((e) => {
       if (!isEventUpcoming(e)) return false;
@@ -188,15 +222,6 @@ export default function HomePage() {
       return true;
     });
   }, [events, budgetMax, category, debouncedDate, selectedCity]);
-
-  const interestBasedEvents = useMemo(() => {
-    if (!user?.interests?.length) return [];
-    const normalizedInterests = user.interests.map((interest) => interest.toLowerCase());
-    return filtered.filter((event) => {
-      const eventText = `${event.category} ${event.title} ${event.description}`.toLowerCase();
-      return normalizedInterests.some((interest) => eventText.includes(interest));
-    });
-  }, [filtered, user?.interests]);
 
   const friendActivity = useMemo(() => {
     if (!user?.friends?.length) return [];
@@ -221,7 +246,7 @@ export default function HomePage() {
     navigate(`/event/${id}`, { state: selectedEvent ? { event: selectedEvent } : undefined });
   };
 
-  // ── 6. Components ──────────────────────────────────────────────────────────
+  // ── 7. Components ──────────────────────────────────────────────────────────
   const SectionHeader = ({ icon: Icon, title, badge, sectionKey }: { icon: any; title: string; badge?: string; sectionKey: string }) => (
     <button type="button" onClick={() => toggleSection(sectionKey)} className="flex w-full items-center gap-2 pt-6 pb-2">
       <Icon className="h-5 w-5 text-primary shrink-0" />
@@ -343,9 +368,15 @@ export default function HomePage() {
             <SectionHeader icon={Sparkles} title="Based On Your Interests" sectionKey="interests" />
             {!collapsed['interests'] && (
               user.interests?.length ? (
-                interestBasedEvents.length > 0 ? (
+                interestRecommendationsLoading ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="h-52 animate-pulse rounded-2xl glass-card" />
+                    ))}
+                  </div>
+                ) : interestRecommendations.length > 0 ? (
                   <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {interestBasedEvents.slice(0, 6).map((event, i) => (
+                    {interestRecommendations.map((event, i) => (
                       <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
                         <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
                       </motion.div>
