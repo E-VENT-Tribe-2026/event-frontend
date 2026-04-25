@@ -9,6 +9,7 @@ export type ApiNotification = {
   event_title?: string | null;
   created_at?: string | null;
   read?: boolean;
+  actor_name?: string | null;
 };
 
 function normalizeType(type: string): string {
@@ -24,28 +25,30 @@ export function relativeTime(isoDate?: string | null): string {
   const ts = new Date(isoDate).getTime();
   if (Number.isNaN(ts)) return '';
   const sec = Math.max(1, Math.floor((Date.now() - ts) / 1000));
-  if (sec < 60) return `${sec}s ago`;
+  if (sec < 60) return sec === 1 ? 'just now' : `${sec} seconds ago`;
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return min === 1 ? '1 minute ago' : `${min} minutes ago`;
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+  if (hr < 24) return hr === 1 ? '1 hour ago' : `${hr} hours ago`;
   const d = Math.floor(hr / 24);
-  if (d < 7) return `${d}d ago`;
-  return new Date(ts).toLocaleDateString();
+  if (d < 7) return d === 1 ? 'yesterday' : `${d} days ago`;
+  const w = Math.floor(d / 7);
+  if (w < 5) return w === 1 ? '1 week ago' : `${w} weeks ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return mo === 1 ? '1 month ago' : `${mo} months ago`;
+  const yr = Math.floor(d / 365);
+  return yr === 1 ? '1 year ago' : `${yr} years ago`;
 }
 
 export async function fetchNotifications(token: string): Promise<ApiNotification[]> {
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' } as const;
-  // Support both backend shapes:
-  // 1) GET /api/notifications
-  // 2) GET /api/notifications/all?page=1&limit=50
-  let res = await fetch(getApiUrl(API_ENDPOINTS.NOTIFICATIONS), { headers });
-  if (!res.ok && res.status === 404) {
-    res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/all?page=1&limit=50`), { headers });
-  }
+  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/all`), { headers });
   if (!res.ok) throw new Error('Failed to load notifications');
   const body = (await res.json().catch(() => [])) as any;
-  const rawRows = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [];
+  const rawRows = Array.isArray(body) ? body
+    : Array.isArray(body?.data) ? body.data
+    : Array.isArray(body?.notifications) ? body.notifications
+    : [];
   return rawRows.map((row: any) => ({
     id: String(row.id ?? ''),
     type: normalizeType(String(row.type ?? 'update')),
@@ -64,6 +67,12 @@ export async function fetchNotifications(token: string): Promise<ApiNotification
           : null,
     created_at: typeof row.created_at === 'string' ? row.created_at : null,
     read: Boolean(row.read ?? row.is_read),
+    actor_name:
+      typeof row.actor_name === 'string' ? row.actor_name
+      : typeof row.sender_name === 'string' ? row.sender_name
+      : typeof row.triggered_by_name === 'string' ? row.triggered_by_name
+      : typeof row.profiles?.full_name === 'string' ? row.profiles.full_name
+      : null,
   }));
 }
 
@@ -83,4 +92,13 @@ export async function markNotificationRead(token: string, id: string): Promise<v
     });
   }
   if (!res.ok) throw new Error('Failed to mark notification read');
+}
+
+export async function deleteNotification(token: string, id: string): Promise<void> {
+  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' } as const;
+  let res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/${id}`), { method: 'DELETE', headers });
+  if (!res.ok && res.status === 404) {
+    res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/delete/${id}`), { method: 'DELETE', headers });
+  }
+  if (!res.ok) throw new Error('Failed to delete notification');
 }

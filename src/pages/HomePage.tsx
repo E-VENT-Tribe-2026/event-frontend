@@ -211,17 +211,27 @@ export default function HomePage() {
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
   // ── 6. Filtered Events logic ──────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    return events.filter((e) => {
+  const applyFilters = (list: EventItem[]) =>
+    list.filter((e) => {
       if (!isEventUpcoming(e)) return false;
       if (e.budget > budgetMax) return false;
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedDate && e.date !== debouncedDate) return false;
       const city = extractCityFromLocation(e.location || '');
       if (selectedCity && city !== selectedCity) return false;
+      if (debouncedSearch && !e.title.toLowerCase().includes(debouncedSearch.toLowerCase())) return false;
       return true;
     });
-  }, [events, budgetMax, category, debouncedDate, selectedCity]);
+
+  const filtered = useMemo(
+    () => applyFilters(events),
+    [events, budgetMax, category, debouncedDate, selectedCity, debouncedSearch],
+  );
+
+  const filteredRecommendations = useMemo(
+    () => applyFilters(interestRecommendations),
+    [interestRecommendations, budgetMax, category, debouncedDate, selectedCity, debouncedSearch],
+  );
 
   const friendActivity = useMemo(() => {
     if (!user?.friends?.length) return [];
@@ -374,9 +384,9 @@ export default function HomePage() {
                       <div key={i} className="h-52 animate-pulse rounded-2xl glass-card" />
                     ))}
                   </div>
-                ) : interestRecommendations.length > 0 ? (
+                ) : filteredRecommendations.length > 0 ? (
                   <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {interestRecommendations.map((event, i) => (
+                    {filteredRecommendations.map((event, i) => (
                       <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
                         <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
                       </motion.div>

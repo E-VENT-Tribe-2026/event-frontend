@@ -24,7 +24,6 @@ export default function SignupPage() {
   const [showPw, setShowPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [dob, setDob] = useState('');
-  const [dobInputType, setDobInputType] = useState<'text' | 'date'>('text');
   const [gender, setGender] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
   const [profilePhoto, setProfilePhoto] = useState('');
@@ -238,31 +237,18 @@ return (
           {errors.email && <p className="text-xs text-destructive px-1">{errors.email}</p>}
 
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label htmlFor="signup-dob" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
+            <div>
+              <label htmlFor="signup-dob" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5 mb-1">
                 Birthdate
               </label>
               <input
                 id="signup-dob"
-                type={dobInputType}
-                placeholder="YYYY-MM-DD (min. 18)"
+                type="date"
                 value={dob}
-                onFocus={() => setDobInputType('date')}
-                onBlur={() => {
-                  if (!dob) setDobInputType('text');
-                }}
                 onChange={e => setDob(e.target.value)}
-                className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50"
-                aria-describedby={errors.dob ? 'signup-dob-hint signup-dob-error' : 'signup-dob-hint'}
+                className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50"
               />
-              <p id="signup-dob-hint" className="text-[10px] text-muted-foreground px-0.5">
-                Tap the field to open the calendar picker.
-              </p>
-              {errors.dob && (
-                <p id="signup-dob-error" className="text-xs text-destructive mt-0.5">
-                  {errors.dob}
-                </p>
-              )}
+              {errors.dob && <p className="text-xs text-destructive mt-1">{errors.dob}</p>}
             </div>
             <div className="space-y-1">
               <label htmlFor="signup-gender" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5">

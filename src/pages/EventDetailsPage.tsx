@@ -801,8 +801,13 @@ export default function EventDetailsPage() {
             <>
               <button
                 type="button"
-                onClick={() => navigate(`/event/${event.id}/edit`)}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-primary/45 bg-primary/15 py-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/25 active:scale-[0.98]"
+                disabled={isPastEvent}
+                onClick={() => !isPastEvent && navigate(`/event/${event.id}/edit`)}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
+                  isPastEvent
+                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                    : 'border-primary/45 bg-primary/15 text-primary hover:bg-primary/25'
+                }`}
               >
                 <Pencil className="h-4 w-4 shrink-0" />
                 Edit event
@@ -821,16 +826,16 @@ export default function EventDetailsPage() {
             <>
               <button
                 type="button"
-                onClick={() => { if (!hasJoined && !participationLoading) void handleJoinOrRequest(); }}
-                disabled={hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
+                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent) void handleJoinOrRequest(); }}
+                disabled={isPastEvent || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  hasJoined || participationLoading || isUpdatingParticipation
+                  isPastEvent || hasJoined || participationLoading || isUpdatingParticipation
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
                 <UserPlus className="h-4 w-4 shrink-0" />
-                Join Event
+                {isPastEvent ? 'Event Ended' : 'Join Event'}
               </button>
               <button
                 type="button"
