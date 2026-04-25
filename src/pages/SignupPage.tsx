@@ -238,7 +238,11 @@ return (
 
           <div className="grid grid-cols-2 gap-3">
             <div>
+              <label htmlFor="signup-dob" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5 mb-1">
+                Birthdate
+              </label>
               <input
+                id="signup-dob"
                 type="date"
                 value={dob}
                 onChange={e => setDob(e.target.value)}
