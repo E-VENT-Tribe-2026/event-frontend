@@ -394,14 +394,6 @@ export default function CreateEventPage() {
           </div>
         </div>
 
-        {/* Requires approval toggle */}
-        <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-          <div className="flex items-center gap-2 text-sm text-foreground"><ShieldCheck className="h-4 w-4" /> Require Approval</div>
-          <button type="button" onClick={() => update('requiresApproval', !form.requiresApproval)} className={`h-6 w-11 rounded-full transition-colors ${form.requiresApproval ? 'bg-primary' : 'bg-muted'}`}>
-            <div className={`h-5 w-5 rounded-full bg-white transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
-
         {/* Actions */}
         <div className="flex gap-3 pt-4">
           <button type="button" onClick={() => navigate(-1)} className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground">Cancel</button>
