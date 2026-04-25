@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getNotifications, saveNotifications, type Notification } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { fetchNotifications, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info } from 'lucide-react';
+import { fetchNotifications, markNotificationRead, relativeTime, deleteNotification, type ApiNotification } from '@/lib/notificationsApi';
+import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -69,6 +69,7 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [usingFallback, setUsingFallback] = useState(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
 
   const resolveToken = async (): Promise<string | null> => {
@@ -77,19 +78,12 @@ export default function NotificationsPage() {
     if (!supabase) return null;
     const { data } = await supabase.auth.getSession();
     const token = data?.session?.access_token ?? null;
-    if (token) {
-      setAuthToken(token);
-      return token;
-    }
+    if (token) { setAuthToken(token); return token; }
     return null;
   };
 
   const loadNotifications = async () => {
-    if (!user) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
+    if (!user) { setItems([]); setLoading(false); return; }
     setLoading(true);
     const token = await resolveToken();
     if (!token) {
@@ -115,9 +109,7 @@ export default function NotificationsPage() {
     }
   };
 
-  useEffect(() => {
-    loadNotifications();
-  }, [user?.id]);
+  useEffect(() => { loadNotifications(); }, [user?.id]);
 
   const unreadCount = useMemo(() => items.filter((n) => !n.read).length, [items]);
 
@@ -145,6 +137,20 @@ export default function NotificationsPage() {
       }
     }
     if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
+  };
+
+  const onDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeletingIds((prev) => new Set(prev).add(id));
+    const token = await resolveToken();
+    try {
+      if (token) await deleteNotification(token, id);
+      setItems((prev) => prev.filter((x) => x.id !== id));
+    } catch {
+      setToast({ show: true, message: 'Could not delete notification.', type: 'error' });
+    } finally {
+      setDeletingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    }
   };
 
   return (
@@ -177,6 +183,7 @@ export default function NotificationsPage() {
         )}
         {!loading && items.map((n, i) => {
           const Icon = iconMap[n.type];
+          const isDeleting = deletingIds.has(n.id);
           return (
             <motion.div
               key={n.id}
@@ -199,9 +206,18 @@ export default function NotificationsPage() {
                   <p className="text-[10px] text-primary">Open event details</p>
                 )}
               </div>
-              <div className="shrink-0 text-right">
-                <span className="block text-xs text-muted-foreground">{relativeTime(n.createdAt)}</span>
+              <div className="shrink-0 flex flex-col items-end gap-2">
+                <span className="text-xs text-muted-foreground">{relativeTime(n.createdAt)}</span>
                 {markingId === n.id && <span className="text-[10px] text-muted-foreground">Saving…</span>}
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={(e) => void onDelete(n.id, e)}
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 transition-colors"
+                  aria-label="Delete notification"
+                >
+                  {isDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                </button>
               </div>
             </motion.div>
           );
