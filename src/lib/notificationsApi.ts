@@ -47,7 +47,7 @@ export function relativeTime(isoDate?: string | null): string {
 
 export async function fetchNotifications(token: string): Promise<ApiNotification[]> {
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' } as const;
-  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/all`), { headers });
+  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/all?limit=100&page=1`), { headers });
   if (!res.ok) throw new Error('Failed to load notifications');
   const body = (await res.json().catch(() => [])) as any;
   const rawRows = Array.isArray(body) ? body

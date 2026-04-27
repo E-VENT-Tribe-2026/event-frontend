@@ -3,6 +3,7 @@ import { getCurrentUser, getUsers, getEvents as getLocalEvents, type EventItem }
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { CATEGORIES } from '@/lib/seedData';
+import { ALL_INTERESTS } from '@/lib/interests';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import EventCard from '@/components/EventCard';
@@ -21,6 +22,7 @@ export default function HomePage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [category, setCategory] = useState('All');
+  const [budgetMin, setBudgetMin] = useState(0);
   const [budgetMax, setBudgetMax] = useState(500);
   const [filterDate, setFilterDate] = useState('');
   const [debouncedDate, setDebouncedDate] = useState('');
@@ -31,6 +33,9 @@ export default function HomePage() {
   const [maxPrice, setMaxPrice] = useState(500);
   const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [visibleInterests, setVisibleInterests] = useState(3);
+  const [visibleAll, setVisibleAll] = useState(6);
+  const PAGE = 6;
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -108,6 +113,7 @@ export default function HomePage() {
       .then((data: { max_price: number }) => {
         setMaxPrice(data.max_price);
         setBudgetMax(data.max_price);
+        setBudgetMin(0);
       })
       .catch(() => {});
   }, []);
@@ -214,7 +220,7 @@ export default function HomePage() {
   const applyFilters = (list: EventItem[]) =>
     list.filter((e) => {
       if (!isEventUpcoming(e)) return false;
-      if (e.budget > budgetMax) return false;
+      if (e.budget < budgetMin || e.budget > budgetMax) return false;
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedDate && e.date !== debouncedDate) return false;
       const city = extractCityFromLocation(e.location || '');
@@ -225,12 +231,12 @@ export default function HomePage() {
 
   const filtered = useMemo(
     () => applyFilters(events),
-    [events, budgetMax, category, debouncedDate, selectedCity, debouncedSearch],
+    [events, budgetMin, budgetMax, category, debouncedDate, selectedCity, debouncedSearch],
   );
 
   const filteredRecommendations = useMemo(
     () => applyFilters(interestRecommendations),
-    [interestRecommendations, budgetMax, category, debouncedDate, selectedCity, debouncedSearch],
+    [interestRecommendations, budgetMin, budgetMax, category, debouncedDate, selectedCity, debouncedSearch],
   );
 
   const friendActivity = useMemo(() => {
@@ -298,19 +304,28 @@ export default function HomePage() {
         )}
 
         {/* Category Filter */}
-        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-          {['All', ...CATEGORIES].map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategory(c)}
-              className={`shrink-0 rounded-full px-4 py-1.5 text-xs font-medium transition-all ${
-                category === c ? 'gradient-primary text-primary-foreground shadow-glow' : 'glass-card text-secondary-foreground hover:text-foreground'
-              }`}
-            >
-              {c}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-2">
+          {['All', ...ALL_INTERESTS].map((c) => {
+            const emoji: Record<string, string> = {
+              Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+              Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+              Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+            };
+            const active = category === c;
+            return (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCategory(c)}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
+                  active ? 'gradient-primary text-primary-foreground shadow-glow' : 'glass-card text-secondary-foreground hover:text-foreground'
+                }`}
+              >
+                {c !== 'All' && <span className="text-sm leading-none">{emoji[c] ?? '✨'}</span>}
+                {c}
+              </button>
+            );
+          })}
         </div>
 
         {/* Search/Location Filters */}
@@ -349,10 +364,89 @@ export default function HomePage() {
           </label>
         </div>
 
-        {/* Budget Slider */}
-        <div className="flex items-center gap-3 rounded-2xl glass-card p-4">
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">Budget: ${budgetMax}</span>
-          <input type="range" min={0} max={maxPrice} value={budgetMax} onChange={(e) => setBudgetMax(Number(e.target.value))} className="h-1 flex-1 accent-primary cursor-pointer" />
+        {/* Budget Range */}
+        <div className="rounded-2xl glass-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase text-muted-foreground">Budget range</span>
+            <span className="text-xs font-medium text-foreground">${budgetMin} — ${budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
+          </div>
+
+          {/* Dual range track */}
+          <div className="relative h-6 flex items-center">
+            <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />
+            <div
+              className="absolute h-1.5 rounded-full bg-primary pointer-events-none"
+              style={{
+                left: `${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}%`,
+                right: `${maxPrice > 0 ? 100 - (budgetMax / maxPrice) * 100 : 0}%`,
+              }}
+            />
+            <input
+              type="range"
+              min={0}
+              max={maxPrice}
+              value={budgetMin}
+              onChange={(e) => {
+                const v = Math.min(Number(e.target.value), budgetMax - 1);
+                setBudgetMin(v);
+              }}
+              className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              style={{ zIndex: budgetMin > maxPrice * 0.9 ? 5 : 3 }}
+            />
+            <input
+              type="range"
+              min={0}
+              max={maxPrice}
+              value={budgetMax}
+              onChange={(e) => {
+                const v = Math.max(Number(e.target.value), budgetMin + 1);
+                setBudgetMax(v);
+              }}
+              className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              style={{ zIndex: 4 }}
+            />
+            {/* visible thumbs */}
+            <div
+              className="absolute h-4 w-4 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+              style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 8px)` }}
+            />
+            <div
+              className="absolute h-4 w-4 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+              style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 8px)` }}
+            />
+          </div>
+
+          {/* numeric inputs */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-muted-foreground">Min ($)</label>
+              <input
+                type="number"
+                min={0}
+                max={budgetMax - 1}
+                value={budgetMin}
+                onChange={(e) => {
+                  const v = Math.min(Math.max(0, Number(e.target.value)), budgetMax - 1);
+                  setBudgetMin(isNaN(v) ? 0 : v);
+                }}
+                className="rounded-lg bg-secondary px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-muted-foreground">Max ($)</label>
+              <input
+                type="number"
+                min={budgetMin + 1}
+                max={maxPrice}
+                value={budgetMax}
+                onChange={(e) => {
+                  const v = Math.max(Math.min(maxPrice, Number(e.target.value)), budgetMin + 1);
+                  setBudgetMax(isNaN(v) ? maxPrice : v);
+                }}
+                className="rounded-lg bg-secondary px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+          </div>
         </div>
 
         {/* Friend Activity Section */}
@@ -385,13 +479,33 @@ export default function HomePage() {
                     ))}
                   </div>
                 ) : filteredRecommendations.length > 0 ? (
-                  <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {filteredRecommendations.map((event, i) => (
-                      <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
-                        <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
-                      </motion.div>
-                    ))}
-                  </motion.div>
+                  <>
+                    <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {filteredRecommendations.slice(0, visibleInterests).map((event, i) => (
+                        <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
+                          <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                    {visibleInterests < filteredRecommendations.length && (
+                      <button
+                        type="button"
+                        onClick={() => setVisibleInterests((v) => v + PAGE)}
+                        className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                      >
+                        View more · {filteredRecommendations.length - visibleInterests} remaining
+                      </button>
+                    )}
+                    {visibleInterests > 3 && (
+                      <button
+                        type="button"
+                        onClick={() => setVisibleInterests(3)}
+                        className="mt-1 w-full rounded-xl py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Show less
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <div className="rounded-2xl glass-card px-4 py-5 text-xs text-muted-foreground text-center">
                     No events match your saved interests yet. Update them from your profile to discover more.
@@ -424,12 +538,30 @@ export default function HomePage() {
                 )}
                 
                 <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {filtered.map((event, i) => (
+                  {filtered.slice(0, visibleAll).map((event, i) => (
                     <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
                       <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
                     </motion.div>
                   ))}
                 </motion.div>
+                {visibleAll < filtered.length && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleAll((v) => v + PAGE)}
+                    className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                  >
+                    View more · {filtered.length - visibleAll} remaining
+                  </button>
+                )}
+                {visibleAll > 9 && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleAll(9)}
+                    className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                  >
+                    Show less
+                  </button>
+                )}
 
                 {filtered.length === 0 && (
                   <div className="rounded-3xl py-20 text-center glass-card">

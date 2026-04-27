@@ -223,3 +223,34 @@
   0%, 100% { box-shadow: 0 0 20px hsl(271 76% 53% / 0.3); }
   50% { box-shadow: 0 0 40px hsl(271 76% 53% / 0.6); }
 }
+
+/* Dual range slider — transparent native thumb so custom thumbs show */
+.dual-range-input {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+}
+.dual-range-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: all;
+}
+.dual-range-input::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  pointer-events: all;
+}
+.dual-range-input::-webkit-slider-runnable-track {
+  background: transparent;
+}
+.dual-range-input::-moz-range-track {
+  background: transparent;
+}
