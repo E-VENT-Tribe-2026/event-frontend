@@ -7,10 +7,12 @@ import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
+import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 import { supabase } from '@/lib/supabase';
+import { ALL_INTERESTS } from '@/lib/interests';
 
-const ALL_INTERESTS = ['Music', 'Sports', 'Gaming', 'Movies', 'Study', 'Travel', 'Tech', 'Art', 'Fitness', 'Coffee', 'Networking', 'Food', 'Wellness'];
 const MIN_AGE = 18;
+const EMAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60;
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -26,8 +28,9 @@ export default function SignupPage() {
   const [interests, setInterests] = useState<string[]>([]);
   const [profilePhoto, setProfilePhoto] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
- const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
+  const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [retryInSeconds, setRetryInSeconds] = useState(0);
   const [showInterests, setShowInterests] = useState(false);
 
   const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -67,9 +70,24 @@ export default function SignupPage() {
     return Object.keys(e).length === 0;
   };
 
+  const isRateLimitError = (message: string) => /rate limit|too many|email rate/i.test(message);
+
+  const startRetryCooldown = () => {
+    setRetryInSeconds(EMAIL_RATE_LIMIT_COOLDOWN_SECONDS);
+    const timer = window.setInterval(() => {
+      setRetryInSeconds((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate() || isSubmitting) return;
+    if (!validate() || isSubmitting || retryInSeconds > 0) return;
     setIsSubmitting(true);
 
     const controller = new AbortController();
@@ -87,9 +105,18 @@ export default function SignupPage() {
 
       if (!res.ok) {
         const isExisting = res.status === 409 || data.message?.toLowerCase().includes('exists');
+        const backendMessage = String(data.detail || data.message || '').trim();
+        const isRateLimited = isRateLimitError(backendMessage);
+        if (isRateLimited) {
+          startRetryCooldown();
+        }
         setToast({ 
           show: true, 
-          message: isExisting ? 'An account with this email already exists.' : (data.detail || data.message || 'Signup failed'), 
+          message: isExisting
+            ? 'An account with this email already exists.'
+            : isRateLimited
+              ? 'Too many email requests. Please wait 1 minute before trying again.'
+              : (backendMessage || 'Signup failed'),
           type: 'error' 
         });
         setIsSubmitting(false);
@@ -134,6 +161,7 @@ export default function SignupPage() {
         email: me.email || email,
         name,
         avatar: profilePhoto || undefined,
+        interests,
       });
 
       navigate('/home');
@@ -150,7 +178,8 @@ export default function SignupPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: getOAuthCallbackUrl('/home'),
+        queryParams: { prompt: 'select_account' },
       },
     });
     if (error) {
@@ -209,38 +238,94 @@ return (
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50" />
+              <label htmlFor="signup-dob" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5 mb-1">
+                Birthdate
+              </label>
+              <input
+                id="signup-dob"
+                type="date"
+                value={dob}
+                onChange={e => setDob(e.target.value)}
+                className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50"
+              />
               {errors.dob && <p className="text-xs text-destructive mt-1">{errors.dob}</p>}
             </div>
-            <select value={gender} onChange={e => setGender(e.target.value)} className="rounded-xl bg-secondary px-3 text-xs outline-none focus:ring-2 focus:ring-primary/50 appearance-none">
-              <option value="">Gender</option>
+            <div className="space-y-1">
+              <label htmlFor="signup-gender" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
+                Gender
+              </label>
+              <select
+                id="signup-gender"
+                value={gender}
+                onChange={e => setGender(e.target.value)}
+                className="h-[42px] w-full rounded-xl bg-secondary px-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
+              >
+              <option value="">Select gender</option>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
               <option value="Other">Other</option>
             </select>
+            </div>
           </div>
 
           {/* Interests */}
-          <button type="button" onClick={() => setShowInterests(!showInterests)} className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors">
-            <span className="truncate">
-              {interests.length ? interests.join(', ') : 'Select Interests'}
-            </span>
-            <ChevronDown className={`h-4 w-4 transition-transform ${showInterests ? 'rotate-180' : ''}`} />
-          </button>
-          
-          <AnimatePresence>
-            {showInterests && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <div className="flex flex-wrap gap-2 p-3 bg-secondary/50 rounded-xl border border-border/50">
-                  {ALL_INTERESTS.map(i => (
-                    <button key={i} type="button" onClick={() => toggleInterest(i)} className={`px-3 py-1 text-[10px] font-medium rounded-full transition-all ${interests.includes(i) ? 'bg-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
-                      {i}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowInterests(!showInterests)}
+              className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-foreground">Interests</span>
+                {interests.length > 0 && (
+                  <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                    {interests.length} selected
+                  </span>
+                )}
+              </div>
+              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showInterests ? 'rotate-180' : ''}`} />
+            </button>
+
+            <AnimatePresence>
+              {showInterests && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {ALL_INTERESTS.map((i) => {
+                      const emoji: Record<string, string> = {
+                        Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+                        Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+                        Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+                      };
+                      const selected = interests.includes(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => toggleInterest(i)}
+                          className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-3 text-center transition-all active:scale-95 ${
+                            selected
+                              ? 'bg-primary/20 border border-primary/50 shadow-sm'
+                              : 'bg-secondary/60 border border-transparent hover:border-border'
+                          }`}
+                        >
+                          <span className="text-xl">{emoji[i] ?? '✨'}</span>
+                          <span className={`text-[10px] font-medium leading-tight ${selected ? 'text-primary' : 'text-muted-foreground'}`}>
+                            {i}
+                          </span>
+                          {selected && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Password */}
           <div className="relative">
@@ -262,8 +347,8 @@ return (
           </div>
           {errors.confirmPw && <p className="text-xs text-destructive px-1">{errors.confirmPw}</p>}
 
-          <button type="submit" disabled={isSubmitting} className="w-full gradient-primary rounded-xl py-3 text-sm font-bold text-primary-foreground shadow-glow transition-all active:scale-[0.98] disabled:opacity-70">
-            {isSubmitting ? 'Creating Account...' : 'Create Account'}
+          <button type="submit" disabled={isSubmitting || retryInSeconds > 0} className="w-full gradient-primary rounded-xl py-3 text-sm font-bold text-primary-foreground shadow-glow transition-all active:scale-[0.98] disabled:opacity-70">
+            {isSubmitting ? 'Creating Account...' : retryInSeconds > 0 ? `Try again in ${retryInSeconds}s` : 'Create Account'}
           </button>
         </form>
 

@@ -1,6 +1,6 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { getEvents, getCurrentUser, addReview, reportEvent, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, deleteEvent, type EventItem } from '@/lib/storage';
-import { ArrowLeft, MapPin, Clock, Users, Star, Flag, Send, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Trash2 } from 'lucide-react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { getEvents, getCurrentUser, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, deleteEvent, type EventItem } from '@/lib/storage';
+import { ArrowLeft, MapPin, Clock, Users, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import AppToast from '@/components/AppToast';
@@ -15,6 +15,8 @@ import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 import EventLocationMap from '@/components/EventLocationMap';
+import { isEventUpcoming } from '@/lib/eventTime';
+import { getCategoryBanner } from '@/lib/categoryBanners';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
@@ -31,29 +33,32 @@ async function readApiErrorMessage(res: Response): Promise<string> {
 export default function EventDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [events, setEventsState] = useState(getEvents());
   const [apiEvent, setApiEvent] = useState<EventItem | null>(null);
+  const [apiEventStatus, setApiEventStatus] = useState<string | null>(null);
   const [loadingApi, setLoadingApi] = useState(true);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [showReviewForm, setShowReviewForm] = useState(false);
-  const [reviewText, setReviewText] = useState('');
-  const [reviewRating, setReviewRating] = useState(5);
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportReason, setReportReason] = useState('');
+  const [showVenuePaymentModal, setShowVenuePaymentModal] = useState(false);
   const [apiParticipants, setApiParticipants] = useState<Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }>>([]);
   const [isUpdatingParticipation, setIsUpdatingParticipation] = useState(false);
   const [attendeeCount, setAttendeeCount] = useState<number | null>(null);
   const [myParticipationStatus, setMyParticipationStatus] = useState<ParticipationStatus | null>(null);
   const [participationKnown, setParticipationKnown] = useState(false);
+  const [organizerNameOverride, setOrganizerNameOverride] = useState<string>('');
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
-  /** Real Supabase user id from JWT (`/api/auth/me`) — matches `events.created_by` even if local profile id was wrong. */
   const [backendAuthUserId, setBackendAuthUserId] = useState<string | null>(null);
   const user = getCurrentUser();
   const allUsers = getUsers();
 
   const localEvent = useMemo(() => events.find((e) => e.id === id) ?? null, [events, id]);
-  const event = apiEvent ?? localEvent ?? null;
+  const routeEvent = useMemo(() => {
+    const state = location.state as { event?: EventItem } | null;
+    if (!state?.event || !id) return null;
+    return state.event.id === id ? state.event : null;
+  }, [location.state, id]);
+  const event = apiEvent ?? routeEvent ?? localEvent ?? null;
   const useApiParticipation = apiEvent !== null;
 
   const getApiToken = async (): Promise<string | null> => {
@@ -69,7 +74,32 @@ export default function EventDetailsPage() {
     return null;
   };
 
-  /** Sync attendee count, current user status, and roster (when allowed by API). */
+  // Hoisted so both handleJoinOrRequest and handleVenuePaymentConfirm can use it
+  const tryJoinViaApi = async (): Promise<boolean> => {
+    if (!event) return false;
+    const token = await getApiToken();
+    if (!token) {
+      setToast({ show: true, message: 'Session missing. Please sign in again.', type: 'error' });
+      return false;
+    }
+    try {
+      const res = await fetch(getApiUrl(`/api/participants/${event.id}/join`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
+        return false;
+      }
+      await syncParticipationFromBackend();
+      setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+      return true;
+    } catch {
+      setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
+      return false;
+    }
+  };
+
   const syncParticipationFromBackend = useCallback(async () => {
     if (!id || !apiEvent) {
       setAttendeeCount(null);
@@ -79,19 +109,36 @@ export default function EventDetailsPage() {
       return;
     }
 
+    let participantsList: Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }> = [];
     try {
-      const cRes = await fetch(getApiUrl(`/api/participants/${id}/participants/count`));
-      if (cRes.ok) {
-        const c = await cRes.json().catch(() => ({}));
-        if (typeof c.count === 'number') setAttendeeCount(c.count);
-        else setAttendeeCount(null);
+      const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), {
+        headers: { Accept: 'application/json' },
+      });
+      if (pRes.ok) {
+        const list = await pRes.json().catch(() => []);
+        participantsList = Array.isArray(list) ? list : [];
+        setAttendeeCount(participantsList.length);
+        if (apiEvent?.organizerId) {
+          const ownerRow = participantsList.find((p) => sameAuthUserId(p.user_id, apiEvent.organizerId));
+          const ownerName = String(ownerRow?.profiles?.full_name || '').trim();
+          setOrganizerNameOverride(ownerName);
+        } else {
+          setOrganizerNameOverride('');
+        }
       }
     } catch {
-      setAttendeeCount(null);
+      // Keep previous attendee count if backend temporarily fails.
     }
 
     const token = await getApiToken();
-    if (!token || !user?.id) {
+    let authUserId: string | null = backendAuthUserId;
+    if (token && !authUserId) {
+      const me = await fetchAuthUserFromToken(token);
+      authUserId = me?.id ?? null;
+    }
+    if (!authUserId) authUserId = user?.id ?? null;
+
+    if (!authUserId) {
       setMyParticipationStatus('none');
       setParticipationKnown(true);
       setApiParticipants([]);
@@ -99,36 +146,39 @@ export default function EventDetailsPage() {
     }
 
     let status: ParticipationStatus = 'none';
-    try {
-      const sRes = await fetch(getApiUrl(`/api/participants/${id}/my-status`), {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      });
-      if (sRes.ok) {
-        const data = await sRes.json().catch(() => ({}));
-        if (data.status === 'going') status = 'going';
-        else if (data.status === 'removed') status = 'removed';
+    const inferredJoined = Boolean(
+      participantsList.some(
+        (p) =>
+          sameAuthUserId(p.user_id, authUserId) && String(p.status || 'going').toLowerCase() !== 'removed',
+      ),
+    );
+    if (token) {
+      try {
+        const sRes = await fetch(getApiUrl(`/api/participants/${id}/my-status`), {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        });
+        if (sRes.ok) {
+          const data = await sRes.json().catch(() => ({}));
+          const st = typeof data?.status === 'string' ? data.status : '';
+          if (st === 'going') status = 'going';
+          else if (st === 'removed') status = 'removed';
+          else if (st === 'none') status = 'none';
+          else if (inferredJoined) status = 'going';
+        } else if (inferredJoined) {
+          status = 'going';
+        }
+      } catch {
+        status = inferredJoined ? 'going' : 'none';
       }
-    } catch {
-      status = 'none';
+    } else {
+      status = inferredJoined ? 'going' : 'none';
     }
     setMyParticipationStatus(status);
 
     const isOwner =
-      sameAuthUserId(apiEvent.organizerId, backendAuthUserId) || sameAuthUserId(apiEvent.organizerId, user?.id);
+      sameAuthUserId(apiEvent.organizerId, authUserId) || sameAuthUserId(apiEvent.organizerId, user?.id);
     if (isOwner || status === 'going') {
-      try {
-        const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
-        if (pRes.ok) {
-          const list = await pRes.json().catch(() => []);
-          setApiParticipants(Array.isArray(list) ? list : []);
-        } else {
-          setApiParticipants([]);
-        }
-      } catch {
-        setApiParticipants([]);
-      }
+      setApiParticipants(participantsList);
     } else {
       setApiParticipants([]);
     }
@@ -147,12 +197,9 @@ export default function EventDetailsPage() {
       const me = await fetchAuthUserFromToken(token);
       if (!cancelled) setBackendAuthUserId(me?.id ?? null);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id, user?.id]);
 
-  // Always try to load canonical event from API (join/leave targets DB rows by this id).
   useEffect(() => {
     if (!id) {
       setLoadingApi(false);
@@ -164,17 +211,22 @@ export default function EventDetailsPage() {
     fetch(getApiUrl(`/api/events/${id}`))
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => {
-        if (!cancelled) setApiEvent(mapApiEventToItem(data));
+        if (!cancelled) {
+          setApiEvent(mapApiEventToItem(data));
+          setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+          setParticipationKnown(false); // reset so skeleton shows while sync runs
+        }
       })
       .catch(() => {
-        if (!cancelled) setApiEvent(null);
+        if (!cancelled) {
+          setApiEvent(null);
+          setApiEventStatus(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingApi(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   useEffect(() => {
@@ -215,27 +267,20 @@ export default function EventDetailsPage() {
     event &&
       (!useApiParticipation
         ? isEventOwner || Boolean(user && event.participants.includes(user.id))
-        : participationKnown && (isEventOwner || hasJoined)),
+        : (isEventOwner || (participationKnown && hasJoined))),
   );
 
   const wasRemovedFromEvent = Boolean(
     useApiParticipation && user && participationKnown && myParticipationStatus === 'removed',
   );
+  const isCancelledEvent = String(apiEventStatus || '').toLowerCase() === 'cancelled';
+  const canAccessEventChat = Boolean(user && !isCancelledEvent && (isEventOwner || hasJoined));
 
-  const alreadyReviewed = user && event ? (event.reviews || []).some(r => r.userId === user?.id) : false;
-  const alreadyReported = user && event ? (event.reports || []).some(r => r.userId === user?.id) : false;
   const existingRequest = user && event ? getJoinRequests().find(r => r.eventId === event.id && r.userId === user.id) : null;
 
-  // Preview avatars (only when attendee names are allowed to be visible)
   const participantUsers = useMemo(() => {
     if (!event || !canViewFullAttendeeList) {
-      return [] as Array<{
-        id: string;
-        profilePhoto?: string;
-        avatar?: string;
-        name: string;
-        email?: string;
-      }>;
+      return [] as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
     }
     if (useApiParticipation && apiParticipants.length > 0) {
       return apiParticipants
@@ -252,13 +297,7 @@ export default function EventDetailsPage() {
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
         if (!u) return null;
-        return {
-          id: u.id,
-          profilePhoto: u.profilePhoto,
-          avatar: u.avatar,
-          name: u.name,
-          email: u.email,
-        };
+        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
       })
       .filter(Boolean)
       .slice(0, 6) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
@@ -266,13 +305,7 @@ export default function EventDetailsPage() {
 
   const fullAttendeeRows = useMemo(() => {
     if (!event || !canViewFullAttendeeList) {
-      return [] as Array<{
-        id: string;
-        profilePhoto?: string;
-        avatar?: string;
-        name: string;
-        email?: string;
-      }>;
+      return [] as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
     }
     if (useApiParticipation && apiParticipants.length > 0) {
       return apiParticipants
@@ -288,13 +321,7 @@ export default function EventDetailsPage() {
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
         if (!u) return null;
-        return {
-          id: u.id,
-          profilePhoto: u.profilePhoto,
-          avatar: u.avatar,
-          name: u.name,
-          email: u.email,
-        };
+        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
       })
       .filter(Boolean) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
@@ -303,13 +330,11 @@ export default function EventDetailsPage() {
     if (loadingApi && !localEvent) return;
     const ev = apiEvent ?? localEvent ?? null;
     if (!ev?.title?.trim()) {
-      if (!loadingApi && !ev) {
-        document.title = formatPageTitle('Event not found');
-      }
+      if (!loadingApi && !ev) document.title = formatPageTitle('Event not found');
       return;
     }
     document.title = formatPageTitle(ev.title);
-  }, [loadingApi, localEvent, apiEvent, apiEvent?.id, apiEvent?.title, localEvent?.id, localEvent?.title]);
+  }, [loadingApi, localEvent, routeEvent, apiEvent, apiEvent?.id, apiEvent?.title, localEvent?.id, localEvent?.title, routeEvent?.id, routeEvent?.title]);
 
   if (loadingApi && !localEvent) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
@@ -317,6 +342,13 @@ export default function EventDetailsPage() {
   if (!event) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
   }
+
+  const isPastEvent = !isEventUpcoming(event);
+  const isChatExpired = isPastEvent && (() => {
+    const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
+    const ts = new Date(normalized).getTime();
+    return !Number.isNaN(ts) && Date.now() - ts > 48 * 60 * 60 * 1000;
+  })();
 
   if (wasRemovedFromEvent) {
     return (
@@ -335,7 +367,7 @@ export default function EventDetailsPage() {
             <h2 className="text-lg font-semibold text-foreground">You no longer have access</h2>
             <p className="text-sm text-muted-foreground">
               The organizer removed you from <span className="font-medium text-foreground">{event.title}</span>. You
-              can&apos;t rejoin this event from the app.
+              can't rejoin this event from the app.
             </p>
             <button
               type="button"
@@ -353,49 +385,38 @@ export default function EventDetailsPage() {
 
   const participationLoading = useApiParticipation && Boolean(user) && !participationKnown && !isEventOwner;
 
-  const handleJoinOrRequest = async () => {
-    if (!user) {
-      navigate('/login');
+  const handleVenuePaymentConfirm = async () => {
+    setShowVenuePaymentModal(false);
+    if (!event || !user) return;
+    if (isPastEvent) {
+      setToast({ show: true, message: 'This event has already ended.', type: 'error' });
       return;
     }
-    if (!event) return;
-    if (isEventOwner) {
-      setToast({ show: true, message: 'You are hosting this event.', type: 'error' });
-      return;
-    }
-    if (isOrganizer) {
-      setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
-      return;
-    }
-
-    if (isUpdatingParticipation) return;
     setIsUpdatingParticipation(true);
-
-const tryJoinViaApi = async (): Promise<boolean> => {
-  const token = await getApiToken();
-  if (!token) {
-    setToast({ show: true, message: 'Session missing. Please sign in again.', type: 'error' });
-    return false;
-  }
-  try {
-    const res = await fetch(getApiUrl(`/api/participants/${event.id}/join`), {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    });
-    if (!res.ok) {
-      setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
-      return false;
+    if (useApiParticipation) {
+      await tryJoinViaApi();
+    } else {
+      joinEvent(event.id, user.id);
+      setEventsState(getEvents());
+      setToast({ show: true, message: 'Successfully joined!', type: 'success' });
     }
-    await syncParticipationFromBackend();
-    setToast({ show: true, message: 'Successfully joined!', type: 'success' });
-    return true;
-  } catch {
-    setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
-    return false;
-  }
-};
+    setIsUpdatingParticipation(false);
+  };
 
+  const handleJoinOrRequest = async () => {
+    if (!user) { navigate('/login'); return; }
+    if (!event) return;
+    if (isPastEvent) {
+      setToast({ show: true, message: 'You cannot join or leave a past event.', type: 'error' });
+      return;
+    }
+    if (isAtCapacity) {
+      setToast({ show: true, message: 'This event has reached its maximum capacity.', type: 'error' });
+      return;
+    }
     if (hasJoined) {
+      if (isUpdatingParticipation) return;
+      setIsUpdatingParticipation(true);
       if (useApiParticipation) {
         const token = await getApiToken();
         if (!token) {
@@ -405,15 +426,17 @@ const tryJoinViaApi = async (): Promise<boolean> => {
         }
         try {
           const res = await fetch(getApiUrl(`/api/participants/${event.id}/leave`), {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-});
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          });
           if (!res.ok) {
             setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
             setIsUpdatingParticipation(false);
             return;
           }
           await syncParticipationFromBackend();
+          leaveEvent(event.id, user.id);
+          setEventsState(getEvents());
           setToast({ show: true, message: 'You left the event.', type: 'success' });
         } catch {
           setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
@@ -428,12 +451,25 @@ const tryJoinViaApi = async (): Promise<boolean> => {
       setIsUpdatingParticipation(false);
       return;
     }
+    if (isEventOwner) {
+      setToast({ show: true, message: 'You are hosting this event.', type: 'error' });
+      return;
+    }
+    if (isOrganizer) {
+      setToast({ show: true, message: 'Organizers cannot join events', type: 'error' });
+      return;
+    }
+    if (isUpdatingParticipation) return;
+    setIsUpdatingParticipation(true);
 
     if (event.requiresApproval) {
       if (existingRequest) {
         if (existingRequest.status === 'approved') {
           if (event.budget > 0) {
-            navigate(`/payment/${event.id}`);
+            // Show venue payment modal instead of navigating
+            setIsUpdatingParticipation(false);
+            setShowVenuePaymentModal(true);
+            return;
           } else if (useApiParticipation) {
             await tryJoinViaApi();
           } else {
@@ -461,8 +497,10 @@ const tryJoinViaApi = async (): Promise<boolean> => {
       setIsUpdatingParticipation(false);
     } else {
       if (event.budget > 0) {
-        navigate(`/payment/${event.id}`);
+        // Show venue payment modal instead of navigating
         setIsUpdatingParticipation(false);
+        setShowVenuePaymentModal(true);
+        return;
       } else {
         if (useApiParticipation) {
           await tryJoinViaApi();
@@ -492,7 +530,7 @@ const tryJoinViaApi = async (): Promise<boolean> => {
         const res = await fetch(getApiUrl(`/api/participants/${event.id}/participants/${participantId}`), {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-});
+        });
         if (!res.ok) {
           setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
           return;
@@ -515,7 +553,7 @@ const tryJoinViaApi = async (): Promise<boolean> => {
 
   const handleDeleteEvent = async () => {
     if (!isEventOwner || !event) return;
-    if (!window.confirm(`Delete “${event.title}”? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete "${event.title}"? This cannot be undone.`)) return;
     setIsDeletingEvent(true);
     try {
       if (useApiParticipation) {
@@ -544,43 +582,33 @@ const tryJoinViaApi = async (): Promise<boolean> => {
     }
   };
 
-  const handleReview = () => {
-    if (!user || !reviewText.trim()) return;
-    addReview(event.id, { userId: user.id, user: user.name, text: reviewText, rating: reviewRating });
-    setEventsState(getEvents());
-    setReviewText('');
-    setShowReviewForm(false);
-    setToast({ show: true, message: 'Review submitted!', type: 'success' });
-  };
-
-  const handleReport = () => {
-    if (!user || !reportReason.trim()) return;
-    reportEvent(event.id, { userId: user.id, reason: reportReason, time: new Date().toISOString() });
-    setEventsState(getEvents());
-    setReportReason('');
-    setShowReportModal(false);
-    setToast({ show: true, message: 'Report submitted.', type: 'success' });
-  };
-
-  const reviews = event.reviews || [];
+  const isFreeEvent = !(Number(event.budget) > 0);
+  const isAtCapacity = Boolean(
+    event.participantsLimit > 0 &&
+    attendeeDisplayCount >= event.participantsLimit &&
+    !hasJoined &&
+    !isEventOwner,
+  );
 
   const getJoinButtonText = () => {
     if (isUpdatingParticipation) return 'Please wait...';
     if (participationLoading) return 'Checking attendance…';
+    if (isPastEvent) return 'Event Ended';
     if (isEventOwner) return "You're hosting";
     if (hasJoined) return 'Leave Event';
+    if (isAtCapacity) return 'Event Full';
     if (isOrganizer) return "Organizers can't join";
     if (event.requiresApproval) {
       if (existingRequest?.status === 'pending') return 'Request Pending...';
-      if (existingRequest?.status === 'approved') return 'Approved — Pay Now';
+      if (existingRequest?.status === 'approved') return !isFreeEvent ? 'Approved — Pay at Venue' : 'Approved — Join Now';
       if (existingRequest?.status === 'rejected') return 'Request Rejected';
       return 'Request to Join';
     }
-    return event.budget > 0 ? `Join — $${event.budget}` : 'Join Event';
+    return !isFreeEvent ? `Join — Pay $${event.budget} at Venue` : 'Join Event';
   };
 
   const showSplitJoinLeave =
-    useApiParticipation && !event.requiresApproval && event.budget === 0 && !isEventOwner && !isOrganizer;
+    !event.requiresApproval && isFreeEvent && !isEventOwner && !isOrganizer && !isPastEvent;
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -588,22 +616,12 @@ const tryJoinViaApi = async (): Promise<boolean> => {
 
       {/* Banner */}
       <div className="relative h-60">
-        <img src={event.image} alt={event.title} className="h-full w-full object-cover" />
+        <img src={event.image || getCategoryBanner(event.category)} alt={event.title} className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-transparent" />
         <button onClick={() => navigate(-1)} className="absolute top-4 left-4 rounded-full glass-card p-2.5">
           <ArrowLeft className="h-5 w-5 text-foreground" />
         </button>
         <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
-          {isEventOwner && (
-            <button
-              type="button"
-              onClick={() => navigate(`/event/${event.id}/edit`)}
-              className="flex items-center gap-1.5 rounded-full glass-card px-3 py-2 text-xs font-semibold text-foreground"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </button>
-          )}
           {event.requiresApproval && (
             <div className="flex items-center gap-1 rounded-full bg-accent/90 px-3 py-1 text-xs font-semibold text-accent-foreground backdrop-blur-sm">
               <ShieldCheck className="h-3 w-3" /> Approval Required
@@ -619,11 +637,10 @@ const tryJoinViaApi = async (): Promise<boolean> => {
             <span className="shrink-0 rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">{event.category}</span>
           </div>
 
-          {/* Organizer */}
           <div className="flex items-center gap-3">
             <img src={event.organizerAvatar} alt="" className="h-10 w-10 rounded-full bg-secondary ring-2 ring-primary/30" />
             <div>
-              <p className="text-sm font-medium text-foreground">{event.organizer}</p>
+              <p className="text-sm font-medium text-foreground">{event.organizer || organizerNameOverride || 'Organizer'}</p>
               <p className="text-xs text-muted-foreground">Organizer</p>
             </div>
           </div>
@@ -634,10 +651,11 @@ const tryJoinViaApi = async (): Promise<boolean> => {
             <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4 text-primary" />{event.date} · {event.time}</div>
             <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4 text-accent" /><span className="truncate">{event.location}</span></div>
             <div className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4 text-primary" />{attendeeDisplayCount}/{event.participantsLimit}</div>
-            <div className="flex items-center gap-2 text-foreground font-semibold">{event.budget === 0 ? 'Free' : `$${event.budget}`}</div>
+            <div className="flex items-center gap-2 text-foreground font-semibold">
+              {isFreeEvent ? 'Free' : `$${event.budget} at venue`}
+            </div>
           </div>
 
-          {/* Participant preview: avatars only when organizer or joined (API rules) */}
           <div className="space-y-1">
             {canViewFullAttendeeList ? (
               <div className="flex items-center gap-2">
@@ -668,22 +686,29 @@ const tryJoinViaApi = async (): Promise<boolean> => {
               <p className="text-xs text-muted-foreground">
                 <span className="font-semibold text-foreground">{attendeeDisplayCount}</span>{' '}
                 {attendeeDisplayCount === 1 ? 'person is' : 'people are'} attending.
-                {user
-                  ? ' Join the event to see who’s going.'
-                  : ' Sign in and join to see who’s going.'}
+                {user ? ' Join the event to see who is going.' : ' Sign in and join to see who is going.'}
               </p>
             )}
           </div>
         </div>
 
-        {/* Full attendee list (organizer + joined only) or count-only message */}
+        {/* Full attendee list */}
         <div className="rounded-2xl glass-card p-4 space-y-3">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <Users className="h-4 w-4 text-primary" />
             Attendees
           </h2>
           {canViewFullAttendeeList ? (
-            fullAttendeeRows.length === 0 ? (
+            (!participationKnown || (useApiParticipation && apiParticipants.length === 0 && !participationKnown)) && useApiParticipation ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-2 rounded-xl bg-secondary/40 px-3 py-2.5">
+                    <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-secondary" />
+                    <div className="h-3 w-32 animate-pulse rounded bg-secondary" />
+                  </div>
+                ))}
+              </div>
+            ) : fullAttendeeRows.length === 0 ? (
               <p className="text-xs text-muted-foreground">No attendees yet.</p>
             ) : (
               <ul className="space-y-2">
@@ -728,18 +753,14 @@ const tryJoinViaApi = async (): Promise<boolean> => {
           )}
         </div>
 
-        {/* Interactive map + Google Maps */}
+        {/* Map */}
         <div className="rounded-2xl glass-card p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <MapPin className="h-4 w-4 text-primary" /> Location
             </h2>
             <a
-              href={openInGoogleMapsUrl({
-                lat: event.lat,
-                lng: event.lng,
-                placeName: event.location,
-              })}
+              href={openInGoogleMapsUrl({ lat: event.lat, lng: event.lng, placeName: event.location })}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-secondary/80"
@@ -752,122 +773,97 @@ const tryJoinViaApi = async (): Promise<boolean> => {
           <p className="text-xs text-muted-foreground">{event.location}</p>
         </div>
 
-        {/* Reviews */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-foreground">Reviews ({reviews.length})</h2>
-            {hasJoined && !alreadyReviewed && (
-              <button onClick={() => setShowReviewForm(!showReviewForm)} className="text-xs text-primary font-medium">Write Review</button>
-            )}
-          </div>
-
-          <AnimatePresence>
-            {showReviewForm && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="rounded-2xl glass-card p-4 space-y-3">
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map(s => (
-                    <button key={s} onClick={() => setReviewRating(s)}>
-                      <Star className={`h-5 w-5 ${s <= reviewRating ? 'fill-accent text-accent' : 'text-muted-foreground'}`} />
-                    </button>
-                  ))}
-                </div>
-                <textarea value={reviewText} onChange={e => setReviewText(e.target.value)} placeholder="Share your experience..." rows={2}
-                  className="w-full rounded-lg bg-secondary p-3 text-sm text-foreground outline-none resize-none focus:ring-2 focus:ring-primary/50" />
-                <button onClick={handleReview} className="flex items-center gap-2 gradient-primary rounded-lg px-4 py-2 text-xs font-semibold text-primary-foreground">
-                  <Send className="h-3 w-3" /> Submit
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {reviews.length > 0 ? reviews.map((r, i) => (
-            <div key={i} className="rounded-2xl glass-card p-4 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">{r.user}</span>
-                <div className="flex">{Array.from({ length: r.rating }, (_, j) => <Star key={j} className="h-3 w-3 fill-accent text-accent" />)}</div>
-              </div>
-              <p className="text-xs text-muted-foreground">{r.text}</p>
-            </div>
-          )) : (
-            <p className="text-xs text-muted-foreground">No reviews yet.</p>
-          )}
-        </div>
-
-        {/* Join / Leave: bottom of the page, above the tab bar. Hosts see Edit/Delete instead. */}
+        {/* Join / Leave */}
         <div className="space-y-2">
           <h2 className="text-base font-semibold text-foreground">
             {isEventOwner ? 'Your event' : 'Join or leave'}
           </h2>
           {isEventOwner ? (
             <p className="text-xs text-muted-foreground">
-              As the host you can edit or delete here. Join and Leave are only for guests — you can’t join your own
-              event.
+              As the host you can edit or delete here. Join and Leave are only for guests — you can't join your own event.
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              {showSplitJoinLeave
+              {isPastEvent
+                ? 'This event already happened. You can still view all event details.'
+                : showSplitJoinLeave
                 ? 'Use Join to attend or Leave to cancel your spot.'
                 : 'One action below handles join, pay, approval, or leave depending on this event.'}
             </p>
           )}
         </div>
+
+        {/* Event Chat Access */}
+        <div className="space-y-2">
+          <h2 className="text-base font-semibold text-foreground">Event chat</h2>
+          {!user ? (
+            <p className="text-xs text-muted-foreground">Sign in and join this event to access the event chat.</p>
+          ) : isCancelledEvent || isChatExpired ? (
+            <p className="text-xs text-muted-foreground">
+              {isChatExpired ? 'Chat is no longer available — this event ended more than 48 hours ago.' : 'This event is canceled. Chat is no longer available.'}
+            </p>
+          ) : canAccessEventChat ? (
+            <button
+              type="button"
+              onClick={() => navigate(`/chat?eventId=${event.id}`)}
+              className="w-full rounded-xl bg-secondary/80 py-3 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+            >
+              Open Event Chat
+            </button>
+          ) : (
+            <p className="text-xs text-muted-foreground">Join this event to access its chat.</p>
+          )}
+        </div>
+
         <div className="flex gap-3">
           {isEventOwner ? (
             <>
               <button
                 type="button"
-                onClick={() => navigate(`/event/${event.id}/edit`)}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-primary/45 bg-primary/15 py-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/25 active:scale-[0.98]"
+                disabled={isPastEvent}
+                onClick={() => !isPastEvent && navigate(`/event/${event.id}/edit`)}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
+                  isPastEvent
+                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                    : 'border-primary/45 bg-primary/15 text-primary hover:bg-primary/25'
+                }`}
               >
                 <Pencil className="h-4 w-4 shrink-0" />
                 Edit event
               </button>
               <button
                 type="button"
-                disabled={isDeletingEvent}
+                disabled={isDeletingEvent || isPastEvent}
                 onClick={() => void handleDeleteEvent()}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-destructive/45 bg-destructive/10 py-3.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-60 active:scale-[0.98]"
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
+                  isPastEvent
+                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                    : 'border-destructive/45 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-60'
+                }`}
               >
                 <Trash2 className="h-4 w-4 shrink-0" />
                 {isDeletingEvent ? 'Deleting…' : 'Delete'}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)
-                }
-                className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-destructive"
-                aria-label="Report event"
-              >
-                <Flag className="h-4 w-4" />
               </button>
             </>
           ) : showSplitJoinLeave ? (
             <>
               <button
                 type="button"
-                onClick={() => {
-                  if (!hasJoined && !participationLoading) void handleJoinOrRequest();
-                }}
-                disabled={
-                  hasJoined ||
-                  participationLoading ||
-                  isUpdatingParticipation ||
-                  existingRequest?.status === 'rejected'
-                }
+                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent && !isAtCapacity) void handleJoinOrRequest(); }}
+                disabled={isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  hasJoined || participationLoading || isUpdatingParticipation
+                  isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
                 <UserPlus className="h-4 w-4 shrink-0" />
-                Join Event
+                {isPastEvent ? 'Event Ended' : isAtCapacity ? 'Event Full' : 'Join Event'}
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  if (hasJoined && !isUpdatingParticipation) void handleJoinOrRequest();
+                  if (hasJoined && !isUpdatingParticipation && !participationLoading) void handleJoinOrRequest();
                 }}
                 disabled={!hasJoined || participationLoading || isUpdatingParticipation}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl border border-border py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
@@ -879,80 +875,87 @@ const tryJoinViaApi = async (): Promise<boolean> => {
                 <LogOut className="h-4 w-4 shrink-0" />
                 Leave Event
               </button>
-              <button
-                type="button"
-                onClick={() =>
-                  alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)
-                }
-                className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-destructive"
-                aria-label="Report event"
-              >
-                <Flag className="h-4 w-4" />
-              </button>
             </>
           ) : (
             <>
               <button
                 type="button"
                 onClick={() => void handleJoinOrRequest()}
-                disabled={
-                  isOrganizer ||
-                  isEventOwner ||
-                  existingRequest?.status === 'rejected' ||
-                  isUpdatingParticipation ||
-                  participationLoading
-                }
+                disabled={isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isOrganizer ||
-                  isEventOwner ||
-                  existingRequest?.status === 'rejected' ||
-                  isUpdatingParticipation ||
-                  participationLoading
+                  isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : hasJoined
                       ? 'border border-border bg-secondary text-foreground hover:bg-secondary/80'
                       : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
-                {useApiParticipation && !event.requiresApproval && event.budget === 0 ? (
-                  hasJoined ? (
-                    <LogOut className="h-4 w-4 shrink-0" />
-                  ) : (
-                    <UserPlus className="h-4 w-4 shrink-0" />
-                  )
+                {useApiParticipation && !event.requiresApproval && isFreeEvent ? (
+                  hasJoined ? <LogOut className="h-4 w-4 shrink-0" /> : <UserPlus className="h-4 w-4 shrink-0" />
                 ) : null}
                 {getJoinButtonText()}
               </button>
-              <button
-                type="button"
-                onClick={() =>
-                  alreadyReported ? setToast({ show: true, message: 'Already reported', type: 'error' }) : setShowReportModal(true)
-                }
-                className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground transition-colors hover:text-destructive"
-                aria-label="Report event"
-              >
-                <Flag className="h-4 w-4" />
-              </button>
+              {hasJoined && !isPastEvent && (
+                <button
+                  type="button"
+                  onClick={() => void handleJoinOrRequest()}
+                  disabled={isUpdatingParticipation || participationLoading}
+                  className={`flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
+                    isUpdatingParticipation || participationLoading
+                      ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
+                      : 'bg-secondary text-foreground hover:bg-secondary/80'
+                  }`}
+                >
+                  <LogOut className="h-4 w-4 shrink-0" />
+                  Leave
+                </button>
+              )}
             </>
           )}
         </div>
       </motion.div>
 
-      {/* Report Modal */}
+      {/* Modals */}
       <AnimatePresence>
-        {showReportModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm px-6">
-            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="w-full max-w-sm rounded-2xl glass-card p-6 space-y-4">
-              <h3 className="text-lg font-bold text-foreground">Report Event</h3>
-              <textarea value={reportReason} onChange={e => setReportReason(e.target.value)} placeholder="Describe the issue..."
-                rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm text-foreground outline-none resize-none focus:ring-2 focus:ring-primary/50" />
+        {showVenuePaymentModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm px-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              className="w-full max-w-sm rounded-2xl glass-card p-6 space-y-4"
+            >
+              <h3 className="text-lg font-bold text-foreground">Payment at Venue</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                This event has a fee of{' '}
+                <span className="font-semibold text-foreground">${event.budget}</span>. Payment is
+                collected at the venue on arrival. By joining, you agree to pay when you get there.
+              </p>
               <div className="flex gap-3">
-                <button onClick={handleReport} className="flex-1 gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground">Submit</button>
-                <button onClick={() => setShowReportModal(false)} className="flex-1 rounded-xl bg-secondary py-2.5 text-sm text-muted-foreground">Cancel</button>
+                <button
+                  type="button"
+                  onClick={() => void handleVenuePaymentConfirm()}
+                  className="flex-1 gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground"
+                >
+                  Okay, Join Event
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowVenuePaymentModal(false)}
+                  className="flex-1 rounded-xl bg-secondary py-2.5 text-sm text-muted-foreground"
+                >
+                  Cancel
+                </button>
               </div>
             </motion.div>
           </motion.div>
         )}
+
       </AnimatePresence>
 
       <BottomNav />

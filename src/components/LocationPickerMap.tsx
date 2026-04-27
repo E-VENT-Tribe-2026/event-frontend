@@ -10,16 +10,24 @@ export type LocationPickerMapProps = {
   className?: string;
 };
 
-/** True when coordinates are set and usable for an event pin (excludes 0,0 placeholder). */
-export function hasValidEventCoordinates(lat: number | null, lng: number | null): boolean {
-  return (
-    lat != null &&
-    lng != null &&
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    !(lat === 0 && lng === 0)
-  );
-}
+/**
+ * Validates that coordinates are present, 
+ * not NaN, and not the 0,0 placeholder.
+ */
+export const hasValidEventCoordinates = (lat: any, lng: any): boolean => {
+  // Check for null, undefined, or NaN
+  if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
+    return false;
+  }
+
+  // Check for the 0,0 placeholder specifically (Null Island)
+  if (lat === 0 && lng === 0) {
+    return false;
+  }
+
+  // Ensure they are finite numbers (prevents Infinity issues)
+  return Number.isFinite(lat) && Number.isFinite(lng);
+}; // <--- Make sure this brace is here!
 
 /**
  * Click the map to place or move the pin; drag the pin to fine-tune.
@@ -70,12 +78,18 @@ export default function LocationPickerMap({
       });
 
       const center = defaultCenterRef.current;
-      const map = L.map(mapRef.current).setView(center, 11);
+      const worldBounds = L.latLngBounds(L.latLng(-90, -180), L.latLng(90, 180));
+      const map = L.map(mapRef.current, {
+        minZoom: 2,
+        maxBounds: worldBounds,
+        maxBoundsViscosity: 1.0,
+      }).setView(center, 11);
       mapInstanceRef.current = map;
       leafletRef.current = L;
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
+        noWrap: true,
       }).addTo(map);
 
       map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
