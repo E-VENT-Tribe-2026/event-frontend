@@ -152,7 +152,7 @@ export default function MapPage() {
         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
       });
 
-      const map = L.map(mapRef.current, { zoomControl: true }).setView([40.7128, -74.006], 11);
+      const map = L.map(mapRef.current, { zoomControl: true, minZoom: 2 }).setView([40.7128, -74.006], 11);
       mapInstance.current = map;
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {

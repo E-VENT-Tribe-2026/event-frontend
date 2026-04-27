@@ -13,11 +13,12 @@ export type ApiNotification = {
 };
 
 function normalizeType(type: string): string {
+  // Return the raw type as-is so the UI can map it to the correct icon/color.
+  // Only normalize legacy aliases.
   const t = type.toLowerCase().trim();
-  if (t === 'cancellation' || t === 'cancelled') return 'cancellation';
-  if (t === 'reminder') return 'reminder';
-  if (t === 'update') return 'update';
-  return 'update';
+  if (t === 'cancelled') return 'event_cancelled';
+  if (t === 'cancellation') return 'event_cancelled';
+  return t;
 }
 
 export function relativeTime(isoDate?: string | null): string {

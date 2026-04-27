@@ -4,14 +4,24 @@ import { getCurrentUser, getNotifications, saveNotifications, type Notification 
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { fetchNotifications, markNotificationRead, relativeTime, deleteNotification, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2 } from 'lucide-react';
+import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 
+type NotificationKind =
+  | 'user_joined'
+  | 'user_left'
+  | 'event_created'
+  | 'event_updated'
+  | 'event_deleted'
+  | 'event_cancelled'
+  | 'reminder'
+  | 'other';
+
 type UINotification = {
   id: string;
-  type: 'update' | 'cancellation' | 'reminder';
+  kind: NotificationKind;
   message: string;
   relatedEventId: string | null;
   eventTitle: string;
@@ -19,29 +29,44 @@ type UINotification = {
   read: boolean;
 };
 
-const iconMap = {
-  update: Info,
-  cancellation: BellOff,
-  reminder: CalendarClock,
+const iconMap: Record<NotificationKind, React.ElementType> = {
+  user_joined:     UserPlus,
+  user_left:       UserMinus,
+  event_created:   PlusCircle,
+  event_updated:   Info,
+  event_deleted:   Trash2,
+  event_cancelled: BellOff,
+  reminder:        CalendarClock,
+  other:           Info,
 };
 
-const colorMap = {
-  update: 'text-primary bg-primary/20',
-  cancellation: 'text-destructive bg-destructive/15',
-  reminder: 'text-accent bg-accent/20',
+const colorMap: Record<NotificationKind, string> = {
+  user_joined:     'text-green-500 bg-green-500/15',
+  user_left:       'text-destructive bg-destructive/15',
+  event_created:   'text-green-500 bg-green-500/15',
+  event_updated:   'text-primary bg-primary/20',
+  event_deleted:   'text-destructive bg-destructive/15',
+  event_cancelled: 'text-destructive bg-destructive/15',
+  reminder:        'text-accent bg-accent/20',
+  other:           'text-primary bg-primary/20',
 };
 
-function normalizeLegacyType(type: string): 'update' | 'cancellation' | 'reminder' {
+function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
-  if (t.includes('cancel')) return 'cancellation';
-  if (t.includes('reminder')) return 'reminder';
-  return 'update';
+  if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
+  if (t === 'user_left' || t.includes('left')) return 'user_left';
+  if (t === 'event_created' || t.includes('creat')) return 'event_created';
+  if (t === 'event_updated' || t.includes('updat')) return 'event_updated';
+  if (t === 'event_deleted' || t.includes('delet')) return 'event_deleted';
+  if (t === 'event_cancelled' || t.includes('cancel')) return 'event_cancelled';
+  if (t === 'reminder') return 'reminder';
+  return 'other';
 }
 
 function fromApi(n: ApiNotification): UINotification {
   return {
     id: n.id,
-    type: normalizeLegacyType(n.type),
+    kind: normalizeKind(n.type),
     message: n.message || 'Event update',
     relatedEventId: n.related_event_id ?? null,
     eventTitle: n.event_title ?? '',
@@ -53,7 +78,7 @@ function fromApi(n: ApiNotification): UINotification {
 function fromLocal(n: Notification): UINotification {
   return {
     id: n.id,
-    type: normalizeLegacyType(n.type),
+    kind: normalizeKind(n.type),
     message: n.description || n.title,
     relatedEventId: null,
     eventTitle: '',
@@ -185,7 +210,7 @@ export default function NotificationsPage() {
           </div>
         )}
         {!loading && items.slice(0, visibleCount).map((n, i) => {
-          const Icon = iconMap[n.type];
+          const Icon = iconMap[n.kind];
           const isDeleting = deletingIds.has(n.id);
           return (
             <motion.div
@@ -196,11 +221,11 @@ export default function NotificationsPage() {
               className={`flex cursor-pointer items-start gap-3 px-4 py-4 ${n.read ? 'opacity-60' : ''}`}
               onClick={() => void onOpenNotification(n)}
             >
-              <div className={`shrink-0 rounded-full p-2.5 ${colorMap[n.type]}`}>
+              <div className={`shrink-0 rounded-full p-2.5 ${colorMap[n.kind]}`}>
                 <Icon className="h-4 w-4" />
               </div>
               <div className="flex-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-primary">{n.type}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">{n.kind.replace(/_/g, ' ')}</p>
                 <p className="text-sm font-medium text-foreground">{n.message}</p>
                 {n.eventTitle && (
                   <p className="text-xs text-muted-foreground">Event: {n.eventTitle}</p>
