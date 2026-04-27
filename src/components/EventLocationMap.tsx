@@ -49,6 +49,7 @@ export default function EventLocationMap({
         doubleClickZoom: true,
         boxZoom: true,
         keyboard: true,
+        minZoom: 2,
       }).setView([latitude, longitude], 14);
 
       mapRef.current = map;

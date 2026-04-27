@@ -101,12 +101,23 @@ export default function CreateEventPage() {
 
   const todayIso = new Date().toISOString().split('T')[0];
 
+  /** Returns HH:MM of current time + 5 min buffer, only when date === today */
+  const minTime = form.date === todayIso
+    ? (() => {
+        const now = new Date(Date.now() + 5 * 60 * 1000);
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      })()
+    : undefined;
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.title.trim()) e.title = 'Title is required';
     if (!form.description.trim()) e.description = 'Description is required';
     if (!form.date) e.date = 'Date is required';
     if (!form.time) e.time = 'Time is required';
+    else if (form.date === todayIso && minTime && form.time < minTime) {
+      e.time = 'Start time cannot be in the past';
+    }
     if (!form.location.trim()) e.location = 'Location name is required';
     if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
       e.mapLocation = 'Search for a location or click the map to set the event pin';
@@ -306,6 +317,7 @@ export default function CreateEventPage() {
               id="create-event-time"
               type={timeInputType}
               placeholder="HH:MM (24h)"
+              min={timeInputType === 'time' ? minTime : undefined}
               value={form.time}
               onFocus={() => setTimeInputType('time')}
               onBlur={() => {
@@ -388,7 +400,7 @@ export default function CreateEventPage() {
               aria-describedby="create-event-capacity-hint"
             />
             <p id="create-event-capacity-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Type a whole number (no slider).
+              Type a whole number.
             </p>
             {errors.limit && <span className="text-[10px] text-destructive px-2">{errors.limit}</span>}
           </div>
