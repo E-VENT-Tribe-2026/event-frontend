@@ -78,7 +78,7 @@ export default function LocationPickerMap({
       });
 
       const center = defaultCenterRef.current;
-      const map = L.map(mapRef.current).setView(center, 11);
+      const map = L.map(mapRef.current, { minZoom: 2 }).setView(center, 11);
       mapInstanceRef.current = map;
       leafletRef.current = L;
 

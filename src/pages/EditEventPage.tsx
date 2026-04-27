@@ -174,12 +174,24 @@ export default function EditEventPage() {
     document.title = formatPageTitle(t ? `Edit: ${t}` : 'Edit event');
   }, [loadState, form.title]);
 
+  const todayIso = new Date().toISOString().split('T')[0];
+
+  const minTime = form.date === todayIso
+    ? (() => {
+        const now = new Date(Date.now() + 5 * 60 * 1000);
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      })()
+    : undefined;
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.title.trim()) e.title = 'Title is required';
     if (!form.description.trim()) e.description = 'Description is required';
     if (!form.date) e.date = 'Date is required';
     if (!form.time) e.time = 'Time is required';
+    else if (form.date === todayIso && minTime && form.time < minTime) {
+      e.time = 'Start time cannot be in the past';
+    }
     if (!form.location.trim()) e.location = 'Location name is required';
     if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
       e.mapLocation = 'Search for a location or click the map to set the event pin';
@@ -348,7 +360,7 @@ export default function EditEventPage() {
         {/* Date + Time */}
         <div className="grid grid-cols-2 gap-3">
           <input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} className={inputCls('date')} />
-          <input type="time" value={form.time} onChange={(e) => update('time', e.target.value)} className={inputCls('time')} />
+          <input type="time" min={minTime} value={form.time} onChange={(e) => update('time', e.target.value)} className={inputCls('time')} />
         </div>
         {(errors.date || errors.time) && (
           <span className="block px-2 text-[10px] text-destructive">{errors.date || errors.time}</span>

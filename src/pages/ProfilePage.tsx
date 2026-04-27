@@ -41,7 +41,7 @@ export default function ProfilePage() {
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
   const [showInterests, setShowInterests] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [activeTab, setActiveTab] = useState<'events' | 'favorites' | 'friends'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'favorites'>('events');
 
   // Password State
   const [showPasswordSection, setShowPasswordSection] = useState(false);
@@ -463,7 +463,7 @@ export default function ProfilePage() {
 
         {/* Tabs */}
         <div className="flex rounded-xl glass-card p-1">
-          {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }, { id: 'friends', label: 'Friends', icon: UserPlus }].map((tab) => (
+          {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }].map((tab) => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex-1 flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-all ${activeTab === tab.id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'}`}><tab.icon className="h-3.5 w-3.5" />{tab.label}</button>
           ))}
         </div>
@@ -544,8 +544,6 @@ export default function ProfilePage() {
               )}
             </div>
           )}
-
-          {activeTab === 'friends' && <p className="text-center py-8 text-xs text-muted-foreground">No connections found.</p>}
         </div>
       </motion.div>
       <BottomNav />

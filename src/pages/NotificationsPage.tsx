@@ -4,14 +4,24 @@ import { getCurrentUser, getNotifications, saveNotifications, type Notification 
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { fetchNotifications, markNotificationRead, relativeTime, deleteNotification, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2 } from 'lucide-react';
+import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 
+type NotificationKind =
+  | 'user_joined'
+  | 'user_left'
+  | 'event_created'
+  | 'event_updated'
+  | 'event_deleted'
+  | 'event_cancelled'
+  | 'reminder'
+  | 'other';
+
 type UINotification = {
   id: string;
-  type: 'update' | 'cancellation' | 'reminder';
+  kind: NotificationKind;
   message: string;
   relatedEventId: string | null;
   eventTitle: string;
@@ -19,29 +29,44 @@ type UINotification = {
   read: boolean;
 };
 
-const iconMap = {
-  update: Info,
-  cancellation: BellOff,
-  reminder: CalendarClock,
+const iconMap: Record<NotificationKind, React.ElementType> = {
+  user_joined:     UserPlus,
+  user_left:       UserMinus,
+  event_created:   PlusCircle,
+  event_updated:   Info,
+  event_deleted:   Trash2,
+  event_cancelled: BellOff,
+  reminder:        CalendarClock,
+  other:           Info,
 };
 
-const colorMap = {
-  update: 'text-primary bg-primary/20',
-  cancellation: 'text-destructive bg-destructive/15',
-  reminder: 'text-accent bg-accent/20',
+const colorMap: Record<NotificationKind, string> = {
+  user_joined:     'text-green-500 bg-green-500/15',
+  user_left:       'text-destructive bg-destructive/15',
+  event_created:   'text-green-500 bg-green-500/15',
+  event_updated:   'text-primary bg-primary/20',
+  event_deleted:   'text-destructive bg-destructive/15',
+  event_cancelled: 'text-destructive bg-destructive/15',
+  reminder:        'text-accent bg-accent/20',
+  other:           'text-primary bg-primary/20',
 };
 
-function normalizeLegacyType(type: string): 'update' | 'cancellation' | 'reminder' {
+function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
-  if (t.includes('cancel')) return 'cancellation';
-  if (t.includes('reminder')) return 'reminder';
-  return 'update';
+  if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
+  if (t === 'user_left' || t.includes('left')) return 'user_left';
+  if (t === 'event_created' || t.includes('creat')) return 'event_created';
+  if (t === 'event_updated' || t.includes('updat')) return 'event_updated';
+  if (t === 'event_deleted' || t.includes('delet')) return 'event_deleted';
+  if (t === 'event_cancelled' || t.includes('cancel')) return 'event_cancelled';
+  if (t === 'reminder') return 'reminder';
+  return 'other';
 }
 
 function fromApi(n: ApiNotification): UINotification {
   return {
     id: n.id,
-    type: normalizeLegacyType(n.type),
+    kind: normalizeKind(n.type),
     message: n.message || 'Event update',
     relatedEventId: n.related_event_id ?? null,
     eventTitle: n.event_title ?? '',
@@ -53,7 +78,7 @@ function fromApi(n: ApiNotification): UINotification {
 function fromLocal(n: Notification): UINotification {
   return {
     id: n.id,
-    type: normalizeLegacyType(n.type),
+    kind: normalizeKind(n.type),
     message: n.description || n.title,
     relatedEventId: null,
     eventTitle: '',
@@ -71,6 +96,8 @@ export default function NotificationsPage() {
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
+  const [visibleCount, setVisibleCount] = useState(5);
+  const PAGE_SIZE = 5;
 
   const resolveToken = async (): Promise<string | null> => {
     const existing = getAuthToken();
@@ -101,6 +128,7 @@ export default function NotificationsPage() {
       });
       setItems(mapped);
       setUsingFallback(false);
+      setVisibleCount(5);
     } catch {
       setItems(getNotifications().map(fromLocal));
       setUsingFallback(true);
@@ -153,6 +181,26 @@ export default function NotificationsPage() {
     }
   };
 
+  const onMarkRead = async (n: UINotification, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (n.read) return;
+    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    const token = await resolveToken();
+    if (token) {
+      try {
+        setMarkingId(n.id);
+        await markNotificationRead(token, n.id);
+      } catch {
+        setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: false } : x)));
+        setToast({ show: true, message: 'Could not mark as read.', type: 'error' });
+      } finally {
+        setMarkingId(null);
+      }
+    } else {
+      saveNotifications(getNotifications().map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast
@@ -165,7 +213,7 @@ export default function NotificationsPage() {
         <button onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5 text-foreground" /></button>
         <h1 className="text-lg font-bold text-foreground">Notifications</h1>
         <span className="ml-auto rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
-          {unreadCount} unread
+          {unreadCount} unread · {items.length} total
         </span>
       </header>
 
@@ -181,8 +229,8 @@ export default function NotificationsPage() {
             Loading notifications...
           </div>
         )}
-        {!loading && items.map((n, i) => {
-          const Icon = iconMap[n.type];
+        {!loading && items.slice(0, visibleCount).map((n, i) => {
+          const Icon = iconMap[n.kind];
           const isDeleting = deletingIds.has(n.id);
           return (
             <motion.div
@@ -193,11 +241,11 @@ export default function NotificationsPage() {
               className={`flex cursor-pointer items-start gap-3 px-4 py-4 ${n.read ? 'opacity-60' : ''}`}
               onClick={() => void onOpenNotification(n)}
             >
-              <div className={`shrink-0 rounded-full p-2.5 ${colorMap[n.type]}`}>
+              <div className={`shrink-0 rounded-full p-2.5 ${colorMap[n.kind]}`}>
                 <Icon className="h-4 w-4" />
               </div>
               <div className="flex-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-primary">{n.type}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">{n.kind.replace(/_/g, ' ')}</p>
                 <p className="text-sm font-medium text-foreground">{n.message}</p>
                 {n.eventTitle && (
                   <p className="text-xs text-muted-foreground">Event: {n.eventTitle}</p>
@@ -208,7 +256,19 @@ export default function NotificationsPage() {
               </div>
               <div className="shrink-0 flex flex-col items-end gap-2">
                 <span className="text-xs text-muted-foreground">{relativeTime(n.createdAt)}</span>
-                {markingId === n.id && <span className="text-[10px] text-muted-foreground">Saving…</span>}
+                {!n.read && (
+                  <button
+                    type="button"
+                    disabled={markingId === n.id}
+                    onClick={(e) => void onMarkRead(n, e)}
+                    className="rounded-lg p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-40 transition-colors"
+                    aria-label="Mark as read"
+                  >
+                    {markingId === n.id
+                      ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      : <CheckCheck className="h-3.5 w-3.5" />}
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={isDeleting}
@@ -226,6 +286,22 @@ export default function NotificationsPage() {
           <div className="py-12 text-center text-sm text-muted-foreground">No notifications yet</div>
         )}
       </div>
+
+      {!loading && items.length > 0 && (
+        <div className="mx-auto max-w-lg px-4 py-4">
+          {visibleCount < items.length ? (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+              className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-primary hover:bg-secondary/50 transition-colors"
+            >
+              Show more · {items.length - visibleCount} remaining
+            </button>
+          ) : items.length > PAGE_SIZE ? (
+            <p className="text-center text-xs text-muted-foreground">All {items.length} notifications shown</p>
+          ) : null}
+        </div>
+      )}
 
       <BottomNav />
     </div>

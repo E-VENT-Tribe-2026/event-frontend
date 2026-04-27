@@ -40,6 +40,15 @@ type ChatMessage = {
   senderId?: string;
 };
 
+/** Returns true if the event ended more than 48 hours ago */
+function isExpiredOver48h(eventDate: string): boolean {
+  if (!eventDate) return false;
+  const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(eventDate) ? eventDate : `${eventDate}T00:00:00Z`;
+  const ts = new Date(normalized).getTime();
+  if (Number.isNaN(ts)) return false;
+  return Date.now() - ts > 48 * 60 * 60 * 1000;
+}
+
 function formatDateSeparator(dateKey: string): string {
   const today = new Date();
   const todayKey = today.toISOString().slice(0, 10);
@@ -636,7 +645,7 @@ export default function ChatPage() {
 
         {!chatListLoading && chats.length > 0 && (() => {
           const activeChats = chats.filter((c) => !c.isPast);
-          const pastChats = chats.filter((c) => c.isPast);
+          const pastChats = chats.filter((c) => c.isPast && !isExpiredOver48h(c.eventDate));
 
           const renderChatItem = (chat: ChatEvent) => (
             <button
