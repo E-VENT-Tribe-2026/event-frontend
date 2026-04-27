@@ -78,12 +78,18 @@ export default function LocationPickerMap({
       });
 
       const center = defaultCenterRef.current;
-      const map = L.map(mapRef.current, { minZoom: 2 }).setView(center, 11);
+      const worldBounds = L.latLngBounds(L.latLng(-90, -180), L.latLng(90, 180));
+      const map = L.map(mapRef.current, {
+        minZoom: 2,
+        maxBounds: worldBounds,
+        maxBoundsViscosity: 1.0,
+      }).setView(center, 11);
       mapInstanceRef.current = map;
       leafletRef.current = L;
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
+        noWrap: true,
       }).addTo(map);
 
       map.on('click', (e: { latlng: { lat: number; lng: number } }) => {

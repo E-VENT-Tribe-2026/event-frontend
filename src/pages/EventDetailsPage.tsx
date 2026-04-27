@@ -213,6 +213,7 @@ export default function EventDetailsPage() {
         if (!cancelled) {
           setApiEvent(mapApiEventToItem(data));
           setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+          setParticipationKnown(false); // reset so skeleton shows while sync runs
         }
       })
       .catch(() => {
@@ -265,7 +266,7 @@ export default function EventDetailsPage() {
     event &&
       (!useApiParticipation
         ? isEventOwner || Boolean(user && event.participants.includes(user.id))
-        : participationKnown && (isEventOwner || hasJoined)),
+        : (isEventOwner || (participationKnown && hasJoined))),
   );
 
   const wasRemovedFromEvent = Boolean(
@@ -406,6 +407,10 @@ export default function EventDetailsPage() {
     if (!event) return;
     if (isPastEvent) {
       setToast({ show: true, message: 'You cannot join or leave a past event.', type: 'error' });
+      return;
+    }
+    if (isAtCapacity) {
+      setToast({ show: true, message: 'This event has reached its maximum capacity.', type: 'error' });
       return;
     }
     if (hasJoined) {
@@ -577,6 +582,12 @@ export default function EventDetailsPage() {
   };
 
   const isFreeEvent = !(Number(event.budget) > 0);
+  const isAtCapacity = Boolean(
+    event.participantsLimit > 0 &&
+    attendeeDisplayCount >= event.participantsLimit &&
+    !hasJoined &&
+    !isEventOwner,
+  );
 
   const getJoinButtonText = () => {
     if (isUpdatingParticipation) return 'Please wait...';
@@ -584,6 +595,7 @@ export default function EventDetailsPage() {
     if (isPastEvent) return 'Event Ended';
     if (isEventOwner) return "You're hosting";
     if (hasJoined) return 'Leave Event';
+    if (isAtCapacity) return 'Event Full';
     if (isOrganizer) return "Organizers can't join";
     if (event.requiresApproval) {
       if (existingRequest?.status === 'pending') return 'Request Pending...';
@@ -686,7 +698,16 @@ export default function EventDetailsPage() {
             Attendees
           </h2>
           {canViewFullAttendeeList ? (
-            fullAttendeeRows.length === 0 ? (
+            (!participationKnown || (useApiParticipation && apiParticipants.length === 0 && !participationKnown)) && useApiParticipation ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-2 rounded-xl bg-secondary/40 px-3 py-2.5">
+                    <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-secondary" />
+                    <div className="h-3 w-32 animate-pulse rounded bg-secondary" />
+                  </div>
+                ))}
+              </div>
+            ) : fullAttendeeRows.length === 0 ? (
               <p className="text-xs text-muted-foreground">No attendees yet.</p>
             ) : (
               <ul className="space-y-2">
@@ -827,16 +848,16 @@ export default function EventDetailsPage() {
             <>
               <button
                 type="button"
-                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent) void handleJoinOrRequest(); }}
-                disabled={isPastEvent || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
+                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent && !isAtCapacity) void handleJoinOrRequest(); }}
+                disabled={isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isPastEvent || hasJoined || participationLoading || isUpdatingParticipation
+                  isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
                 <UserPlus className="h-4 w-4 shrink-0" />
-                {isPastEvent ? 'Event Ended' : 'Join Event'}
+                {isPastEvent ? 'Event Ended' : isAtCapacity ? 'Event Full' : 'Join Event'}
               </button>
               <button
                 type="button"
@@ -859,9 +880,9 @@ export default function EventDetailsPage() {
               <button
                 type="button"
                 onClick={() => void handleJoinOrRequest()}
-                disabled={isPastEvent || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
+                disabled={isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isPastEvent || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
+                  isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : hasJoined
                       ? 'border border-border bg-secondary text-foreground hover:bg-secondary/80'

@@ -96,8 +96,8 @@ export default function NotificationsPage() {
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
-  const [visibleCount, setVisibleCount] = useState(5);
-  const PAGE_SIZE = 5;
+  const [visibleCount, setVisibleCount] = useState(8);
+  const PAGE_SIZE = 8;
 
   const resolveToken = async (): Promise<string | null> => {
     const existing = getAuthToken();
@@ -128,7 +128,6 @@ export default function NotificationsPage() {
       });
       setItems(mapped);
       setUsingFallback(false);
-      setVisibleCount(5);
     } catch {
       setItems(getNotifications().map(fromLocal));
       setUsingFallback(true);
@@ -289,7 +288,7 @@ export default function NotificationsPage() {
 
       {!loading && items.length > 0 && (
         <div className="mx-auto max-w-lg px-4 py-4">
-          {visibleCount < items.length ? (
+          {items.length > visibleCount ? (
             <button
               type="button"
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
@@ -297,7 +296,7 @@ export default function NotificationsPage() {
             >
               Show more · {items.length - visibleCount} remaining
             </button>
-          ) : items.length > PAGE_SIZE ? (
+          ) : visibleCount > PAGE_SIZE ? (
             <p className="text-center text-xs text-muted-foreground">All {items.length} notifications shown</p>
           ) : null}
         </div>

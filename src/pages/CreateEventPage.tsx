@@ -124,7 +124,7 @@ export default function CreateEventPage() {
     }
     const cap = Math.floor(Number(form.limit));
     if (!form.limit.trim() || Number.isNaN(cap)) e.limit = 'Enter participant capacity';
-    else if (cap < 10 || cap > 500) e.limit = 'Capacity must be between 10 and 500';
+    else if (cap < 4 || cap > 500) e.limit = 'Capacity must be between 4 and 500';
     if (form.budget.trim() !== '' && Number(form.budget) < 0) e.budget = 'Budget cannot be negative';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -390,10 +390,10 @@ export default function CreateEventPage() {
             <input
               id="create-event-capacity"
               type="number"
-              min={10}
+              min={4}
               max={500}
               step={1}
-              placeholder="10–500 people"
+              placeholder="4–500 people"
               value={form.limit}
               onChange={e => update('limit', e.target.value)}
               className={inputCls('limit')}

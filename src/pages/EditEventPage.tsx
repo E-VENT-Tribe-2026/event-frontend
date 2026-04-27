@@ -55,6 +55,7 @@ export default function EditEventPage() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cachedItem, setCachedItem] = useState<EventItem | null>(null);
+  const [currentParticipantCount, setCurrentParticipantCount] = useState(0);
 
   const update = (key: string, value: string | boolean) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -140,6 +141,16 @@ export default function EditEventPage() {
 
         setCachedItem(item);
         setDurationMs(dMs);
+        setCurrentParticipantCount(item.participants?.length ?? 0);
+
+        // Also fetch live participant count from API
+        try {
+          const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`));
+          if (pRes.ok) {
+            const list = await pRes.json().catch(() => []);
+            if (Array.isArray(list)) setCurrentParticipantCount(list.length);
+          }
+        } catch { /* use local count */ }
         setForm({
           title: item.title,
           description: item.description,
@@ -196,6 +207,11 @@ export default function EditEventPage() {
     if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
       e.mapLocation = 'Search for a location or click the map to set the event pin';
     }
+    const cap = Math.floor(Number(form.limit));
+    if (!form.limit.trim() || Number.isNaN(cap)) e.limit = 'Enter participant capacity';
+    else if (cap < 4 || cap > 500) e.limit = 'Capacity must be between 4 and 500';
+    else if (cap < currentParticipantCount) e.limit = `Cannot set capacity below current participant count (${currentParticipantCount} joined)`;
+    if (form.budget.trim() !== '' && Number(form.budget) < 0) e.budget = 'Budget cannot be negative';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -343,13 +359,13 @@ export default function EditEventPage() {
         {/* Title */}
         <div>
           <input placeholder="Event Title" value={form.title} onChange={(e) => update('title', e.target.value)} className={inputCls('title')} />
-          {errors.title && <span className="px-2 text-[10px] text-destructive">{errors.title}</span>}
+          {errors.title && <span className="text-[10px] text-destructive px-2">{errors.title}</span>}
         </div>
 
         {/* Description */}
         <div>
           <textarea placeholder="Description" rows={3} value={form.description} onChange={(e) => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
-          {errors.description && <span className="px-2 text-[10px] text-destructive">{errors.description}</span>}
+          {errors.description && <span className="text-[10px] text-destructive px-2">{errors.description}</span>}
         </div>
 
         {/* Category */}
@@ -359,12 +375,31 @@ export default function EditEventPage() {
 
         {/* Date + Time */}
         <div className="grid grid-cols-2 gap-3">
-          <input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} className={inputCls('date')} />
-          <input type="time" min={minTime} value={form.time} onChange={(e) => update('time', e.target.value)} className={inputCls('time')} />
+          <div className="space-y-1">
+            <label htmlFor="edit-event-date" className="block text-xs font-medium text-foreground">Event date</label>
+            <input
+              id="edit-event-date"
+              type="date"
+              min={todayIso}
+              value={form.date}
+              onChange={(e) => update('date', e.target.value)}
+              className={inputCls('date')}
+            />
+            {errors.date && <span className="text-[10px] text-destructive px-2">{errors.date}</span>}
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="edit-event-time" className="block text-xs font-medium text-foreground">Event time</label>
+            <input
+              id="edit-event-time"
+              type="time"
+              min={minTime}
+              value={form.time}
+              onChange={(e) => update('time', e.target.value)}
+              className={inputCls('time')}
+            />
+            {errors.time && <span className="text-[10px] text-destructive px-2">{errors.time}</span>}
+          </div>
         </div>
-        {(errors.date || errors.time) && (
-          <span className="block px-2 text-[10px] text-destructive">{errors.date || errors.time}</span>
-        )}
 
         {/* Location search */}
         <div className="space-y-1">
@@ -397,10 +432,38 @@ export default function EditEventPage() {
 
         {/* Budget + Capacity */}
         <div className="grid grid-cols-2 gap-3">
-          <input type="number" placeholder="Budget ($)" value={form.budget} onChange={(e) => update('budget', e.target.value)} className={inputCls('budget')} />
-          <div className="flex flex-col justify-center px-2">
-            <label className="mb-1 text-[10px] font-bold uppercase text-muted-foreground">Capacity: {form.limit}</label>
-            <input type="range" min="10" max="500" value={form.limit} onChange={(e) => update('limit', e.target.value)} className="h-1.5 w-full accent-primary" />
+          <div className="space-y-1">
+            <label htmlFor="edit-event-budget" className="block text-xs font-medium text-foreground">Budget (USD)</label>
+            <input
+              id="edit-event-budget"
+              type="number"
+              min={0}
+              step="1"
+              placeholder="0 = free event"
+              value={form.budget}
+              onChange={(e) => update('budget', e.target.value)}
+              className={inputCls('budget')}
+            />
+            <p className="text-[10px] text-muted-foreground px-0.5">Leave empty or enter 0 for free.</p>
+            {errors.budget && <span className="text-[10px] text-destructive px-2">{errors.budget}</span>}
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="edit-event-capacity" className="block text-xs font-medium text-foreground">Max participants</label>
+            <input
+              id="edit-event-capacity"
+              type="number"
+              min={4}
+              max={500}
+              step={1}
+              placeholder="4–500 people"
+              value={form.limit}
+              onChange={(e) => update('limit', e.target.value)}
+              className={inputCls('limit')}
+            />
+            <p className="text-[10px] text-muted-foreground px-0.5">
+              Type a whole number. {currentParticipantCount > 0 && `${currentParticipantCount} already joined.`}
+            </p>
+            {errors.limit && <span className="text-[10px] text-destructive px-2">{errors.limit}</span>}
           </div>
         </div>
 
