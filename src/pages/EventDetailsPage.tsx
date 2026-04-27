@@ -604,16 +604,6 @@ export default function EventDetailsPage() {
           <ArrowLeft className="h-5 w-5 text-foreground" />
         </button>
         <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
-          {isEventOwner && (
-            <button
-              type="button"
-              onClick={() => navigate(`/event/${event.id}/edit`)}
-              className="flex items-center gap-1.5 rounded-full glass-card px-3 py-2 text-xs font-semibold text-foreground"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </button>
-          )}
           {event.requiresApproval && (
             <div className="flex items-center gap-1 rounded-full bg-accent/90 px-3 py-1 text-xs font-semibold text-accent-foreground backdrop-blur-sm">
               <ShieldCheck className="h-3 w-3" /> Approval Required
