@@ -16,6 +16,7 @@ import { formatPageTitle } from '@/lib/documentTitle';
 import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 import EventLocationMap from '@/components/EventLocationMap';
 import { isEventUpcoming } from '@/lib/eventTime';
+import { getCategoryBanner } from '@/lib/categoryBanners';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
@@ -615,7 +616,7 @@ export default function EventDetailsPage() {
 
       {/* Banner */}
       <div className="relative h-60">
-        <img src={event.image} alt={event.title} className="h-full w-full object-cover" />
+        <img src={event.image || getCategoryBanner(event.category)} alt={event.title} className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-transparent" />
         <button onClick={() => navigate(-1)} className="absolute top-4 left-4 rounded-full glass-card p-2.5">
           <ArrowLeft className="h-5 w-5 text-foreground" />
