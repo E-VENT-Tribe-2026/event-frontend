@@ -22,7 +22,11 @@ function normalizeType(type: string): string {
 
 export function relativeTime(isoDate?: string | null): string {
   if (!isoDate) return '';
-  const ts = new Date(isoDate).getTime();
+  // The API returns naive UTC datetimes without a timezone suffix (e.g. "2026-04-24T22:29:18.064253").
+  // Browsers parse those as local time, which gives wrong results.
+  // Append 'Z' to force UTC interpretation when no offset is present.
+  const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(isoDate) ? isoDate : `${isoDate}Z`;
+  const ts = new Date(normalized).getTime();
   if (Number.isNaN(ts)) return '';
   const sec = Math.max(1, Math.floor((Date.now() - ts) / 1000));
   if (sec < 60) return sec === 1 ? 'just now' : `${sec} seconds ago`;

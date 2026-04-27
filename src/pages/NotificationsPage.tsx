@@ -71,6 +71,8 @@ export default function NotificationsPage() {
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
+  const [visibleCount, setVisibleCount] = useState(5);
+  const PAGE_SIZE = 5;
 
   const resolveToken = async (): Promise<string | null> => {
     const existing = getAuthToken();
@@ -101,6 +103,7 @@ export default function NotificationsPage() {
       });
       setItems(mapped);
       setUsingFallback(false);
+      setVisibleCount(5);
     } catch {
       setItems(getNotifications().map(fromLocal));
       setUsingFallback(true);
@@ -165,7 +168,7 @@ export default function NotificationsPage() {
         <button onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5 text-foreground" /></button>
         <h1 className="text-lg font-bold text-foreground">Notifications</h1>
         <span className="ml-auto rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
-          {unreadCount} unread
+          {unreadCount} unread · {items.length} total
         </span>
       </header>
 
@@ -181,7 +184,7 @@ export default function NotificationsPage() {
             Loading notifications...
           </div>
         )}
-        {!loading && items.map((n, i) => {
+        {!loading && items.slice(0, visibleCount).map((n, i) => {
           const Icon = iconMap[n.type];
           const isDeleting = deletingIds.has(n.id);
           return (
@@ -226,6 +229,22 @@ export default function NotificationsPage() {
           <div className="py-12 text-center text-sm text-muted-foreground">No notifications yet</div>
         )}
       </div>
+
+      {!loading && items.length > 0 && (
+        <div className="mx-auto max-w-lg px-4 py-4">
+          {visibleCount < items.length ? (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+              className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-primary hover:bg-secondary/50 transition-colors"
+            >
+              Show more · {items.length - visibleCount} remaining
+            </button>
+          ) : items.length > PAGE_SIZE ? (
+            <p className="text-center text-xs text-muted-foreground">All {items.length} notifications shown</p>
+          ) : null}
+        </div>
+      )}
 
       <BottomNav />
     </div>
