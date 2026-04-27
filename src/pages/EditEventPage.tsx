@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Type, Calendar, MapPin, Users, Settings } from 'lucide-react';
 import { getCurrentUser, upsertEvent, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -23,7 +23,6 @@ function safeISO(d: Date) {
   return d.toISOString().split('.')[0] + 'Z';
 }
 
-// Germany centre fallback
 const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
 
 export default function EditEventPage() {
@@ -64,7 +63,6 @@ export default function EditEventPage() {
     }
   };
 
-  // Manual map click
   const onMapLocationChange = useCallback((lat: number, lng: number) => {
     setPickedLat(lat);
     setPickedLng(lng);
@@ -76,7 +74,6 @@ export default function EditEventPage() {
     });
   }, []);
 
-  // Search result selected
   const handleLocationSelect = (result: LocationResult) => {
     setPickedLat(result.lat);
     setPickedLng(result.lng);
@@ -85,9 +82,7 @@ export default function EditEventPage() {
     setErrors((prev) => { const n = { ...prev }; delete n.mapLocation; return n; });
   };
 
-  // Geolocation resolved — only update map center, don't override existing marker
   const handleUserLocation = (coords: { lat: number; lng: number }) => {
-    // If no marker has been set yet and no saved coords, center the map on user
     setMapCenter((prev) => {
       const hasExisting = pickedLat !== null && pickedLng !== null;
       return hasExisting ? prev : coords;
@@ -105,7 +100,6 @@ export default function EditEventPage() {
     return null;
   };
 
-  // Load event data
   useEffect(() => {
     if (!id) { setLoadState('error'); setLoadMessage('Missing event id'); return; }
 
@@ -143,7 +137,6 @@ export default function EditEventPage() {
         setDurationMs(dMs);
         setCurrentParticipantCount(item.participants?.length ?? 0);
 
-        // Also fetch live participant count from API
         try {
           const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`));
           if (pRes.ok) {
@@ -151,6 +144,7 @@ export default function EditEventPage() {
             if (Array.isArray(list)) setCurrentParticipantCount(list.length);
           }
         } catch { /* use local count */ }
+
         setForm({
           title: item.title,
           description: item.description,
@@ -166,7 +160,6 @@ export default function EditEventPage() {
         if (hasValidEventCoordinates(item.lat, item.lng)) {
           setPickedLat(item.lat);
           setPickedLng(item.lng);
-          // Centre map on the saved location
           setMapCenter({ lat: item.lat, lng: item.lng });
         }
 
@@ -311,184 +304,211 @@ export default function EditEventPage() {
   };
 
   const inputCls = (field: string) =>
-    `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none focus:ring-2 ${
-      errors[field] ? 'ring-1 ring-destructive' : 'focus:ring-primary/50'
+    `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground outline-none border border-border/50 focus:border-primary/40 focus:ring-2 ${
+      errors[field] ? 'ring-1 ring-destructive border-destructive/50' : 'focus:ring-primary/50'
     } transition-all`;
 
   if (loadState === 'loading') {
-    return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-t-2 border-primary" />
+          <p className="text-sm text-muted-foreground">Loading event…</p>
+        </div>
+      </div>
+    );
   }
 
   if (loadState === 'error') {
     return (
       <div className="min-h-screen bg-background pb-20">
-        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-lg">
-          <button type="button" onClick={() => navigate(-1)} aria-label="Back">
-            <ArrowLeft className="h-5 w-5 text-foreground" />
+        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border/50 bg-background/80 px-4 py-3 backdrop-blur-xl">
+          <button type="button" onClick={() => navigate(-1)} aria-label="Back" className="glass-card rounded-full p-2 text-foreground hover:text-primary transition-colors">
+            <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="text-lg font-bold text-foreground">Edit Event</h1>
+          <div>
+            <h1 className="text-lg font-bold text-gradient leading-tight">Edit Event</h1>
+            <p className="text-[11px] text-muted-foreground leading-none">Fill in the details below</p>
+          </div>
         </header>
-        <p className="px-4 pt-6 text-sm text-muted-foreground">{loadMessage}</p>
+        <div className="mx-auto max-w-lg px-4 pt-8 text-center">
+          <p className="text-sm text-muted-foreground">{loadMessage}</p>
+        </div>
         <BottomNav />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background pb-20">
-      <AppToast
-        message={toast.message}
-        type={toast.type}
-        show={toast.show}
-        onClose={() => setToast((t) => ({ ...t, show: false }))}
-      />
+    <div className="min-h-screen bg-background pb-24 relative overflow-x-hidden">
+      <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
 
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-lg">
-        <button type="button" onClick={() => navigate(-1)} aria-label="Back">
-          <ArrowLeft className="h-5 w-5 text-foreground" />
+      {/* Ambient background glows */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-32 left-1/4 w-[500px] h-[500px] rounded-full bg-primary/15 blur-[140px]" />
+        <div className="absolute top-1/2 -right-32 w-[400px] h-[400px] rounded-full bg-accent/10 blur-[140px]" />
+        <div className="absolute bottom-0 left-0 w-[400px] h-[350px] rounded-full bg-primary/10 blur-[140px]" />
+      </div>
+
+      {/* Header */}
+      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border/50 bg-background/80 px-4 py-3 backdrop-blur-xl">
+        <button type="button" onClick={() => navigate(-1)} aria-label="Back" className="glass-card rounded-full p-2 text-foreground hover:text-primary transition-colors shrink-0">
+          <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="text-lg font-bold text-foreground">Edit Event</h1>
+        <div>
+          <h1 className="text-lg font-bold text-gradient leading-tight">Edit Event</h1>
+          <p className="text-[11px] text-muted-foreground leading-none">Update the details below</p>
+        </div>
       </header>
 
       <motion.form
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         onSubmit={handleSubmit}
-        className="mx-auto max-w-lg space-y-4 px-4 pt-4"
+        className="relative z-10 mx-auto max-w-lg space-y-5 px-4 pt-5"
       >
-        {/* Title */}
+        {/* ── Event Details ── */}
         <div>
-          <input placeholder="Event Title" value={form.title} onChange={(e) => update('title', e.target.value)} className={inputCls('title')} />
-          {errors.title && <span className="text-[10px] text-destructive px-2">{errors.title}</span>}
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <Type className="h-3 w-3" /> Event Details
+          </p>
+          <div className="rounded-2xl glass-card p-4 space-y-4">
+            <div className="space-y-1">
+              <label htmlFor="edit-title" className="block text-xs font-semibold text-foreground">Title</label>
+              <input id="edit-title" placeholder="Event Title" value={form.title} onChange={(e) => update('title', e.target.value)} className={inputCls('title')} />
+              {errors.title && <span className="text-[10px] text-destructive px-1">{errors.title}</span>}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="edit-description" className="block text-xs font-semibold text-foreground">Description</label>
+              <textarea id="edit-description" placeholder="Description" rows={3} value={form.description} onChange={(e) => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
+              {errors.description && <span className="text-[10px] text-destructive px-1">{errors.description}</span>}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="edit-category" className="block text-xs font-semibold text-foreground">Category</label>
+              <select id="edit-category" value={form.category} onChange={(e) => update('category', e.target.value)} className={inputCls('category')}>
+                {ALL_INTERESTS.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
 
-        {/* Description */}
+        {/* ── Date & Time ── */}
         <div>
-          <textarea placeholder="Description" rows={3} value={form.description} onChange={(e) => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
-          {errors.description && <span className="text-[10px] text-destructive px-2">{errors.description}</span>}
-        </div>
-
-        {/* Category */}
-        <select value={form.category} onChange={(e) => update('category', e.target.value)} className={inputCls('category')}>
-          {ALL_INTERESTS.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-
-        {/* Date + Time */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="edit-event-date" className="block text-xs font-medium text-foreground">Event date</label>
-            <input
-              id="edit-event-date"
-              type="date"
-              min={todayIso}
-              value={form.date}
-              onChange={(e) => update('date', e.target.value)}
-              className={inputCls('date')}
-            />
-            {errors.date && <span className="text-[10px] text-destructive px-2">{errors.date}</span>}
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="edit-event-time" className="block text-xs font-medium text-foreground">Event time</label>
-            <input
-              id="edit-event-time"
-              type="time"
-              min={minTime}
-              value={form.time}
-              onChange={(e) => update('time', e.target.value)}
-              className={inputCls('time')}
-            />
-            {errors.time && <span className="text-[10px] text-destructive px-2">{errors.time}</span>}
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <Calendar className="h-3 w-3" /> Date &amp; Time
+          </p>
+          <div className="rounded-2xl glass-card p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label htmlFor="edit-event-date" className="block text-xs font-semibold text-foreground">Event date</label>
+                <input id="edit-event-date" type="date" min={todayIso} value={form.date} onChange={(e) => update('date', e.target.value)} className={inputCls('date')} />
+                {errors.date && <span className="text-[10px] text-destructive px-1">{errors.date}</span>}
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="edit-event-time" className="block text-xs font-semibold text-foreground">Event time</label>
+                <input id="edit-event-time" type="time" min={minTime} value={form.time} onChange={(e) => update('time', e.target.value)} className={inputCls('time')} />
+                {errors.time && <span className="text-[10px] text-destructive px-1">{errors.time}</span>}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Location search */}
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-foreground">Location</label>
-          <LocationSearchInput
-            value={form.location}
-            onChange={(v) => update('location', v)}
-            onSelect={handleLocationSelect}
-            onUserLocation={handleUserLocation}
-            placeholder="Search venue, address or city…"
-            error={errors.location}
-          />
-        </div>
-
-        {/* Map */}
-        <div className="relative z-10 space-y-1">
-          <label className="block text-xs font-medium text-foreground">
-            Pin on map
-            <span className="ml-1 text-[10px] text-muted-foreground">(search above or click to adjust manually)</span>
-          </label>
-          <LocationPickerMap
-            latitude={pickedLat}
-            longitude={pickedLng}
-            onLocationChange={onMapLocationChange}
-          />
-          {errors.mapLocation && (
-            <span className="mt-1 block px-2 text-[10px] text-destructive">{errors.mapLocation}</span>
-          )}
-        </div>
-
-        {/* Budget + Capacity */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="edit-event-budget" className="block text-xs font-medium text-foreground">Budget (USD)</label>
-            <input
-              id="edit-event-budget"
-              type="number"
-              min={0}
-              step="1"
-              placeholder="0 = free event"
-              value={form.budget}
-              onChange={(e) => update('budget', e.target.value)}
-              className={inputCls('budget')}
-            />
-            <p className="text-[10px] text-muted-foreground px-0.5">Leave empty or enter 0 for free.</p>
-            {errors.budget && <span className="text-[10px] text-destructive px-2">{errors.budget}</span>}
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="edit-event-capacity" className="block text-xs font-medium text-foreground">Max participants</label>
-            <input
-              id="edit-event-capacity"
-              type="number"
-              min={4}
-              max={500}
-              step={1}
-              placeholder="4–500 people"
-              value={form.limit}
-              onChange={(e) => update('limit', e.target.value)}
-              className={inputCls('limit')}
-            />
-            <p className="text-[10px] text-muted-foreground px-0.5">
-              Type a whole number. {currentParticipantCount > 0 && `${currentParticipantCount} already joined.`}
-            </p>
-            {errors.limit && <span className="text-[10px] text-destructive px-2">{errors.limit}</span>}
+        {/* ── Location ── */}
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <MapPin className="h-3 w-3" /> Location
+          </p>
+          <div className="rounded-2xl glass-card p-4 space-y-3">
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold text-foreground">Search address</label>
+              <LocationSearchInput
+                value={form.location}
+                onChange={(v) => update('location', v)}
+                onSelect={handleLocationSelect}
+                onUserLocation={handleUserLocation}
+                placeholder="Search venue, address or city…"
+                error={errors.location}
+              />
+            </div>
+            <div className="relative z-10 space-y-1">
+              <label className="block text-xs font-semibold text-foreground">
+                Pin on map
+                <span className="ml-1 text-[10px] font-normal text-muted-foreground">(search above or click to adjust manually)</span>
+              </label>
+              <LocationPickerMap latitude={pickedLat} longitude={pickedLng} onLocationChange={onMapLocationChange} />
+              {errors.mapLocation && <span className="mt-1 block px-1 text-[10px] text-destructive">{errors.mapLocation}</span>}
+            </div>
           </div>
         </div>
 
-        {/* Requires approval */}
-        <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-          <div className="flex items-center gap-2 text-sm text-foreground">
-            <ShieldCheck className="h-4 w-4" /> Require Approval
+        {/* ── Capacity & Cost ── */}
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <Users className="h-3 w-3" /> Capacity &amp; Cost
+          </p>
+          <div className="rounded-2xl glass-card p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label htmlFor="edit-event-budget" className="block text-xs font-semibold text-foreground">Budget (USD)</label>
+                <input id="edit-event-budget" type="number" min={0} step="1" placeholder="0 = free event" value={form.budget} onChange={(e) => update('budget', e.target.value)} className={inputCls('budget')} />
+                <p className="text-[10px] text-muted-foreground px-0.5">Leave empty or enter 0 for free.</p>
+                {errors.budget && <span className="text-[10px] text-destructive px-1">{errors.budget}</span>}
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="edit-event-capacity" className="block text-xs font-semibold text-foreground">Max participants</label>
+                <input id="edit-event-capacity" type="number" min={4} max={500} step={1} placeholder="4–500 people" value={form.limit} onChange={(e) => update('limit', e.target.value)} className={inputCls('limit')} />
+                <p className="text-[10px] text-muted-foreground px-0.5">
+                  Type a whole number.{currentParticipantCount > 0 && ` ${currentParticipantCount} already joined.`}
+                </p>
+                {errors.limit && <span className="text-[10px] text-destructive px-1">{errors.limit}</span>}
+              </div>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => update('requiresApproval', !form.requiresApproval)}
-            className={`h-6 w-11 rounded-full transition-colors ${form.requiresApproval ? 'bg-primary' : 'bg-muted'}`}
-          >
-            <div className={`h-5 w-5 rounded-full bg-white transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`} />
-          </button>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-3 pt-4">
-          <button type="button" onClick={() => navigate(-1)} className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground">Cancel</button>
-          <button type="submit" disabled={isSubmitting} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50">
-            {isSubmitting ? 'Saving…' : 'Save changes'}
-          </button>
+        {/* ── Settings ── */}
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <Settings className="h-3 w-3" /> Settings
+          </p>
+          <div className="rounded-2xl glass-card p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Require Approval</p>
+                  <p className="text-[10px] text-muted-foreground">Manually approve join requests</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => update('requiresApproval', !form.requiresApproval)}
+                aria-pressed={form.requiresApproval}
+                className={`relative h-6 w-11 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50 ${
+                  form.requiresApproval ? 'bg-primary shadow-glow' : 'bg-muted'
+                }`}
+              >
+                <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Actions ── */}
+        <div className="rounded-2xl glass-card p-4">
+          <div className="flex gap-3">
+            <button type="button" onClick={() => navigate(-1)} className="flex-1 rounded-xl border border-border bg-secondary py-3 text-sm font-semibold text-foreground transition-colors hover:bg-secondary/80 active:scale-[0.98]">
+              Cancel
+            </button>
+            <button type="submit" disabled={isSubmitting} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container active:scale-[0.98] transition-transform disabled:opacity-50">
+              {isSubmitting ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </div>
       </motion.form>
+
       <BottomNav />
     </div>
   );

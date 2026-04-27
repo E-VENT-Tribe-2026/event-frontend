@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Type, Calendar, MapPin, Users } from 'lucide-react';
 import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -39,7 +39,6 @@ const EVENT_IMAGES = [
   'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=600&q=80',
 ];
 
-// Germany centre fallback
 const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
 
 export default function CreateEventPage() {
@@ -65,7 +64,6 @@ export default function CreateEventPage() {
   const [dateInputType, setDateInputType] = useState<'text' | 'date'>('text');
   const [timeInputType, setTimeInputType] = useState<'text' | 'time'>('text');
 
-  // Coordinates — start at Germany until user grants geolocation or picks a location
   const [pickedLat, setPickedLat] = useState<number | null>(null);
   const [pickedLng, setPickedLng] = useState<number | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>(GERMANY_DEFAULT);
@@ -75,7 +73,6 @@ export default function CreateEventPage() {
     if (errors[key]) setErrors(prev => { const n = { ...prev }; delete n[key]; return n; });
   };
 
-  // Called by LocationSearchInput when the user selects a search result
   const handleLocationSelect = (result: LocationResult) => {
     setPickedLat(result.lat);
     setPickedLng(result.lng);
@@ -84,15 +81,12 @@ export default function CreateEventPage() {
     setErrors(prev => { const n = { ...prev }; delete n.mapLocation; return n; });
   };
 
-  // Called by LocationSearchInput once geolocation resolves
   const handleUserLocation = (coords: { lat: number; lng: number }) => {
     setMapCenter(coords);
-    // Only set the marker if the user hasn't already picked one
     setPickedLat(prev => prev ?? null);
     setPickedLng(prev => prev ?? null);
   };
 
-  // Manual map click still works
   const onMapLocationChange = (lat: number, lng: number) => {
     setPickedLat(lat);
     setPickedLng(lng);
@@ -101,7 +95,6 @@ export default function CreateEventPage() {
 
   const todayIso = new Date().toISOString().split('T')[0];
 
-  /** Returns HH:MM of current time + 5 min buffer, only when date === today */
   const minTime = form.date === todayIso
     ? (() => {
         const now = new Date(Date.now() + 5 * 60 * 1000);
@@ -248,172 +241,177 @@ export default function CreateEventPage() {
   };
 
   const inputCls = (field: string) =>
-    `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 ${
-      errors[field] ? 'ring-1 ring-destructive' : 'focus:ring-primary/50'
+    `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none border border-border/50 focus:border-primary/40 focus:ring-2 ${
+      errors[field] ? 'ring-1 ring-destructive border-destructive/50' : 'focus:ring-primary/50'
     } transition-all`;
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="min-h-screen bg-background pb-24 relative overflow-x-hidden">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
 
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-        <button onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5 text-foreground" /></button>
-        <h1 className="text-lg font-bold text-foreground">Create Event</h1>
+      {/* Ambient background glows */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-32 left-1/4 w-[500px] h-[500px] rounded-full bg-primary/15 blur-[140px]" />
+        <div className="absolute top-1/2 -right-32 w-[400px] h-[400px] rounded-full bg-accent/10 blur-[140px]" />
+        <div className="absolute bottom-0 left-0 w-[400px] h-[350px] rounded-full bg-primary/10 blur-[140px]" />
+      </div>
+
+      {/* Header */}
+      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border/50 bg-background/80 backdrop-blur-xl px-4 py-3">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          aria-label="Back"
+          className="glass-card rounded-full p-2 text-foreground hover:text-primary transition-colors shrink-0"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <div>
+          <h1 className="text-lg font-bold text-gradient leading-tight">Create Event</h1>
+          <p className="text-[11px] text-muted-foreground leading-none">Fill in the details below</p>
+        </div>
       </header>
 
       <motion.form
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         onSubmit={handleSubmit}
-        className="mx-auto max-w-lg space-y-4 px-4 pt-4"
+        className="relative z-10 mx-auto max-w-lg space-y-5 px-4 pt-5"
       >
-        {/* Title */}
+        {/* ── Event Details ── */}
         <div>
-          <input placeholder="Event Title" value={form.title} onChange={e => update('title', e.target.value)} className={inputCls('title')} />
-          {errors.title && <span className="text-[10px] text-destructive px-2">{errors.title}</span>}
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <Type className="h-3 w-3" /> Event Details
+          </p>
+          <div className="rounded-2xl glass-card p-4 space-y-4">
+            <div className="space-y-1">
+              <label htmlFor="create-title" className="block text-xs font-semibold text-foreground">Title</label>
+              <input id="create-title" placeholder="Event Title" value={form.title} onChange={e => update('title', e.target.value)} className={inputCls('title')} />
+              {errors.title && <span className="text-[10px] text-destructive px-1">{errors.title}</span>}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="create-description" className="block text-xs font-semibold text-foreground">Description</label>
+              <textarea id="create-description" placeholder="Description" rows={3} value={form.description} onChange={e => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
+              {errors.description && <span className="text-[10px] text-destructive px-1">{errors.description}</span>}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="create-category" className="block text-xs font-semibold text-foreground">Category</label>
+              <select id="create-category" value={form.category} onChange={e => update('category', e.target.value)} className={inputCls('category')}>
+                {ALL_INTERESTS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
 
-        {/* Description */}
+        {/* ── Date & Time ── */}
         <div>
-          <textarea placeholder="Description" rows={3} value={form.description} onChange={e => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
-          {errors.description && <span className="text-[10px] text-destructive px-2">{errors.description}</span>}
-        </div>
-
-        {/* Category */}
-        <select value={form.category} onChange={e => update('category', e.target.value)} className={inputCls('category')}>
-          {ALL_INTERESTS.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-
-        {/* Date + Time */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="create-event-date" className="block text-xs font-medium text-foreground">
-              Event date
-            </label>
-            <input
-              id="create-event-date"
-              type={dateInputType}
-              min={dateInputType === 'date' ? todayIso : undefined}
-              placeholder="YYYY-MM-DD"
-              value={form.date}
-              onFocus={() => setDateInputType('date')}
-              onBlur={() => {
-                if (!form.date) setDateInputType('text');
-              }}
-              onChange={e => update('date', e.target.value)}
-              className={inputCls('date')}
-              aria-describedby="create-event-date-hint"
-            />
-            <p id="create-event-date-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Tap to pick from calendar.
-            </p>
-            {errors.date && <span className="text-[10px] text-destructive px-2">{errors.date}</span>}
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="create-event-time" className="block text-xs font-medium text-foreground">
-              Event time
-            </label>
-            <input
-              id="create-event-time"
-              type={timeInputType}
-              placeholder="HH:MM (24h)"
-              min={timeInputType === 'time' ? minTime : undefined}
-              value={form.time}
-              onFocus={() => setTimeInputType('time')}
-              onBlur={() => {
-                if (!form.time) setTimeInputType('text');
-              }}
-              onChange={e => update('time', e.target.value)}
-              className={inputCls('time')}
-              aria-describedby="create-event-time-hint"
-            />
-            <p id="create-event-time-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Tap to pick start time.
-            </p>
-            {errors.time && <span className="text-[10px] text-destructive px-2">{errors.time}</span>}
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <Calendar className="h-3 w-3" /> Date &amp; Time
+          </p>
+          <div className="rounded-2xl glass-card p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label htmlFor="create-event-date" className="block text-xs font-semibold text-foreground">Event date</label>
+                <input
+                  id="create-event-date"
+                  type={dateInputType}
+                  min={dateInputType === 'date' ? todayIso : undefined}
+                  placeholder="YYYY-MM-DD"
+                  value={form.date}
+                  onFocus={() => setDateInputType('date')}
+                  onBlur={() => { if (!form.date) setDateInputType('text'); }}
+                  onChange={e => update('date', e.target.value)}
+                  className={inputCls('date')}
+                  aria-describedby="create-event-date-hint"
+                />
+                <p id="create-event-date-hint" className="text-[10px] text-muted-foreground px-0.5">Tap to pick from calendar.</p>
+                {errors.date && <span className="text-[10px] text-destructive px-1">{errors.date}</span>}
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="create-event-time" className="block text-xs font-semibold text-foreground">Event time</label>
+                <input
+                  id="create-event-time"
+                  type={timeInputType}
+                  placeholder="HH:MM (24h)"
+                  min={timeInputType === 'time' ? minTime : undefined}
+                  value={form.time}
+                  onFocus={() => setTimeInputType('time')}
+                  onBlur={() => { if (!form.time) setTimeInputType('text'); }}
+                  onChange={e => update('time', e.target.value)}
+                  className={inputCls('time')}
+                  aria-describedby="create-event-time-hint"
+                />
+                <p id="create-event-time-hint" className="text-[10px] text-muted-foreground px-0.5">Tap to pick start time.</p>
+                {errors.time && <span className="text-[10px] text-destructive px-1">{errors.time}</span>}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Location search */}
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-foreground">Location</label>
-          <LocationSearchInput
-            value={form.location}
-            onChange={(v) => update('location', v)}
-            onSelect={handleLocationSelect}
-            onUserLocation={handleUserLocation}
-            placeholder="Search venue, address or city…"
-            error={errors.location}
-          />
-        </div>
-
-        {/* Map — centres on mapCenter, marker on pickedLat/Lng */}
-        <div className="relative z-10 space-y-1">
-          <label className="block text-xs font-medium text-foreground">
-            Pin on map
-            <span className="ml-1 text-[10px] text-muted-foreground">(search above or click to set manually)</span>
-          </label>
-          <LocationPickerMap
-            latitude={pickedLat}
-            longitude={pickedLng}
-            onLocationChange={onMapLocationChange}
-          />
-          {errors.mapLocation && <span className="block text-[10px] text-destructive px-2">{errors.mapLocation}</span>}
-        </div>
-
-        {/* Budget + Capacity */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="create-event-budget" className="block text-xs font-medium text-foreground">
-              Budget (USD)
-            </label>
-            <input
-              id="create-event-budget"
-              type="number"
-              min={0}
-              step="1"
-              placeholder="0 = free event"
-              value={form.budget}
-              onChange={e => update('budget', e.target.value)}
-              className={inputCls('budget')}
-              aria-describedby="create-event-budget-hint"
-            />
-            <p id="create-event-budget-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Leave empty or enter 0 for free.
-            </p>
-            {errors.budget && <span className="text-[10px] text-destructive px-2">{errors.budget}</span>}
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="create-event-capacity" className="block text-xs font-medium text-foreground">
-              Max participants
-            </label>
-            <input
-              id="create-event-capacity"
-              type="number"
-              min={4}
-              max={500}
-              step={1}
-              placeholder="4–500 people"
-              value={form.limit}
-              onChange={e => update('limit', e.target.value)}
-              className={inputCls('limit')}
-              aria-describedby="create-event-capacity-hint"
-            />
-            <p id="create-event-capacity-hint" className="text-[10px] text-muted-foreground px-0.5">
-              Type a whole number.
-            </p>
-            {errors.limit && <span className="text-[10px] text-destructive px-2">{errors.limit}</span>}
+        {/* ── Location ── */}
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <MapPin className="h-3 w-3" /> Location
+          </p>
+          <div className="rounded-2xl glass-card p-4 space-y-3">
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold text-foreground">Search address</label>
+              <LocationSearchInput
+                value={form.location}
+                onChange={(v) => update('location', v)}
+                onSelect={handleLocationSelect}
+                onUserLocation={handleUserLocation}
+                placeholder="Search venue, address or city…"
+                error={errors.location}
+              />
+            </div>
+            <div className="relative z-10 space-y-1">
+              <label className="block text-xs font-semibold text-foreground">
+                Pin on map
+                <span className="ml-1 text-[10px] font-normal text-muted-foreground">(search above or click to set manually)</span>
+              </label>
+              <LocationPickerMap latitude={pickedLat} longitude={pickedLng} onLocationChange={onMapLocationChange} />
+              {errors.mapLocation && <span className="block text-[10px] text-destructive px-1">{errors.mapLocation}</span>}
+            </div>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-3 pt-4">
-          <button type="button" onClick={() => navigate(-1)} className="flex-1 rounded-xl bg-secondary py-3 text-sm font-semibold text-foreground">Cancel</button>
-          <button type="submit" disabled={isSubmitting} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50">
-            {isSubmitting ? 'Publishing...' : 'Publish Event'}
-          </button>
+        {/* ── Capacity & Cost ── */}
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <Users className="h-3 w-3" /> Capacity &amp; Cost
+          </p>
+          <div className="rounded-2xl glass-card p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label htmlFor="create-event-budget" className="block text-xs font-semibold text-foreground">Budget (USD)</label>
+                <input id="create-event-budget" type="number" min={0} step="1" placeholder="0 = free event" value={form.budget} onChange={e => update('budget', e.target.value)} className={inputCls('budget')} aria-describedby="create-event-budget-hint" />
+                <p id="create-event-budget-hint" className="text-[10px] text-muted-foreground px-0.5">Leave empty or enter 0 for free.</p>
+                {errors.budget && <span className="text-[10px] text-destructive px-1">{errors.budget}</span>}
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="create-event-capacity" className="block text-xs font-semibold text-foreground">Max participants</label>
+                <input id="create-event-capacity" type="number" min={4} max={500} step={1} placeholder="4–500 people" value={form.limit} onChange={e => update('limit', e.target.value)} className={inputCls('limit')} aria-describedby="create-event-capacity-hint" />
+                <p id="create-event-capacity-hint" className="text-[10px] text-muted-foreground px-0.5">Type a whole number.</p>
+                {errors.limit && <span className="text-[10px] text-destructive px-1">{errors.limit}</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Actions ── */}
+        <div className="rounded-2xl glass-card p-4">
+          <div className="flex gap-3">
+            <button type="button" onClick={() => navigate(-1)} className="flex-1 rounded-xl border border-border bg-secondary py-3 text-sm font-semibold text-foreground transition-colors hover:bg-secondary/80 active:scale-[0.98]">
+              Cancel
+            </button>
+            <button type="submit" disabled={isSubmitting} className="flex-1 gradient-primary rounded-xl py-3 text-sm font-semibold text-primary-foreground shadow-glow ripple-container active:scale-[0.98] transition-transform disabled:opacity-50">
+              {isSubmitting ? 'Publishing...' : 'Publish Event'}
+            </button>
+          </div>
         </div>
       </motion.form>
+
       <BottomNav />
     </div>
   );

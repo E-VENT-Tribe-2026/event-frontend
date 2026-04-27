@@ -449,109 +449,125 @@ export default function ChatPage() {
     return (
       <div className="flex min-h-screen flex-col bg-background pb-20">
         <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
-        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border glass-nav px-4 py-3">
-          <button type="button" aria-label="Back to chats" onClick={() => setActiveChat(null)}>
-            <ArrowLeft className="h-5 w-5 text-foreground" />
-          </button>
-          <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="sm" className="ring-2 ring-primary/30" />
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold text-foreground">{chat.name}</h1>
-            {chat.isPast && !chatUnavailable && (
-              <p className="text-[10px] text-muted-foreground">Past event · read-only history</p>
-            )}
-            {chatUnavailable && <p className="text-[10px] text-destructive">Chat unavailable</p>}
-            {chatApiMissing && !chatUnavailable && !chat.isPast && <p className="text-[10px] text-muted-foreground">Offline preview</p>}
+
+        {/* Chat header */}
+        <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label="Back to chats"
+              onClick={() => setActiveChat(null)}
+              className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90 shrink-0"
+            >
+              <ArrowLeft className="h-4 w-4 text-foreground" />
+            </button>
+
+            <div className="relative shrink-0">
+              <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="sm" className="ring-2 ring-primary/30" />
+              <div className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-background ${chat.isPast || chatUnavailable ? 'bg-muted-foreground' : 'bg-green-500'}`} />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-sm font-bold text-foreground">{chat.name}</h1>
+              <p className={`text-[10px] ${chatUnavailable ? 'text-destructive' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
+                {chatUnavailable ? 'Chat unavailable' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
+              </p>
+            </div>
           </div>
         </header>
 
+        {/* Unavailable banner */}
         {chatUnavailable && (
-          <div className="mx-4 mt-3 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-xs text-destructive">
+          <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <p>This event was canceled or you can no longer use this chat.</p>
           </div>
         )}
 
+        {/* Messages */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 custom-scrollbar">
+          <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 custom-scrollbar">
             {messagesLoading && (
-              <p className="py-6 text-center text-xs text-muted-foreground">Loading messages…</p>
+              <div className="space-y-3 pt-4">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className={`flex items-end gap-2 ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
+                    {i % 2 === 0 && <div className="h-8 w-8 shrink-0 rounded-full shimmer" />}
+                    <div className={`h-10 rounded-2xl shimmer ${i % 2 === 0 ? 'w-48' : 'w-36'}`} />
+                  </div>
+                ))}
+              </div>
             )}
             {!messagesLoading && messages.length === 0 && !chatUnavailable && (
-              <p className="py-6 text-center text-xs text-muted-foreground">No messages yet. Say hello below.</p>
-            )}
-            {!messagesLoading && messages.length === 0 && chatUnavailable && (
-              <p className="py-6 text-center text-xs text-muted-foreground">No messages to show.</p>
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                  <Send className="h-6 w-6 text-primary" />
+                </div>
+                <p className="text-sm font-medium text-foreground">No messages yet</p>
+                <p className="text-xs text-muted-foreground">Be the first to say hello 👋</p>
+              </div>
             )}
             {messages.map((m, i) => {
               const showDateSep = i === 0 || messages[i - 1].dateKey !== m.dateKey;
               return (
                 <div key={m.id}>
                   {showDateSep && (
-                    <div className="flex items-center gap-3 py-2">
-                      <div className="flex-1 border-t border-border/50" />
-                      <span className="shrink-0 rounded-full bg-secondary px-3 py-1 text-[11px] font-medium text-muted-foreground">
+                    <div className="flex items-center gap-3 py-3">
+                      <div className="flex-1 border-t border-border/40" />
+                      <span className="shrink-0 rounded-full bg-secondary/80 px-3 py-1 text-[10px] font-semibold text-muted-foreground">
                         {formatDateSeparator(m.dateKey)}
                       </span>
-                      <div className="flex-1 border-t border-border/50" />
+                      <div className="flex-1 border-t border-border/40" />
                     </div>
                   )}
                   {m.kind === 'system' ? (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-start gap-2.5 px-2 py-1"
-                >
-                  <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-muted-foreground/30 bg-secondary text-muted-foreground">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                      {/left|removed|kicked/i.test(m.text)
-                        ? <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>
-                        : /joined|welcome|added/i.test(m.text)
-                        ? <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></>
-                        : <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>
-                      }
-                    </svg>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {m.text}
-                    <span className="ml-1.5 text-[10px] opacity-60">{m.time}</span>
-                  </p>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex items-end gap-2 ${m.from === 'me' ? 'justify-end' : 'justify-start'}`}
-                >
-                  {m.from === 'them' && (
-                    <UserAvatar src={m.senderAvatar} seed={m.senderId || m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
-                  )}
-                  <div className={`max-w-[75%] flex flex-col gap-0.5 ${m.from === 'me' ? 'items-end' : 'items-start'}`}>
-                    {m.from === 'them' && (
-                      <div className="flex items-center gap-1.5 px-1">
-                        <span className="text-[11px] font-semibold text-foreground">{m.senderName || 'Unknown'}</span>
-                        {m.senderId && (
-                          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                            m.senderId === chat.organizerId
-                              ? 'bg-primary/20 text-primary'
-                              : 'bg-secondary text-muted-foreground'
-                          }`}>
-                            {m.senderId === chat.organizerId ? 'Organizer' : 'Participant'}
-                          </span>
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center justify-center py-1"
+                    >
+                      <span className="rounded-full bg-secondary/60 px-3 py-1 text-[10px] text-muted-foreground">
+                        {m.text}
+                        <span className="ml-1.5 opacity-60">{m.time}</span>
+                      </span>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`flex items-end gap-2 mb-1 ${m.from === 'me' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      {m.from === 'them' && (
+                        <UserAvatar src={m.senderAvatar} seed={m.senderId || m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
+                      )}
+                      <div className={`max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}>
+                        {m.from === 'them' && (
+                          <div className="flex items-center gap-1.5 px-1">
+                            <span className="text-[11px] font-semibold text-foreground">{m.senderName || 'Unknown'}</span>
+                            {m.senderId && (
+                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                                m.senderId === chat.organizerId
+                                  ? 'gradient-primary text-primary-foreground'
+                                  : 'bg-secondary text-muted-foreground'
+                              }`}>
+                                {m.senderId === chat.organizerId ? 'Host' : 'Guest'}
+                              </span>
+                            )}
+                          </div>
                         )}
+                        <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
+                          m.from === 'me'
+                            ? 'gradient-primary text-primary-foreground rounded-br-sm'
+                            : 'glass-card text-foreground rounded-bl-sm'
+                        }`}>
+                          <p className="whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
+                          <p className={`mt-1 text-[10px] ${m.from === 'me' ? 'text-primary-foreground/60 text-right' : 'text-muted-foreground'}`}>{m.time}</p>
+                        </div>
                       </div>
-                    )}
-                    <div className={`rounded-2xl px-4 py-2.5 text-sm ${m.from === 'me' ? 'gradient-primary text-primary-foreground' : 'glass-card text-foreground'}`}>
-                      <p className="whitespace-pre-wrap break-words">{m.text}</p>
-                      <p className={`mt-1 text-[10px] ${m.from === 'me' ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{m.time}</p>
-                    </div>
-                  </div>
-                  {m.from === 'me' && (
-                    <UserAvatar src={user.avatar} seed={user.id} name={user.name} size="sm" className="shrink-0 mb-1" />
+                      {m.from === 'me' && (
+                        <UserAvatar src={user.avatar} seed={user.id} name={user.name} size="sm" className="shrink-0 mb-1" />
+                      )}
+                    </motion.div>
                   )}
-                </motion.div>
-              )}
                 </div>
               );
             })}
@@ -559,18 +575,19 @@ export default function ChatPage() {
           </div>
         </div>
 
-        <div className="sticky bottom-16 border-t border-border glass-nav px-4 py-3">
+        {/* Input bar */}
+        <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3">
           <AnimatePresence>
             {showEmoji && !chatUnavailable && !chat.isPast && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="mb-2 overflow-hidden"
+                className="mb-3 overflow-hidden"
               >
-                <div className="flex flex-wrap gap-2 rounded-2xl bg-secondary/60 px-3 py-2">
+                <div className="flex flex-wrap gap-2 rounded-2xl glass-card px-3 py-2.5">
                   {EMOJIS.map((emoji) => (
-                    <button key={emoji} type="button" onClick={() => setInput((prev) => prev + emoji)} className="text-xl transition-transform hover:scale-125">
+                    <button key={emoji} type="button" onClick={() => setInput((prev) => prev + emoji)} className="text-xl transition-transform hover:scale-125 active:scale-95">
                       {emoji}
                     </button>
                   ))}
@@ -579,32 +596,32 @@ export default function ChatPage() {
             )}
           </AnimatePresence>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={chatUnavailable || chat.isPast}
+              onClick={() => setShowEmoji(!showEmoji)}
+              className={`shrink-0 rounded-full p-2 transition-all disabled:opacity-40 ${showEmoji ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:bg-secondary/80 hover:text-foreground'}`}
+              aria-label="Emoji"
+            >
+              <Smile className="h-5 w-5" />
+            </button>
             <input
               value={input}
               disabled={chatUnavailable || chat.isPast}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
               placeholder={
-                chat.isPast ? 'This event has ended — chat is read-only'
+                chat.isPast ? 'Chat is read-only for past events'
                   : chatUnavailable ? 'Chat unavailable for this event'
                   : 'Type a message…'
               }
-              className="flex-1 rounded-full bg-secondary px-4 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 rounded-full border border-border/50 bg-secondary px-4 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <button
-              type="button"
-              disabled={chatUnavailable || chat.isPast}
-              onClick={() => setShowEmoji(!showEmoji)}
-              className={`shrink-0 transition-colors disabled:opacity-40 ${showEmoji ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-              aria-label="Emoji"
-            >
-              <Smile className="h-5 w-5" />
-            </button>
             <button
               type="button"
               disabled={chatUnavailable || sending || !input.trim() || chat.isPast}
               onClick={() => void sendMessage()}
-              className="rounded-full gradient-primary p-2.5 shadow-glow disabled:opacity-50"
+              className="shrink-0 rounded-full gradient-primary p-2.5 shadow-glow disabled:opacity-40 active:scale-90 transition-transform"
               aria-label="Send message"
             >
               <Send className="h-4 w-4 text-primary-foreground" />
@@ -620,27 +637,46 @@ export default function ChatPage() {
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
-      <header className="sticky top-0 z-40 border-b border-border glass-nav px-4 py-3">
-        <h1 className="text-lg font-bold text-gradient">Chats</h1>
-        <p className="text-xs text-muted-foreground">Event conversations you joined or host</p>
+
+      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-gradient">Chats</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
+          </div>
+          {chats.length > 0 && (
+            <span className="rounded-full gradient-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground shadow-glow">
+              {chats.filter(c => !c.isPast).length} active
+            </span>
+          )}
+        </div>
       </header>
 
-      <div className="mx-auto max-w-lg px-0">
+      <div className="mx-auto max-w-lg px-4 pt-3 space-y-2">
         {chatListLoading && (
-          <div className="divide-y divide-border/50">
+          <>
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-4">
-                <div className="h-11 w-11 shrink-0 animate-pulse rounded-full bg-secondary" />
+              <div key={i} className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3.5">
+                <div className="h-12 w-12 shrink-0 rounded-full shimmer" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-3 w-2/5 animate-pulse rounded bg-secondary" />
-                  <div className="h-2.5 w-3/5 animate-pulse rounded bg-secondary" />
+                  <div className="h-3.5 w-2/5 rounded-full shimmer" />
+                  <div className="h-2.5 w-3/5 rounded-full shimmer" />
                 </div>
               </div>
             ))}
-          </div>
+          </>
         )}
+
         {!chatListLoading && chats.length === 0 && (
-          <p className="px-4 py-6 text-xs text-muted-foreground">No event conversations yet. Join an event, then open chat from the event page.</p>
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+              <Send className="h-7 w-7 text-primary" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">No conversations yet</p>
+            <p className="text-xs text-muted-foreground max-w-xs">
+              Join an event and open its chat from the event details page to start talking.
+            </p>
+          </div>
         )}
 
         {!chatListLoading && chats.length > 0 && (() => {
@@ -648,44 +684,46 @@ export default function ChatPage() {
           const pastChats = chats.filter((c) => c.isPast && !isExpiredOver48h(c.eventDate));
 
           const renderChatItem = (chat: ChatEvent) => (
-            <button
+            <motion.button
               key={chat.id}
               type="button"
               onClick={() => setActiveChat(chat.id)}
-              className={`flex w-full items-center gap-3 px-4 py-4 text-left transition-colors hover:bg-secondary/30 border-b border-border/50 ${chat.isPast ? 'opacity-70' : ''}`}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`flex w-full items-center gap-3 rounded-2xl glass-card px-4 py-3.5 text-left transition-all hover:border-primary/30 active:scale-[0.98] ${chat.isPast ? 'opacity-60' : ''}`}
             >
               <div className="relative shrink-0">
                 <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="lg" className="ring-2 ring-border" />
-                <div className={`absolute bottom-0 right-0 z-10 h-3 w-3 rounded-full ring-2 ring-background ${chat.isPast ? 'bg-muted-foreground' : 'bg-green-500'}`} />
+                <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-background ${chat.isPast ? 'bg-muted-foreground' : 'bg-green-500'}`} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">{chat.name}</p>
-                <p className="line-clamp-1 text-xs text-muted-foreground">
+                <p className="truncate text-sm font-semibold text-foreground">{chat.name}</p>
+                <p className="line-clamp-1 text-xs text-muted-foreground mt-0.5">
                   {chat.isPast ? `Ended · ${chat.eventDate}` : chat.lastMsg}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
                 <span className="text-[10px] text-muted-foreground">{chat.time}</span>
                 {chat.unread > 0 && (
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-[10px] font-bold text-primary-foreground">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full gradient-primary text-[10px] font-bold text-primary-foreground shadow-glow">
                     {chat.unread}
                   </span>
                 )}
               </div>
-            </button>
+            </motion.button>
           );
 
           return (
             <>
               {activeChats.length > 0 && (
-                <div>
-                  <p className="px-4 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Active</p>
+                <div className="space-y-2">
+                  <p className="px-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Active</p>
                   {activeChats.map(renderChatItem)}
                 </div>
               )}
               {pastChats.length > 0 && (
-                <div>
-                  <p className="px-4 pt-5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Past</p>
+                <div className="space-y-2 pt-2">
+                  <p className="px-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Past</p>
                   {pastChats.map(renderChatItem)}
                 </div>
               )}
