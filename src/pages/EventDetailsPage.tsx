@@ -342,6 +342,11 @@ export default function EventDetailsPage() {
   }
 
   const isPastEvent = !isEventUpcoming(event);
+  const isChatExpired = isPastEvent && (() => {
+    const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
+    const ts = new Date(normalized).getTime();
+    return !Number.isNaN(ts) && Date.now() - ts > 48 * 60 * 60 * 1000;
+  })();
 
   if (wasRemovedFromEvent) {
     return (
@@ -771,8 +776,10 @@ export default function EventDetailsPage() {
           <h2 className="text-base font-semibold text-foreground">Event chat</h2>
           {!user ? (
             <p className="text-xs text-muted-foreground">Sign in and join this event to access the event chat.</p>
-          ) : isCancelledEvent ? (
-            <p className="text-xs text-muted-foreground">This event is canceled. Chat is no longer available.</p>
+          ) : isCancelledEvent || isChatExpired ? (
+            <p className="text-xs text-muted-foreground">
+              {isChatExpired ? 'Chat is no longer available — this event ended more than 48 hours ago.' : 'This event is canceled. Chat is no longer available.'}
+            </p>
           ) : canAccessEventChat ? (
             <button
               type="button"
@@ -804,9 +811,13 @@ export default function EventDetailsPage() {
               </button>
               <button
                 type="button"
-                disabled={isDeletingEvent}
+                disabled={isDeletingEvent || isPastEvent}
                 onClick={() => void handleDeleteEvent()}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-destructive/45 bg-destructive/10 py-3.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-60 active:scale-[0.98]"
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
+                  isPastEvent
+                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                    : 'border-destructive/45 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-60'
+                }`}
               >
                 <Trash2 className="h-4 w-4 shrink-0" />
                 {isDeletingEvent ? 'Deleting…' : 'Delete'}
