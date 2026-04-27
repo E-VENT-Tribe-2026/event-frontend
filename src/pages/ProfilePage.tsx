@@ -42,6 +42,9 @@ export default function ProfilePage() {
   const [showInterests, setShowInterests] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [activeTab, setActiveTab] = useState<'events' | 'favorites'>('events');
+  const [visibleUpcoming, setVisibleUpcoming] = useState(3);
+  const [visiblePast, setVisiblePast] = useState(3);
+  const [visibleFavorites, setVisibleFavorites] = useState(3);
 
   // Password State
   const [showPasswordSection, setShowPasswordSection] = useState(false);
@@ -290,55 +293,85 @@ export default function ProfilePage() {
           <UserAvatar src={user.avatar} seed={user.id} name={name} size="xl" className="ring-4 ring-background shadow-glow" />
           {editing ? <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" /> : <h2 className="text-xl font-bold">{name || 'User'}</h2>}
           <p className="text-sm text-muted-foreground">{user.email}</p>
+          {editing ? (
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow"
+            >
+              <Check className="h-3.5 w-3.5" /> Save Profile
+            </button>
+          ) : (
+            <button
+              onClick={() => setEditing(true)}
+              className="flex items-center gap-1.5 rounded-full glass-card border border-border px-4 py-1.5 text-xs font-semibold text-foreground hover:border-primary/50 transition-colors"
+            >
+              <Edit2 className="h-3.5 w-3.5" /> Edit Profile
+            </button>
+          )}
         </div>
 
         {/* Bio */}
         <div className="rounded-2xl glass-card p-4 space-y-2">
-          <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">Bio</h3><button onClick={editing ? handleSave : () => setEditing(true)} className="text-primary p-1">{editing ? <Check className="h-4 w-4" /> : <Edit2 className="h-4 w-4" />}</button></div>
+          <h3 className="text-sm font-semibold">Bio</h3>
           {editing ? <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm resize-none outline-none" /> : <p className="text-sm text-muted-foreground">{bio || 'No bio yet.'}</p>}
         </div>
 
         {/* Interests */}
-        <div className="rounded-2xl glass-card p-4 space-y-2">
-          <h3 className="text-sm font-semibold">Interests</h3>
+        <div className="rounded-2xl glass-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Interests</h3>
+            {interests.length > 0 && (
+              <span className="text-[10px] text-muted-foreground">{interests.length} selected</span>
+            )}
+          </div>
+
           {editing ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowInterests((prev) => !prev)}
-                className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors"
-              >
-                <span className="truncate">{interests.length ? interests.join(', ') : 'Select Interests'}</span>
-                <ChevronDown className={`h-4 w-4 transition-transform ${showInterests ? 'rotate-180' : ''}`} />
-              </button>
-              <AnimatePresence>
-                {showInterests && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
+            <div className="grid grid-cols-3 gap-2">
+              {ALL_INTERESTS.map((interest) => {
+                const emoji: Record<string, string> = {
+                  Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+                  Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+                  Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+                };
+                const selected = interests.includes(interest);
+                return (
+                  <button
+                    key={interest}
+                    type="button"
+                    onClick={() => toggleInterest(interest)}
+                    className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-3 text-center transition-all active:scale-95 ${
+                      selected
+                        ? 'bg-primary/20 border border-primary/50 shadow-sm'
+                        : 'bg-secondary/60 border border-transparent hover:border-border'
+                    }`}
                   >
-                    <div className="flex flex-wrap gap-2 p-3 bg-secondary/50 rounded-xl border border-border/50">
-                      {ALL_INTERESTS.map((interest) => (
-                        <button
-                          key={interest}
-                          type="button"
-                          onClick={() => toggleInterest(interest)}
-                          className={`px-3 py-1 text-[10px] font-medium rounded-full transition-all ${interests.includes(interest) ? 'bg-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
-                        >
-                          {interest}
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </>
+                    <span className="text-xl">{emoji[interest] ?? '✨'}</span>
+                    <span className={`text-[10px] font-medium leading-tight ${selected ? 'text-primary' : 'text-muted-foreground'}`}>
+                      {interest}
+                    </span>
+                    {selected && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                  </button>
+                );
+              })}
+            </div>
+          ) : interests.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {interests.map((interest) => {
+                const emoji: Record<string, string> = {
+                  Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+                  Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+                  Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+                };
+                return (
+                  <span key={interest} className="flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-medium text-primary">
+                    <span>{emoji[interest] ?? '✨'}</span>
+                    {interest}
+                  </span>
+                );
+              })}
+            </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              {interests.length ? interests.join(', ') : 'No interests selected yet.'}
-            </p>
+            <p className="text-xs text-muted-foreground text-center py-2">No interests selected yet. Tap Edit Profile to add some.</p>
           )}
         </div>
 
@@ -475,41 +508,56 @@ export default function ProfilePage() {
                 <h3 className="text-sm font-semibold px-1">Upcoming</h3>
                 {[...displayCreatedUpcoming, ...displayJoinedUpcoming].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No upcoming events.</p>}
                 
-                {displayCreatedUpcoming.map(e => (
-                   <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 border border-primary/20" onClick={() => navigate(`/event/${e.id}`)}>
-                     <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
-                     <div className="flex-1">
-                       <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                       <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-bold uppercase">Created</span>
-                     </div>
-                     <div className="text-right">
-                       <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                     </div>
-                   </div>
-                ))}
-
-                {displayJoinedUpcoming.map(e => (
-                   <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
-                     <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
-                     <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                       <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                       <div className="flex items-center gap-2">
-                         <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent font-bold uppercase">Joined</span>
-                         <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                       </div>
-                     </div>
-                     <button onClick={() => handleLeaveFromProfile(e.id)} disabled={leavingEventId === e.id} className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-full transition-colors">{leavingEventId === e.id ? '...' : 'Leave'}</button>
-                   </div>
-                ))}
+                {[...displayCreatedUpcoming.map(e => ({ e, isCreated: true })), ...displayJoinedUpcoming.map(e => ({ e, isCreated: false }))].slice(0, visibleUpcoming).map(({ e, isCreated }) =>
+                  isCreated ? (
+                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 border border-primary/20 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
+                      <div className="flex-1">
+                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-bold uppercase">Created</span>
+                      </div>
+                      <div className="text-right"><p className="text-[10px] text-muted-foreground">{e.date}</p></div>
+                    </div>
+                  ) : (
+                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
+                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
+                      <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent font-bold uppercase">Joined</span>
+                          <p className="text-[10px] text-muted-foreground">{e.date}</p>
+                        </div>
+                      </div>
+                      <button onClick={() => handleLeaveFromProfile(e.id)} disabled={leavingEventId === e.id} className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-full transition-colors">{leavingEventId === e.id ? '...' : 'Leave'}</button>
+                    </div>
+                  )
+                )}
+                {(() => {
+                  const total = displayCreatedUpcoming.length + displayJoinedUpcoming.length;
+                  return (
+                    <div className="flex gap-2">
+                      {visibleUpcoming < total && (
+                        <button type="button" onClick={() => setVisibleUpcoming(v => v + 3)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
+                          View more · {total - visibleUpcoming} remaining
+                        </button>
+                      )}
+                      {visibleUpcoming > 3 && (
+                        <button type="button" onClick={() => setVisibleUpcoming(3)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                          Show less
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="space-y-3 pt-2">
                 <h3 className="text-sm font-semibold opacity-70 px-1">Past Events</h3>
                 {[...displayCreatedPast, ...displayJoinedPast].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No past events recorded.</p>}
-                {[...displayCreatedPast, ...displayJoinedPast].map(e => {
+                {[...displayCreatedPast, ...displayJoinedPast].slice(0, visiblePast).map(e => {
                   const isCreated = createdIds.has(e.id);
                   return (
-                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 opacity-60 grayscale-[0.5]" onClick={() => navigate(`/event/${e.id}`)}>
+                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 opacity-60 grayscale-[0.5] cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
                       <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
                       <div className="flex-1">
                         <p className="text-xs font-bold line-clamp-1">{e.title}</p>
@@ -521,6 +569,23 @@ export default function ProfilePage() {
                     </div>
                   );
                 })}
+                {(() => {
+                  const total = displayCreatedPast.length + displayJoinedPast.length;
+                  return (
+                    <div className="flex gap-2">
+                      {visiblePast < total && (
+                        <button type="button" onClick={() => setVisiblePast(v => v + 3)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
+                          View more · {total - visiblePast} remaining
+                        </button>
+                      )}
+                      {visiblePast > 3 && (
+                        <button type="button" onClick={() => setVisiblePast(3)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                          Show less
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -531,16 +596,30 @@ export default function ProfilePage() {
               {favorites.length === 0 ? (
                 <p className="text-center py-8 text-xs text-muted-foreground">You haven't saved any events yet.</p>
               ) : (
-                favorites.map(e => (
-                  <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
-                    <img src={e.image} className="h-10 w-10 rounded-lg object-cover cursor-pointer" onClick={() => navigate(`/event/${e.id}`)} />
-                    <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                      <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                      <p className="text-[10px] text-muted-foreground">{e.date} · {e.location}</p>
+                <>
+                  {favorites.slice(0, visibleFavorites).map(e => (
+                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
+                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover cursor-pointer" onClick={() => navigate(`/event/${e.id}`)} />
+                      <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                        <p className="text-[10px] text-muted-foreground">{e.date} · {e.location}</p>
+                      </div>
+                      <button onClick={() => handleRemoveFavorite(e.id)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
                     </div>
-                    <button onClick={() => handleRemoveFavorite(e.id)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
+                  ))}
+                  <div className="flex gap-2">
+                    {visibleFavorites < favorites.length && (
+                      <button type="button" onClick={() => setVisibleFavorites(v => v + 3)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
+                        View more · {favorites.length - visibleFavorites} remaining
+                      </button>
+                    )}
+                    {visibleFavorites > 3 && (
+                      <button type="button" onClick={() => setVisibleFavorites(3)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                        Show less
+                      </button>
+                    )}
                   </div>
-                ))
+                </>
               )}
             </div>
           )}

@@ -269,26 +269,63 @@ return (
           </div>
 
           {/* Interests */}
-          <button type="button" onClick={() => setShowInterests(!showInterests)} className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors">
-            <span className="truncate">
-              {interests.length ? interests.join(', ') : 'Select Interests'}
-            </span>
-            <ChevronDown className={`h-4 w-4 transition-transform ${showInterests ? 'rotate-180' : ''}`} />
-          </button>
-          
-          <AnimatePresence>
-            {showInterests && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <div className="flex flex-wrap gap-2 p-3 bg-secondary/50 rounded-xl border border-border/50">
-                  {ALL_INTERESTS.map(i => (
-                    <button key={i} type="button" onClick={() => toggleInterest(i)} className={`px-3 py-1 text-[10px] font-medium rounded-full transition-all ${interests.includes(i) ? 'bg-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
-                      {i}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowInterests(!showInterests)}
+              className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-foreground">Interests</span>
+                {interests.length > 0 && (
+                  <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                    {interests.length} selected
+                  </span>
+                )}
+              </div>
+              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showInterests ? 'rotate-180' : ''}`} />
+            </button>
+
+            <AnimatePresence>
+              {showInterests && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {ALL_INTERESTS.map((i) => {
+                      const emoji: Record<string, string> = {
+                        Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+                        Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+                        Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+                      };
+                      const selected = interests.includes(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => toggleInterest(i)}
+                          className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-3 text-center transition-all active:scale-95 ${
+                            selected
+                              ? 'bg-primary/20 border border-primary/50 shadow-sm'
+                              : 'bg-secondary/60 border border-transparent hover:border-border'
+                          }`}
+                        >
+                          <span className="text-xl">{emoji[i] ?? '✨'}</span>
+                          <span className={`text-[10px] font-medium leading-tight ${selected ? 'text-primary' : 'text-muted-foreground'}`}>
+                            {i}
+                          </span>
+                          {selected && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Password */}
           <div className="relative">

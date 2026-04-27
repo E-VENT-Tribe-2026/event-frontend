@@ -4,7 +4,7 @@ import BottomNav from '@/components/BottomNav';
 import { ArrowLeft, LocateFixed, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
-import { CATEGORIES } from '@/lib/seedData';
+import { ALL_INTERESTS } from '@/lib/interests';
 import { getApiUrl } from '@/lib/api';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
@@ -322,7 +322,7 @@ export default function MapPage() {
             className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground outline-none"
             aria-label="Filter by category"
           >
-            {['All', ...CATEGORIES].map((c) => (
+            {['All', ...ALL_INTERESTS].map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>

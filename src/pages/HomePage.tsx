@@ -3,6 +3,7 @@ import { getCurrentUser, getUsers, getEvents as getLocalEvents, type EventItem }
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { CATEGORIES } from '@/lib/seedData';
+import { ALL_INTERESTS } from '@/lib/interests';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import EventCard from '@/components/EventCard';
@@ -32,8 +33,8 @@ export default function HomePage() {
   const [maxPrice, setMaxPrice] = useState(500);
   const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [visibleInterests, setVisibleInterests] = useState(6);
-  const [visibleAll, setVisibleAll] = useState(9);
+  const [visibleInterests, setVisibleInterests] = useState(3);
+  const [visibleAll, setVisibleAll] = useState(6);
   const PAGE = 6;
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -303,19 +304,28 @@ export default function HomePage() {
         )}
 
         {/* Category Filter */}
-        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-          {['All', ...CATEGORIES].map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategory(c)}
-              className={`shrink-0 rounded-full px-4 py-1.5 text-xs font-medium transition-all ${
-                category === c ? 'gradient-primary text-primary-foreground shadow-glow' : 'glass-card text-secondary-foreground hover:text-foreground'
-              }`}
-            >
-              {c}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-2">
+          {['All', ...ALL_INTERESTS].map((c) => {
+            const emoji: Record<string, string> = {
+              Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+              Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+              Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+            };
+            const active = category === c;
+            return (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCategory(c)}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
+                  active ? 'gradient-primary text-primary-foreground shadow-glow' : 'glass-card text-secondary-foreground hover:text-foreground'
+                }`}
+              >
+                {c !== 'All' && <span className="text-sm leading-none">{emoji[c] ?? '✨'}</span>}
+                {c}
+              </button>
+            );
+          })}
         </div>
 
         {/* Search/Location Filters */}
@@ -486,10 +496,10 @@ export default function HomePage() {
                         View more · {filteredRecommendations.length - visibleInterests} remaining
                       </button>
                     )}
-                    {visibleInterests > 6 && (
+                    {visibleInterests > 3 && (
                       <button
                         type="button"
-                        onClick={() => setVisibleInterests(6)}
+                        onClick={() => setVisibleInterests(3)}
                         className="mt-1 w-full rounded-xl py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
                       >
                         Show less
