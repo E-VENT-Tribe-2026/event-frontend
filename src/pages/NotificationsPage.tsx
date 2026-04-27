@@ -209,16 +209,29 @@ export default function NotificationsPage() {
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
       <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-        <button onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5 text-foreground" /></button>
+        <button
+          onClick={() => navigate(-1)}
+          className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
+          aria-label="Back"
+        >
+          <ArrowLeft className="h-5 w-5 text-foreground" />
+        </button>
         <h1 className="text-lg font-bold text-foreground">Notifications</h1>
-        <span className="ml-auto rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
-          {unreadCount} unread · {items.length} total
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {unreadCount > 0 && (
+            <span className="rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">
+              {unreadCount} new
+            </span>
+          )}
+          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+            {items.length} total
+          </span>
+        </div>
       </header>
 
-      <div className="mx-auto max-w-lg divide-y divide-border">
+      <div className="mx-auto max-w-lg px-4 pt-3 space-y-2">
         {usingFallback && (
-          <div className="px-4 py-2 text-center text-xs text-amber-500">
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2 text-center text-xs text-amber-500">
             Offline mode: showing local notifications only.
           </div>
         )}
@@ -234,27 +247,27 @@ export default function NotificationsPage() {
           return (
             <motion.div
               key={n.id}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className={`flex cursor-pointer items-start gap-3 px-4 py-4 ${n.read ? 'opacity-60' : ''}`}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.04 }}
+              className={`flex cursor-pointer items-start gap-3 rounded-2xl glass-card px-4 py-3.5 transition-all hover:border-border/60 ${n.read ? 'opacity-55' : 'border-l-2 border-l-primary/50'}`}
               onClick={() => void onOpenNotification(n)}
             >
-              <div className={`shrink-0 rounded-full p-2.5 ${colorMap[n.kind]}`}>
+              <div className={`shrink-0 rounded-xl p-2.5 ${colorMap[n.kind]}`}>
                 <Icon className="h-4 w-4" />
               </div>
-              <div className="flex-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-primary">{n.kind.replace(/_/g, ' ')}</p>
-                <p className="text-sm font-medium text-foreground">{n.message}</p>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{n.kind.replace(/_/g, ' ')}</p>
+                <p className="text-sm font-medium text-foreground leading-snug">{n.message}</p>
                 {n.eventTitle && (
-                  <p className="text-xs text-muted-foreground">Event: {n.eventTitle}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Event: {n.eventTitle}</p>
                 )}
                 {n.relatedEventId && (
-                  <p className="text-[10px] text-primary">Open event details</p>
+                  <p className="text-[10px] text-primary mt-0.5 font-medium">Tap to open event →</p>
                 )}
               </div>
               <div className="shrink-0 flex flex-col items-end gap-2">
-                <span className="text-xs text-muted-foreground">{relativeTime(n.createdAt)}</span>
+                <span className="text-[10px] text-muted-foreground whitespace-nowrap">{relativeTime(n.createdAt)}</span>
                 {!n.read && (
                   <button
                     type="button"
@@ -282,7 +295,13 @@ export default function NotificationsPage() {
           );
         })}
         {!loading && items.length === 0 && (
-          <div className="py-12 text-center text-sm text-muted-foreground">No notifications yet</div>
+          <div className="py-20 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60">
+              <BellOff className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium text-foreground">No notifications yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">You're all caught up!</p>
+          </div>
         )}
       </div>
 
@@ -307,7 +326,6 @@ export default function NotificationsPage() {
           ) : null}
         </div>
       )}
-
       <BottomNav />
     </div>
   );

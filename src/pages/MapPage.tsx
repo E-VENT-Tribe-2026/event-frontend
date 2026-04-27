@@ -284,96 +284,136 @@ export default function MapPage() {
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
+
+      {/* Header */}
       <header className="sticky top-0 z-[1000] flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => navigate(-1)} aria-label="Back">
-            <ArrowLeft className="h-5 w-5 text-foreground" />
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            aria-label="Back"
+            className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
+          >
+            <ArrowLeft className="h-4 w-4 text-foreground" />
           </button>
-          <h1 className="text-lg font-bold text-foreground">Map</h1>
+          <div>
+            <h1 className="text-base font-bold text-foreground leading-none">Explore Map</h1>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              {loading ? 'Loading…' : `${filteredEvents.length} event${filteredEvents.length !== 1 ? 's' : ''} nearby`}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={manualRefresh}
-            className="rounded-full bg-secondary p-2"
-            title="Refresh events"
             disabled={loading}
             aria-label="Refresh events"
+            className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90 disabled:opacity-50"
+            title="Refresh events"
           >
             <RefreshCw className={`h-4 w-4 text-foreground ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button
             type="button"
             onClick={locateUser}
-            className="rounded-full bg-primary p-2 shadow-glow"
-            title="Use my location"
             aria-label="Center map on my location"
+            title="Use my location"
+            className={`rounded-full p-2 shadow-glow transition-all active:scale-90 ${
+              geoStatus === 'granted' ? 'gradient-primary' : 'bg-primary/80 hover:bg-primary'
+            }`}
           >
             <LocateFixed className="h-4 w-4 text-primary-foreground" />
           </button>
         </div>
       </header>
 
-      <div className="space-y-2 border-b border-border/70 px-4 py-2">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground outline-none"
-            aria-label="Filter by category"
-          >
-            {['All', ...ALL_INTERESTS].map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={filterDate}
-            onChange={(e) => setFilterDate(e.target.value)}
-            className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground outline-none"
-            aria-label="Filter by event date"
-          />
+      {/* Filters */}
+      <div className="border-b border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3 space-y-3">
+        {/* Category + Date row */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase text-muted-foreground">Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              aria-label="Filter by category"
+            >
+              {['All', ...ALL_INTERESTS].map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase text-muted-foreground">Date</label>
+            <input
+              type="date"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              aria-label="Filter by event date"
+            />
+          </div>
         </div>
-        <div className="space-y-1">
-          <label htmlFor="map-city-filter" className="block text-[10px] font-semibold uppercase text-muted-foreground">
-            Location
-          </label>
-          <select
-            id="map-city-filter"
-            value={selectedCity}
-            onChange={(e) => setSelectedCity(e.target.value)}
-            className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground outline-none"
-            aria-label="Filter events by location"
-          >
-            <option value="">All locations</option>
-            {availableCities.map((city) => (
-              <option key={city} value={city}>
-                {city}
-              </option>
-            ))}
-          </select>
-          {!loading && availableCities.length === 0 && (
-            <p className="text-[10px] text-muted-foreground">No location list yet — load events or add event locations.</p>
+
+        {/* Location + Search row */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <label htmlFor="map-city-filter" className="text-[10px] font-semibold uppercase text-muted-foreground">Location</label>
+            <select
+              id="map-city-filter"
+              value={selectedCity}
+              onChange={(e) => setSelectedCity(e.target.value)}
+              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              aria-label="Filter events by location"
+            >
+              <option value="">All locations</option>
+              {availableCities.map((city) => (
+                <option key={city} value={city}>{city}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase text-muted-foreground">Search</label>
+            <input
+              type="search"
+              value={titleSearch}
+              onChange={(e) => setTitleSearch(e.target.value)}
+              placeholder="Event title…"
+              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              aria-label="Search events by title"
+            />
+          </div>
+        </div>
+
+        {/* Status bar */}
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          {loading ? (
+            <><RefreshCw className="h-3 w-3 animate-spin" /> Loading events…</>
+          ) : (
+            <>
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
+              {filteredEvents.length} event{filteredEvents.length !== 1 ? 's' : ''} on map
+            </>
           )}
+          {geoStatus === 'granted' && <span className="ml-auto text-primary">📍 Your location shown</span>}
+          {geoStatus === 'denied' && <span className="ml-auto text-destructive/70">Location off</span>}
         </div>
-        <input
-          type="search"
-          value={titleSearch}
-          onChange={(e) => setTitleSearch(e.target.value)}
-          placeholder="Search title…"
-          className="w-full rounded-xl bg-secondary px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none"
-          aria-label="Search events by title"
-        />
-        <p className="text-[10px] text-muted-foreground">
-          {loading ? 'Loading events…' : `${filteredEvents.length} event(s) on map`}
-          {geoStatus === 'granted' && ' · Your location is shown.'}
-          {geoStatus === 'denied' && ' · Location off.'}
-        </p>
       </div>
 
-      <div ref={mapRef} className="h-[min(72vh,560px)] w-full z-0" />
+      {/* Map */}
+      <div className="relative">
+        <div ref={mapRef} className="h-[min(72vh,580px)] w-full z-0" />
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm z-10 pointer-events-none">
+            <div className="flex flex-col items-center gap-2 rounded-2xl glass-card px-6 py-4">
+              <RefreshCw className="h-5 w-5 animate-spin text-primary" />
+              <p className="text-xs text-muted-foreground">Loading events…</p>
+            </div>
+          </div>
+        )}
+      </div>
 
       <BottomNav />
     </div>

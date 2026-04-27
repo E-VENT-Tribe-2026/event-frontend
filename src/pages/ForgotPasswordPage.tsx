@@ -131,15 +131,41 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 relative overflow-hidden">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-gradient">{isResetMode ? 'Set New Password' : 'Reset Password'}</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {isResetMode ? 'Enter and confirm your new password' : 'Enter your email to receive a reset link'}
-          </p>
-        </div>
+
+      {/* Ambient background */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-32 left-1/3 w-[500px] h-[500px] rounded-full bg-primary/15 blur-[140px]" />
+        <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] rounded-full bg-accent/10 blur-[140px]" />
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: 'linear-gradient(hsl(213 30% 60%) 1px, transparent 1px), linear-gradient(90deg, hsl(213 30% 60%) 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+          }}
+        />
+      </div>
+
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm z-10">
+        <div className="rounded-3xl glass-card p-8 space-y-8">
+          {/* Logo + heading */}
+          <div className="text-center space-y-3">
+            <div className="relative mx-auto h-16 w-16 flex items-center justify-center">
+              <motion.div
+                className="absolute inset-0 rounded-2xl border-2 border-primary/50"
+                animate={{ scale: [1, 1.25, 1], opacity: [0.5, 0, 0.5] }}
+                transition={{ duration: 2.2, repeat: Infinity }}
+              />
+              <div className="h-14 w-14 rounded-2xl gradient-primary flex items-center justify-center text-white text-2xl font-bold shadow-glow">E</div>
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-gradient">{isResetMode ? 'Set New Password' : 'Reset Password'}</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                {isResetMode ? 'Enter and confirm your new password' : 'Enter your email to receive a reset link'}
+              </p>
+            </div>
+          </div>
 
         {!isResetMode ? (
           <form onSubmit={handleRequestSubmit} className="space-y-4">
@@ -194,9 +220,10 @@ export default function ForgotPasswordPage() {
           </form>
         )}
 
-        <p className="text-center text-sm text-muted-foreground">
-          <Link to="/login" className="text-primary font-medium hover:underline">← Back to Sign In</Link>
-        </p>
+          <p className="text-center text-sm text-muted-foreground">
+            <Link to="/login" className="text-primary font-medium hover:underline">← Back to Sign In</Link>
+          </p>
+        </div>
       </motion.div>
     </div>
   );
