@@ -297,7 +297,13 @@ export default function NotificationsPage() {
               Show more · {items.length - visibleCount} remaining
             </button>
           ) : visibleCount > PAGE_SIZE ? (
-            <p className="text-center text-xs text-muted-foreground">All {items.length} notifications shown</p>
+            <button
+              type="button"
+              onClick={() => setVisibleCount(PAGE_SIZE)}
+              className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-primary hover:bg-secondary/50 transition-colors"
+            >
+              Show less
+            </button>
           ) : null}
         </div>
       )}

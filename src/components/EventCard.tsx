@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
+import { getCategoryBanner } from '@/lib/categoryBanners';
 
 interface EventCardProps {
   event: EventItem;
@@ -115,7 +116,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     >
       <div className="relative h-40 overflow-hidden">
         <img 
-          src={event.image} 
+          src={event.image || getCategoryBanner(event.category)} 
           alt={event.title} 
           className="h-full w-full object-cover transition-transform duration-500 hover:scale-110" 
         />
