@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
-import { CATEGORIES } from '@/lib/seedData';
+import { ALL_INTERESTS } from '@/lib/interests';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
@@ -281,7 +281,7 @@ export default function CreateEventPage() {
 
         {/* Category */}
         <select value={form.category} onChange={e => update('category', e.target.value)} className={inputCls('category')}>
-          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          {ALL_INTERESTS.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
 
         {/* Date + Time */}
