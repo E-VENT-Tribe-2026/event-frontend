@@ -16,6 +16,7 @@ import LocationPickerMap, { hasValidEventCoordinates } from '@/components/Locati
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
+import { invalidatePrefix } from '@/lib/queryCache';
 
 type ApiEventRow = Record<string, unknown>;
 
@@ -293,6 +294,8 @@ export default function EditEventPage() {
 
       upsertEvent(merged);
       setToast({ show: true, message: 'Event updated!', type: 'success' });
+      invalidatePrefix('/api/events?');
+      invalidatePrefix(`/api/participants/${id}`);
       setTimeout(() => navigate(`/event/${id}`), 1200);
     } catch (err: unknown) {
       clearTimeout(timeoutId);

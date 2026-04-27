@@ -14,6 +14,7 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming } from '@/lib/eventTime';
+import { cachedFetch, invalidatePrefix, TTL } from '@/lib/queryCache';
 
 export default function HomePage() {
   const INTEREST_PROMPT_DISMISSED_KEY = 'event_interest_prompt_dismissed';
@@ -105,10 +106,14 @@ export default function HomePage() {
     setShowInterestPrompt(false);
   };
 
-  // ── 1. Load Max Price ──────────────────────────────────────────────────────
+  // ── 1. Load Max Price (cached 5 min — rarely changes) ────────────────────
   useEffect(() => {
-    fetch(getApiUrl('/api/events/max-price'))
-      .then((res) => res.ok ? res.json() : Promise.reject())
+    cachedFetch(
+      '/api/events/max-price',
+      () => fetch(getApiUrl('/api/events/max-price')).then((res) => res.ok ? res.json() : Promise.reject()),
+      TTL.LONG,
+      true, // persist to sessionStorage
+    )
       .then((data: { max_price: number }) => {
         setMaxPrice(data.max_price);
         setBudgetMax(data.max_price);
@@ -117,15 +122,17 @@ export default function HomePage() {
       .catch(() => {});
   }, []);
 
-  // ── 2. Load Favorites ──────────────────────────────────────────────────────
+  // ── 2. Load Favorites (cached 2 min, per user) ────────────────────────────
   useEffect(() => {
     const token = getAuthToken();
     if (!user || !token) return;
 
-    fetch(getApiUrl('/api/favorites/all'), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.ok ? res.json() : Promise.reject())
+    cachedFetch(
+      `/api/favorites/all:${user.id}`,
+      () => fetch(getApiUrl('/api/favorites/all'), { headers: { Authorization: `Bearer ${token}` } })
+        .then((res) => res.ok ? res.json() : Promise.reject()),
+      TTL.MEDIUM,
+    )
       .then((data: any[]) => {
         const ids = data.map(fav => fav.id || fav.event_id);
         setFavoriteIds(new Set(ids));
@@ -133,7 +140,7 @@ export default function HomePage() {
       .catch(() => console.error("Failed to load favorites"));
   }, [user?.id, interestsRefreshTick]);
 
-  // ── 3. Load Interest Recommendations ─────────────────────────────────────
+  // ── 3. Load Interest Recommendations (cached 2 min, per user) ────────────
   useEffect(() => {
     const token = getAuthToken();
     if (!user?.id || !token || !user.interests?.length) {
@@ -144,10 +151,13 @@ export default function HomePage() {
 
     let cancelled = false;
     setInterestRecommendationsLoading(true);
-    fetch(getApiUrl('/api/recommendations?limit=6'), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
+
+    cachedFetch(
+      `/api/recommendations:${user.id}`,
+      () => fetch(getApiUrl('/api/recommendations?limit=6'), { headers: { Authorization: `Bearer ${token}` } })
+        .then((res) => (res.ok ? res.json() : Promise.reject())),
+      TTL.MEDIUM,
+    )
       .then((data: { data?: unknown[] }) => {
         if (cancelled) return;
         const rows = Array.isArray(data.data) ? data.data : [];
@@ -160,9 +170,7 @@ export default function HomePage() {
         if (!cancelled) setInterestRecommendationsLoading(false);
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [user?.id, user?.interests, interestsRefreshTick]);
 
   // ── 4. Debouncing ─────────────────────────────────────────────────────────
@@ -176,7 +184,7 @@ export default function HomePage() {
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
-  // ── 5. Main Events Fetch ──────────────────────────────────────────────────
+  // ── 5. Main Events Fetch (cached 2 min per filter combination) ───────────
   useEffect(() => {
     let cancelled = false;
     const params = new URLSearchParams({ limit: '50', page: '1' });
@@ -184,12 +192,20 @@ export default function HomePage() {
     if (debouncedSearch) params.set('search', debouncedSearch);
     if (debouncedDate) params.set('event_date', debouncedDate);
 
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    const cacheKey = `/api/events?${params}`;
     setLoading(true);
 
-    fetch(getApiUrl(`/api/events?${params}`), { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load events'))))
+    cachedFetch(
+      cacheKey,
+      () => {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 8000);
+        return fetch(getApiUrl(`/api/events?${params}`), { signal: controller.signal })
+          .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load events'))))
+          .finally(() => window.clearTimeout(timeout));
+      },
+      TTL.MEDIUM,
+    )
       .then((data: unknown) => {
         if (cancelled) return;
         const list = parseEventsApiList(data).map(mapApiEventToItem);
@@ -207,7 +223,6 @@ export default function HomePage() {
         }
       })
       .finally(() => {
-        window.clearTimeout(timeout);
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };

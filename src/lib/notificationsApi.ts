@@ -1,5 +1,6 @@
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
 
 export type ApiNotification = {
   id: string;
@@ -47,45 +48,49 @@ export function relativeTime(isoDate?: string | null): string {
 
 export async function fetchNotifications(token: string): Promise<ApiNotification[]> {
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' } as const;
-  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/all?limit=100&page=1`), { headers });
-  if (!res.ok) throw new Error('Failed to load notifications');
-  const body = (await res.json().catch(() => [])) as any;
-  const rawRows = Array.isArray(body) ? body
-    : Array.isArray(body?.data) ? body.data
-    : Array.isArray(body?.notifications) ? body.notifications
-    : [];
-  return rawRows.map((row: any) => ({
-    id: String(row.id ?? ''),
-    type: normalizeType(String(row.type ?? 'update')),
-    message: String(row.message ?? ''),
-    related_event_id:
-      typeof row.related_event_id === 'string'
-        ? row.related_event_id
-        : typeof row.event_id === 'string'
-          ? row.event_id
+  const cacheKey = `/api/notifications/all:${token.slice(-16)}`; // key per token suffix
+  return cachedFetch(
+    cacheKey,
+    async () => {
+      const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/all?limit=100&page=1`), { headers });
+      if (!res.ok) throw new Error('Failed to load notifications');
+      const body = (await res.json().catch(() => [])) as any;
+      const rawRows = Array.isArray(body) ? body
+        : Array.isArray(body?.data) ? body.data
+        : Array.isArray(body?.notifications) ? body.notifications
+        : [];
+      return rawRows.map((row: any) => ({
+        id: String(row.id ?? ''),
+        type: normalizeType(String(row.type ?? 'update')),
+        message: String(row.message ?? ''),
+        related_event_id:
+          typeof row.related_event_id === 'string'
+            ? row.related_event_id
+            : typeof row.event_id === 'string'
+              ? row.event_id
+              : null,
+        event_title:
+          typeof row.event_title === 'string'
+            ? row.event_title
+            : typeof row.related_event_title === 'string'
+              ? row.related_event_title
+              : null,
+        created_at: typeof row.created_at === 'string' ? row.created_at : null,
+        read: Boolean(row.read ?? row.is_read),
+        actor_name:
+          typeof row.actor_name === 'string' ? row.actor_name
+          : typeof row.sender_name === 'string' ? row.sender_name
+          : typeof row.triggered_by_name === 'string' ? row.triggered_by_name
+          : typeof row.profiles?.full_name === 'string' ? row.profiles.full_name
           : null,
-    event_title:
-      typeof row.event_title === 'string'
-        ? row.event_title
-        : typeof row.related_event_title === 'string'
-          ? row.related_event_title
-          : null,
-    created_at: typeof row.created_at === 'string' ? row.created_at : null,
-    read: Boolean(row.read ?? row.is_read),
-    actor_name:
-      typeof row.actor_name === 'string' ? row.actor_name
-      : typeof row.sender_name === 'string' ? row.sender_name
-      : typeof row.triggered_by_name === 'string' ? row.triggered_by_name
-      : typeof row.profiles?.full_name === 'string' ? row.profiles.full_name
-      : null,
-  }));
+      })) as ApiNotification[];
+    },
+    TTL.SHORT, // 30s — notifications should feel fresh
+  );
 }
 
 export async function markNotificationRead(token: string, id: string): Promise<void> {
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' } as const;
-  // Support both backend shapes:
-  // 1) PATCH /api/notifications/{id}/read
-  // 2) PATCH /api/notifications/mark-read/{id}
   let res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/${id}/read`), {
     method: 'PATCH',
     headers,
@@ -97,6 +102,8 @@ export async function markNotificationRead(token: string, id: string): Promise<v
     });
   }
   if (!res.ok) throw new Error('Failed to mark notification read');
+  // Invalidate so next fetch gets fresh unread count
+  invalidate(`/api/notifications/all:${token.slice(-16)}`);
 }
 
 export async function deleteNotification(token: string, id: string): Promise<void> {
@@ -106,4 +113,6 @@ export async function deleteNotification(token: string, id: string): Promise<voi
     res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/delete/${id}`), { method: 'DELETE', headers });
   }
   if (!res.ok) throw new Error('Failed to delete notification');
+  // Invalidate so next fetch reflects deletion
+  invalidate(`/api/notifications/all:${token.slice(-16)}`);
 }

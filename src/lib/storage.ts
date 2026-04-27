@@ -230,6 +230,8 @@ export function setCurrentUserFromOAuth(data: {
 export function logout() {
   CURRENT_USER_ID = null;
   clearSessionUserSnapshot();
+  // Clear all cached API responses so the next user starts fresh
+  import('@/lib/queryCache').then(({ clearCache }) => clearCache()).catch(() => {});
 }
 
 function generateId() {
