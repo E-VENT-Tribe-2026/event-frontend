@@ -4,7 +4,7 @@ import { getCurrentUser, getNotifications, saveNotifications, type Notification 
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { fetchNotifications, markNotificationRead, relativeTime, deleteNotification, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle } from 'lucide-react';
+import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -181,6 +181,26 @@ export default function NotificationsPage() {
     }
   };
 
+  const onMarkRead = async (n: UINotification, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (n.read) return;
+    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    const token = await resolveToken();
+    if (token) {
+      try {
+        setMarkingId(n.id);
+        await markNotificationRead(token, n.id);
+      } catch {
+        setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: false } : x)));
+        setToast({ show: true, message: 'Could not mark as read.', type: 'error' });
+      } finally {
+        setMarkingId(null);
+      }
+    } else {
+      saveNotifications(getNotifications().map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast
@@ -236,7 +256,19 @@ export default function NotificationsPage() {
               </div>
               <div className="shrink-0 flex flex-col items-end gap-2">
                 <span className="text-xs text-muted-foreground">{relativeTime(n.createdAt)}</span>
-                {markingId === n.id && <span className="text-[10px] text-muted-foreground">Saving…</span>}
+                {!n.read && (
+                  <button
+                    type="button"
+                    disabled={markingId === n.id}
+                    onClick={(e) => void onMarkRead(n, e)}
+                    className="rounded-lg p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-40 transition-colors"
+                    aria-label="Mark as read"
+                  >
+                    {markingId === n.id
+                      ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      : <CheckCheck className="h-3.5 w-3.5" />}
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={isDeleting}

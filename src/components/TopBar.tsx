@@ -18,13 +18,16 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
-    let cancelled = false;
-    fetchNotifications(token)
-      .then((rows) => {
-        if (!cancelled) setHasUnread(rows.some((n) => !n.read));
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+
+    const check = () => {
+      fetchNotifications(token)
+        .then((rows) => setHasUnread(rows.some((n) => !n.read)))
+        .catch(() => {});
+    };
+
+    check();
+    window.addEventListener('focus', check);
+    return () => window.removeEventListener('focus', check);
   }, [user?.id]);
 
   return (
