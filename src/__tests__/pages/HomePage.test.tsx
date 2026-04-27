@@ -182,7 +182,7 @@ describe('HomePage', () => {
       expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '⚽ Sports' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sports' }));
 
     await waitFor(() => {
       const withCategory = fetchMock.mock.calls

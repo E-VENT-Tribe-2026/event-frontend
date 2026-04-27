@@ -190,18 +190,40 @@ export default function SignupPage() {
   const inputCls = "w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 transition-all";
 
 return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8 relative">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8 relative overflow-hidden">
       <AppToast 
         message={toast.message} 
         type={toast.type} 
         show={toast.show} 
         onClose={() => setToast(t => ({ ...t, show: false }))} 
       />
+
+      {/* Ambient background */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-32 right-1/4 w-[500px] h-[500px] rounded-full bg-primary/15 blur-[140px]" />
+        <div className="absolute bottom-0 left-1/4 w-[400px] h-[400px] rounded-full bg-accent/10 blur-[140px]" />
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: 'linear-gradient(hsl(213 30% 60%) 1px, transparent 1px), linear-gradient(90deg, hsl(213 30% 60%) 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+          }}
+        />
+      </div>
       
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-6">
-        <div className="text-center">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm z-10">
+        <div className="rounded-3xl glass-card p-8 space-y-6">
+        <div className="text-center space-y-1">
+          <div className="mx-auto mb-3 relative h-16 w-16 flex items-center justify-center">
+            <motion.div
+              className="absolute inset-0 rounded-2xl border-2 border-primary/50"
+              animate={{ scale: [1, 1.25, 1], opacity: [0.5, 0, 0.5] }}
+              transition={{ duration: 2.2, repeat: Infinity }}
+            />
+            <div className="h-14 w-14 rounded-2xl gradient-primary flex items-center justify-center text-white text-2xl font-bold shadow-glow">E</div>
+          </div>
           <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Join E-VENT and discover events</p>
+          <p className="text-sm text-muted-foreground">Join E-VENT and discover events</p>
         </div>
 
         {/* Profile Photo */}
@@ -370,6 +392,7 @@ return (
         <p className="text-center text-sm text-muted-foreground">
           Already have an account? <Link to="/login" className="text-primary font-medium hover:underline">Sign In</Link>
         </p>
+        </div>
       </motion.div>
     </div>
 )
