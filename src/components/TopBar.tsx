@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react';
 import { Search, Bell } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getCurrentUser } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
+import { getAuthToken } from '@/lib/auth';
+import { fetchNotifications } from '@/lib/notificationsApi';
 
 interface TopBarProps {
   search: string;
@@ -10,6 +13,19 @@ interface TopBarProps {
 
 export default function TopBar({ search, onSearchChange }: TopBarProps) {
   const user = getCurrentUser();
+  const [hasUnread, setHasUnread] = useState(false);
+
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    let cancelled = false;
+    fetchNotifications(token)
+      .then((rows) => {
+        if (!cancelled) setHasUnread(rows.some((n) => !n.read));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
@@ -27,7 +43,9 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
         </div>
         <Link to="/notifications" className="relative shrink-0 p-1">
           <Bell className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
-          <span className="absolute top-0 right-0 h-2 w-2 rounded-full bg-accent" />
+          {hasUnread && (
+            <span className="absolute top-0 right-0 h-2 w-2 rounded-full bg-accent" />
+          )}
         </Link>
         {user && (
           <Link to="/profile" className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-primary/40 transition-all">
