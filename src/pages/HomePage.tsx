@@ -639,32 +639,40 @@ export default function HomePage() {
             className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-background/80 backdrop-blur-sm px-4 pb-4 sm:pb-0"
           >
             <motion.div
-              initial={{ opacity: 0, y: 40 }}
+              initial={{ opacity: 0, y: 48 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 40 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-              className="w-full max-w-md rounded-3xl glass-card p-6 space-y-5"
+              exit={{ opacity: 0, y: 48 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+              className="w-full max-w-sm rounded-3xl glass-card overflow-hidden"
             >
               {/* Header */}
-              <div className="flex items-start gap-3">
-                <div className="shrink-0 rounded-2xl gradient-primary p-2.5 shadow-glow">
+              <div className="px-6 pt-7 pb-5 text-center space-y-2">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl gradient-primary shadow-glow">
                   <Sparkles className="h-5 w-5 text-primary-foreground" />
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-foreground">What are you into?</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Pick your interests and we'll personalise your event feed right away.
-                  </p>
-                </div>
+                <h2 className="text-lg font-bold text-foreground">What are you into?</h2>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Pick a few interests so we can show you events you'll love.
+                </p>
               </div>
 
-              {/* Interest chips */}
-              <div className="flex flex-wrap gap-2">
+              {/* Interest grid — 3 columns */}
+              <div className="px-5 pb-2 grid grid-cols-3 gap-2.5">
                 {ALL_INTERESTS.map((interest) => {
-                  const emoji: Record<string, string> = {
-                    Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
-                    Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
-                    Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+                  const meta: Record<string, { emoji: string }> = {
+                    Music:      { emoji: '🎵' },
+                    Sports:     { emoji: '⚽' },
+                    Gaming:     { emoji: '🎮' },
+                    Movies:     { emoji: '🎬' },
+                    Study:      { emoji: '📚' },
+                    Travel:     { emoji: '✈️' },
+                    Tech:       { emoji: '💻' },
+                    Art:        { emoji: '🎨' },
+                    Fitness:    { emoji: '💪' },
+                    Coffee:     { emoji: '☕' },
+                    Networking: { emoji: '🤝' },
+                    Food:       { emoji: '🍕' },
+                    Wellness:   { emoji: '🧘' },
                   };
                   const selected = pickedInterests.includes(interest);
                   return (
@@ -676,39 +684,35 @@ export default function HomePage() {
                           selected ? prev.filter(i => i !== interest) : [...prev, interest]
                         )
                       }
-                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
+                      className={`flex flex-col items-center gap-1.5 rounded-2xl border py-3 px-2 text-center transition-all active:scale-95 ${
                         selected
                           ? 'gradient-primary border-transparent text-primary-foreground shadow-glow'
-                          : 'border-border/50 bg-secondary/60 text-muted-foreground hover:text-foreground'
+                          : 'border-border/40 bg-secondary/50 text-muted-foreground hover:border-border hover:text-foreground'
                       }`}
                     >
-                      <span className="text-sm leading-none">{emoji[interest] ?? '✨'}</span>
-                      {interest}
+                      <span className="text-xl leading-none">{meta[interest]?.emoji ?? '✨'}</span>
+                      <span className="text-[11px] font-medium leading-tight">{interest}</span>
                     </button>
                   );
                 })}
               </div>
 
               {/* Actions */}
-              <div className="flex gap-3">
+              <div className="px-5 pt-4 pb-6 flex gap-3">
                 <button
                   type="button"
                   onClick={handleSkipInterestPrompt}
                   className="flex-1 rounded-2xl border border-border bg-secondary py-3 text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors active:scale-[0.98]"
                 >
-                  Skip for now
+                  Skip
                 </button>
                 <button
                   type="button"
                   disabled={pickedInterests.length === 0 || savingInterests}
                   onClick={handleSaveInterests}
-                  className="flex-1 rounded-2xl gradient-primary py-3 text-sm font-bold text-primary-foreground shadow-glow disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-transform"
+                  className="flex-1 rounded-2xl gradient-primary py-3 text-sm font-bold text-primary-foreground shadow-glow disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-transform"
                 >
-                  {savingInterests
-                    ? 'Saving…'
-                    : pickedInterests.length > 0
-                      ? `Save (${pickedInterests.length})`
-                      : 'Select at least one'}
+                  {savingInterests ? 'Saving…' : pickedInterests.length > 0 ? `Done (${pickedInterests.length})` : 'Done'}
                 </button>
               </div>
             </motion.div>
