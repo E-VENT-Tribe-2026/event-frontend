@@ -113,7 +113,9 @@ function persistCurrentUserToSession(): void {
   const u = getCurrentUser();
   if (u) {
     try {
-      window.sessionStorage.setItem(SESSION_USER_SNAPSHOT_KEY, JSON.stringify(u));
+      // Never persist the password field to sessionStorage
+      const { password: _omit, ...safeUser } = u as User & { password?: string };
+      window.sessionStorage.setItem(SESSION_USER_SNAPSHOT_KEY, JSON.stringify(safeUser));
     } catch {
       /* ignore quota / private mode */
     }
@@ -230,6 +232,8 @@ export function setCurrentUserFromOAuth(data: {
 export function logout() {
   CURRENT_USER_ID = null;
   clearSessionUserSnapshot();
+  // Clear all cached API responses so the next user starts fresh
+  import('@/lib/queryCache').then(({ clearCache }) => clearCache()).catch(() => {});
 }
 
 function generateId() {

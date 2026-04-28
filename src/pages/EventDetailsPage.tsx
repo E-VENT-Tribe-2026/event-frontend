@@ -17,6 +17,7 @@ import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 import EventLocationMap from '@/components/EventLocationMap';
 import { isEventUpcoming } from '@/lib/eventTime';
 import { getCategoryBanner } from '@/lib/categoryBanners';
+import { invalidatePrefix } from '@/lib/queryCache';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
@@ -93,6 +94,8 @@ export default function EventDetailsPage() {
       }
       await syncParticipationFromBackend();
       setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+      invalidatePrefix(`/api/participants/${event.id}`);
+      invalidatePrefix('/api/events?');
       return true;
     } catch {
       setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
@@ -438,6 +441,8 @@ export default function EventDetailsPage() {
           leaveEvent(event.id, user.id);
           setEventsState(getEvents());
           setToast({ show: true, message: 'You left the event.', type: 'success' });
+          invalidatePrefix(`/api/participants/${event.id}`);
+          invalidatePrefix('/api/events?');
         } catch {
           setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
         } finally {
@@ -448,6 +453,8 @@ export default function EventDetailsPage() {
       leaveEvent(event.id, user.id);
       setEventsState(getEvents());
       setToast({ show: true, message: 'You left the event.', type: 'success' });
+      invalidatePrefix(`/api/participants/${event.id}`);
+      invalidatePrefix('/api/events?');
       setIsUpdatingParticipation(false);
       return;
     }
@@ -537,6 +544,7 @@ export default function EventDetailsPage() {
         }
         await syncParticipationFromBackend();
         setToast({ show: true, message: 'Attendee removed.', type: 'success' });
+        invalidatePrefix(`/api/participants/${event.id}`);
       } catch {
         setToast({ show: true, message: 'Could not remove attendee. Try again.', type: 'error' });
       } finally {
@@ -549,6 +557,7 @@ export default function EventDetailsPage() {
     updateEvent(event.id, { participants: next });
     setEventsState(getEvents());
     setToast({ show: true, message: 'Attendee removed.', type: 'success' });
+    invalidatePrefix(`/api/participants/${event.id}`);
   };
 
   const handleDeleteEvent = async () => {
@@ -574,6 +583,8 @@ export default function EventDetailsPage() {
       deleteEvent(event.id);
       setEventsState(getEvents());
       setToast({ show: true, message: 'Event deleted.', type: 'success' });
+      invalidatePrefix('/api/events?');
+      invalidatePrefix(`/api/participants/${event.id}`);
       setTimeout(() => navigate('/home'), 600);
     } catch {
       setToast({ show: true, message: 'Could not delete the event.', type: 'error' });

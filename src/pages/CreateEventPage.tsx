@@ -13,6 +13,8 @@ import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
+import { invalidatePrefix } from '@/lib/queryCache';
+import { sanitizeText } from '@/lib/sanitize';
 
 function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
   if (!res || typeof res !== 'object') return {};
@@ -154,8 +156,8 @@ export default function CreateEventPage() {
       const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
       const payload = {
-        title: form.title.trim(),
-        description: form.description.trim(),
+        title: sanitizeText(form.title),
+        description: sanitizeText(form.description),
         category: form.category,
         cost: Math.round(Number(form.budget)) || 0,
         max_capacity: Math.floor(Number(form.limit)),
@@ -228,6 +230,7 @@ export default function CreateEventPage() {
 
       addEvent(localEvent);
       setToast({ show: true, message: 'Event Published Successfully!', type: 'success' });
+      invalidatePrefix('/api/events?');
       setTimeout(() => navigate('/home'), 1500);
     } catch (err: any) {
       clearTimeout(timeoutId);

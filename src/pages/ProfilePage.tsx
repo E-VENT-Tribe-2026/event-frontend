@@ -23,6 +23,7 @@ import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
+import { invalidatePrefix, invalidate } from '@/lib/queryCache';
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -188,6 +189,8 @@ export default function ProfilePage() {
     setRemoteJoinedEvents(prev => prev.filter(e => e.id !== eventId));
     setLeavingEventId(null);
     setToast({ show: true, message: 'Left event', type: 'success' });
+    invalidatePrefix('/api/events?');
+    invalidatePrefix(`/api/participants/${eventId}`);
   };
 
   const handleRemoveFavorite = async (eventId: string) => {
@@ -198,6 +201,7 @@ export default function ProfilePage() {
       if (res.ok) {
         setFavorites(prev => prev.filter(e => e.id !== eventId));
         setToast({ show: true, message: 'Removed from favorites', type: 'success' });
+        invalidate(`/api/favorites/all:${user?.id ?? ''}`);
       }
     } catch (err) { console.error(err); }
   };
