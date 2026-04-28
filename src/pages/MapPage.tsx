@@ -191,17 +191,39 @@ export default function MapPage() {
 
     spread.forEach(({ item: event, lat, lng }) => {
       const marker = L.marker([lat, lng]).addTo(layer);
+
+      // Organizer display — name with avatar
+      const organizerName = event.organizer || '';
+      const organizerInitial = escapeHtml((organizerName || event.organizerId || 'O').charAt(0).toUpperCase());
+      const organizerLabel = escapeHtml(organizerName || 'Event Organizer');
+
+      const avatarHtml = event.organizerAvatar
+        ? `<img src="${escapeHtml(event.organizerAvatar)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #6d28d9;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'" /><span style="display:none;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`
+        : `<span style="display:flex;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`;
+
+      const costBadge = event.budget === 0
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#22c55e20;color:#16a34a;font-size:10px;font-weight:700">Free</span>`
+        : `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#6d28d920;color:#6d28d9;font-size:10px;font-weight:700">$${escapeHtml(String(event.budget))}</span>`;
+
       const preview = `
-        <div style="font-family:system-ui,sans-serif;min-width:180px;max-width:240px">
-          <h3 style="margin:0 0 6px;font-size:14px;font-weight:600">${escapeHtml(event.title)}</h3>
-          <p style="margin:0 0 4px;font-size:12px;color:#666">${escapeHtml(event.date)} · ${escapeHtml(event.time)}</p>
-          <p style="margin:0 0 10px;font-size:12px;color:#666">${escapeHtml(event.location || '—')}</p>
+        <div style="font-family:system-ui,sans-serif;min-width:200px;max-width:260px">
+          <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;line-height:1.3;color:#0f172a">${escapeHtml(event.title)}</h3>
+          <p style="margin:0 0 2px;font-size:11px;color:#64748b">${escapeHtml(event.date)} · ${escapeHtml(event.time)}</p>
+          <p style="margin:0 0 10px;font-size:11px;color:#64748b">${escapeHtml(event.location || '—')}</p>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f8fafc;border-radius:8px">
+            ${avatarHtml}
+            <div style="min-width:0">
+              <p style="margin:0;font-size:11px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${organizerLabel}</p>
+              <p style="margin:0;font-size:10px;color:#94a3b8">Organizer</p>
+            </div>
+            <div style="margin-left:auto">${costBadge}</div>
+          </div>
           <button type="button" data-map-event-id="${escapeHtml(event.id)}" style="width:100%;padding:8px 10px;border:none;border-radius:8px;background:#6d28d9;color:#fff;font-size:12px;font-weight:600;cursor:pointer">
             View event details
           </button>
         </div>
       `;
-      marker.bindPopup(preview);
+      marker.bindPopup(preview, { maxWidth: 280 });
     });
 
     if (spread.length > 0) {
