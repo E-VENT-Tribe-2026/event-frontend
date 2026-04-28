@@ -482,7 +482,6 @@ export default function EditEventPage() {
           </div>
         </div>
       </motion.form>
-
       <BottomNav />
     </div>
   );

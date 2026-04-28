@@ -907,21 +907,6 @@ export default function EventDetailsPage() {
                 ) : null}
                 {getJoinButtonText()}
               </button>
-              {hasJoined && !isPastEvent && (
-                <button
-                  type="button"
-                  onClick={() => void handleJoinOrRequest()}
-                  disabled={isUpdatingParticipation || participationLoading}
-                  className={`flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                    isUpdatingParticipation || participationLoading
-                      ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
-                      : 'bg-secondary text-foreground hover:bg-secondary/80'
-                  }`}
-                >
-                  <LogOut className="h-4 w-4 shrink-0" />
-                  Leave
-                </button>
-              )}
             </>
           )}
         </div>

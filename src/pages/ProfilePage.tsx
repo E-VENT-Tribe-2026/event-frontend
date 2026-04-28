@@ -298,12 +298,25 @@ export default function ProfilePage() {
           {editing ? <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" /> : <h2 className="text-xl font-bold">{name || 'User'}</h2>}
           <p className="text-sm text-muted-foreground">{user.email}</p>
           {editing ? (
-            <button
-              onClick={handleSave}
-              className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow"
-            >
-              <Check className="h-3.5 w-3.5" /> Save Profile
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setName(user.name || '');
+                  setBio(user.bio || '');
+                  setInterests(user.interests || []);
+                  setEditing(false);
+                }}
+                className="flex items-center gap-1.5 rounded-full border border-border bg-secondary px-4 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow"
+              >
+                <Check className="h-3.5 w-3.5" /> Save
+              </button>
+            </div>
           ) : (
             <button
               onClick={() => setEditing(true)}
