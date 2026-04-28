@@ -62,6 +62,7 @@ export default function LoginPage() {
         return;
       }
       setCurrentUserFromOAuth({ id: me.id, email: me.email || email, name: email.split('@')[0] });
+      setPassword(''); // clear from memory after successful auth
       navigate('/home');
     } catch {
       setToast({ show: true, message: 'Connection failed', type: 'error' });

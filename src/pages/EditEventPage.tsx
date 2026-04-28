@@ -17,6 +17,7 @@ import LocationSearchInput, { type LocationResult } from '@/components/LocationS
 import { formatPageTitle } from '@/lib/documentTitle';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { invalidatePrefix } from '@/lib/queryCache';
+import { sanitizeText } from '@/lib/sanitize';
 
 type ApiEventRow = Record<string, unknown>;
 
@@ -229,8 +230,8 @@ export default function EditEventPage() {
       const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
       const payload = {
-        title: form.title.trim(),
-        description: form.description.trim(),
+        title: sanitizeText(form.title),
+        description: sanitizeText(form.description),
         category: form.category,
         cost: Math.round(Number(form.budget)) || 0,
         max_capacity: Math.floor(Number(form.limit)) || 50,
