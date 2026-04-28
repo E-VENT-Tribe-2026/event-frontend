@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ShieldCheck, Type, Calendar, MapPin, Users, Settings } from 'lucide-react';
+import { ArrowLeft, Type, Calendar, MapPin, Users } from 'lucide-react';
 import { getCurrentUser, upsertEvent, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -466,36 +466,6 @@ export default function EditEventPage() {
                 </p>
                 {errors.limit && <span className="text-[10px] text-destructive px-1">{errors.limit}</span>}
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Settings ── */}
-        <div>
-          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            <Settings className="h-3 w-3" /> Settings
-          </p>
-          <div className="rounded-2xl glass-card p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15">
-                  <ShieldCheck className="h-4 w-4 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Require Approval</p>
-                  <p className="text-[10px] text-muted-foreground">Manually approve join requests</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => update('requiresApproval', !form.requiresApproval)}
-                aria-pressed={form.requiresApproval}
-                className={`relative h-6 w-11 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50 ${
-                  form.requiresApproval ? 'bg-primary shadow-glow' : 'bg-muted'
-                }`}
-              >
-                <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.requiresApproval ? 'translate-x-5' : 'translate-x-0.5'}`} />
-              </button>
             </div>
           </div>
         </div>
