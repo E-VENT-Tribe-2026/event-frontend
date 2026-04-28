@@ -10,6 +10,7 @@ import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 import { supabase } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
+import { sanitizeText, sanitizeEmail } from '@/lib/sanitize';
 
 const MIN_AGE = 18;
 const EMAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60;
@@ -61,7 +62,9 @@ export default function SignupPage() {
     if (!email.trim()) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
     if (!password) e.password = 'Password is required';
-    else if (password.length < 6) e.password = 'Minimum 6 characters';
+    else if (password.length < 8) e.password = 'Minimum 8 characters';
+    else if (!/[A-Z]/.test(password)) e.password = 'Must contain at least one uppercase letter';
+    else if (!/[0-9]/.test(password)) e.password = 'Must contain at least one number';
     if (password !== confirmPw) e.confirmPw = 'Passwords do not match';
     if (!dob) e.dob = 'Date of birth is required';
     else if (!isAtLeastAge(dob, MIN_AGE)) e.dob = `You must be at least ${MIN_AGE} years old`;
@@ -97,7 +100,7 @@ export default function SignupPage() {
       const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, full_name: name, dob, gender, interests }),
+        body: JSON.stringify({ email: sanitizeEmail(email), password, full_name: sanitizeText(name), dob, gender, interests }),
         signal: controller.signal,
       });
 
@@ -164,6 +167,8 @@ export default function SignupPage() {
         interests,
       });
 
+      setPassword(''); // clear from memory after successful auth
+      setConfirmPw('');
       navigate('/home');
     } catch {
       setToast({ show: true, message: 'Server unreachable. Please try again later.', type: 'error' });
