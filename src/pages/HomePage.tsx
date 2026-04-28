@@ -48,6 +48,7 @@ export default function HomePage() {
   const [showInterestPrompt, setShowInterestPrompt] = useState(false);
   const [pickedInterests, setPickedInterests] = useState<string[]>([]);
   const [savingInterests, setSavingInterests] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
   const user = currentUser;
   const allUsers = getUsers();
@@ -67,7 +68,10 @@ export default function HomePage() {
   useEffect(() => {
     if (!user?.id) return;
     const token = getAuthToken();
-    if (!token) return;
+    if (!token) {
+      setProfileLoaded(true); // no token — treat as loaded so prompt can show
+      return;
+    }
 
     let cancelled = false;
 
@@ -82,16 +86,16 @@ export default function HomePage() {
         if (cancelled) return;
         const profile = (data.data || data.user || data) as Record<string, unknown>;
         const apiInterests = Array.isArray(profile.interests) ? profile.interests : [];
-        // Always update local state with what the API says
         updateUser({ interests: apiInterests as string[] });
-        // Force React re-render by updating currentUser state directly
         setCurrentUser(getCurrentUser());
         setInterestsRefreshTick(t => t + 1);
       })
       .catch(() => {
         if (cancelled) return;
-        // API failed — treat as no interests to show the prompt
         setInterestsRefreshTick(t => t + 1);
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoaded(true);
       });
 
     return () => { cancelled = true; };
@@ -99,7 +103,7 @@ export default function HomePage() {
 
   // ── Show interest prompt when interests are empty ─────────────────────────
   useEffect(() => {
-    if (!user?.id) {
+    if (!user?.id || !profileLoaded) {
       setShowInterestPrompt(false);
       return;
     }
@@ -119,7 +123,7 @@ export default function HomePage() {
     } catch { /* ignore */ }
 
     setShowInterestPrompt(true);
-  }, [user?.id, user?.interests, interestsRefreshTick]);
+  }, [user?.id, user?.interests, interestsRefreshTick, profileLoaded]);
 
   const handleSkipInterestPrompt = () => {
     if (user?.id) {

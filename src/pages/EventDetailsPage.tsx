@@ -524,6 +524,7 @@ export default function EventDetailsPage() {
 
   const handleRemoveAttendee = async (participantId: string) => {
     if (!isEventOwner || !user || String(participantId) === String(user.id)) return;
+    if (isPastEvent) return; // Cannot remove participants from past events
     if (!window.confirm('Remove this person from the event? They will lose access.')) return;
 
     if (useApiParticipation) {
@@ -740,7 +741,7 @@ export default function EventDetailsPage() {
                       />
                       <span className="truncate text-sm font-medium text-foreground">{row.name}</span>
                     </div>
-                    {isEventOwner && user && String(row.id) !== String(user.id) && (
+                    {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && (
                       <button
                         type="button"
                         disabled={removingParticipantId === row.id}
