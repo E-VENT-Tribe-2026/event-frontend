@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { getCurrentUser, getUsers, getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
+import { getCurrentUser, getUsers, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -7,7 +7,7 @@ import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import EventCard from '@/components/EventCard';
 import AppToast from '@/components/AppToast';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2, Film, BookOpen, Plane, Coffee, Network, Leaf, LayoutGrid } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
@@ -46,6 +46,8 @@ export default function HomePage() {
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [interestsRefreshTick, setInterestsRefreshTick] = useState(0);
   const [showInterestPrompt, setShowInterestPrompt] = useState(false);
+  const [pickedInterests, setPickedInterests] = useState<string[]>([]);
+  const [savingInterests, setSavingInterests] = useState(false);
 
   const user = currentUser;
   const allUsers = getUsers();
@@ -61,36 +63,63 @@ export default function HomePage() {
 
   const toggleSection = (key: string) => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
 
+  // ── Load profile immediately on mount to check interests ─────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    const token = getAuthToken();
+    if (!token) return;
+
+    let cancelled = false;
+
+    cachedFetch(
+      `/api/profile/me:${user.id}`,
+      () => fetch(getApiUrl('/api/profile/me'), {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      }).then((res) => res.ok ? res.json() : Promise.reject()),
+      TTL.MEDIUM,
+    )
+      .then((data: Record<string, unknown>) => {
+        if (cancelled) return;
+        const profile = (data.data || data.user || data) as Record<string, unknown>;
+        const apiInterests = Array.isArray(profile.interests) ? profile.interests : [];
+        // Always update local state with what the API says
+        updateUser({ interests: apiInterests as string[] });
+        // Force React re-render by updating currentUser state directly
+        setCurrentUser(getCurrentUser());
+        setInterestsRefreshTick(t => t + 1);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // API failed — treat as no interests to show the prompt
+        setInterestsRefreshTick(t => t + 1);
+      });
+
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  // ── Show interest prompt when interests are empty ─────────────────────────
   useEffect(() => {
     if (!user?.id) {
       setShowInterestPrompt(false);
       return;
     }
-    const hasInterests = Array.isArray(user.interests) && user.interests.length > 0;
-    if (hasInterests) {
-      try {
-        const raw = window.localStorage.getItem(INTEREST_PROMPT_DISMISSED_KEY);
-        const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-        if (parsed[user.id]) {
-          delete parsed[user.id];
-          window.localStorage.setItem(INTEREST_PROMPT_DISMISSED_KEY, JSON.stringify(parsed));
-        }
-      } catch {
-        // ignore storage errors
-      }
+    // Don't show if user already has interests (including when still loading — undefined)
+    if (Array.isArray(user.interests) && user.interests.length > 0) {
       setShowInterestPrompt(false);
       return;
     }
-    let dismissedForUser = false;
+    // Don't show if user previously dismissed it
     try {
       const raw = window.localStorage.getItem(INTEREST_PROMPT_DISMISSED_KEY);
       const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-      dismissedForUser = Boolean(parsed[user.id]);
-    } catch {
-      dismissedForUser = false;
-    }
-    setShowInterestPrompt(!dismissedForUser);
-  }, [user?.id, interestsRefreshTick, user?.interests]);
+      if (parsed[user.id]) {
+        setShowInterestPrompt(false);
+        return;
+      }
+    } catch { /* ignore */ }
+
+    setShowInterestPrompt(true);
+  }, [user?.id, user?.interests, interestsRefreshTick]);
 
   const handleSkipInterestPrompt = () => {
     if (user?.id) {
@@ -104,6 +133,34 @@ export default function HomePage() {
       }
     }
     setShowInterestPrompt(false);
+  };
+
+  const handleSaveInterests = async () => {
+    if (pickedInterests.length === 0) return;
+    setSavingInterests(true);
+    try {
+      const token = getAuthToken();
+      if (token) {
+        await fetch(getApiUrl('/api/profile/me'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ interests: pickedInterests }),
+        });
+        // Invalidate profile cache so next visit re-fetches fresh data
+        invalidatePrefix(`/api/profile/me:${user?.id ?? ''}`);
+      }
+      // Update local user state
+      updateUser({ interests: pickedInterests });
+      window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+      setShowInterestPrompt(false);
+    } catch {
+      // Still update locally even if API fails
+      updateUser({ interests: pickedInterests });
+      window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+      setShowInterestPrompt(false);
+    } finally {
+      setSavingInterests(false);
+    }
   };
 
   // ── 1. Load Max Price (cached 5 min — rarely changes) ────────────────────
@@ -341,41 +398,6 @@ export default function HomePage() {
       </div>
 
       <div className="mx-auto max-w-3xl space-y-4 px-4">
-        {showInterestPrompt && user && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/10 to-accent/10 p-4"
-          >
-            <div className="flex items-start gap-3">
-              <div className="shrink-0 rounded-xl bg-primary/20 p-2">
-                <Sparkles className="h-4 w-4 text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground">Personalise your feed</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Add interests to your profile and we'll surface events you'll actually love.
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => navigate('/profile')}
-                    className="rounded-lg gradient-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow"
-                  >
-                    Go to profile
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSkipInterestPrompt}
-                    className="rounded-lg bg-secondary/80 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
-                  >
-                    Skip for now
-                  </button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
 
         {/* Search/Location Filters */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -606,6 +628,93 @@ export default function HomePage() {
         </div>
       </div>
       <BottomNav />
+
+      {/* ── Interest selection modal — shown immediately for new users ── */}
+      <AnimatePresence>
+        {showInterestPrompt && user && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-background/80 backdrop-blur-sm px-4 pb-4 sm:pb-0"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+              className="w-full max-w-md rounded-3xl glass-card p-6 space-y-5"
+            >
+              {/* Header */}
+              <div className="flex items-start gap-3">
+                <div className="shrink-0 rounded-2xl gradient-primary p-2.5 shadow-glow">
+                  <Sparkles className="h-5 w-5 text-primary-foreground" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-foreground">What are you into?</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Pick your interests and we'll personalise your event feed right away.
+                  </p>
+                </div>
+              </div>
+
+              {/* Interest chips */}
+              <div className="flex flex-wrap gap-2">
+                {ALL_INTERESTS.map((interest) => {
+                  const emoji: Record<string, string> = {
+                    Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+                    Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+                    Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+                  };
+                  const selected = pickedInterests.includes(interest);
+                  return (
+                    <button
+                      key={interest}
+                      type="button"
+                      onClick={() =>
+                        setPickedInterests(prev =>
+                          selected ? prev.filter(i => i !== interest) : [...prev, interest]
+                        )
+                      }
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
+                        selected
+                          ? 'gradient-primary border-transparent text-primary-foreground shadow-glow'
+                          : 'border-border/50 bg-secondary/60 text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <span className="text-sm leading-none">{emoji[interest] ?? '✨'}</span>
+                      {interest}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleSkipInterestPrompt}
+                  className="flex-1 rounded-2xl border border-border bg-secondary py-3 text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors active:scale-[0.98]"
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  disabled={pickedInterests.length === 0 || savingInterests}
+                  onClick={handleSaveInterests}
+                  className="flex-1 rounded-2xl gradient-primary py-3 text-sm font-bold text-primary-foreground shadow-glow disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-transform"
+                >
+                  {savingInterests
+                    ? 'Saving…'
+                    : pickedInterests.length > 0
+                      ? `Save (${pickedInterests.length})`
+                      : 'Select at least one'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
