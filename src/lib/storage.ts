@@ -216,7 +216,7 @@ export function setCurrentUserFromOAuth(data: {
       profilePhoto: data.avatar || avatar,
       coverPhoto: '',
       bio: data.bio || 'Hey there! I love events.', // Use API bio if available
-      interests: data.interests && data.interests.length > 0 ? data.interests : ['Music', 'Tech', 'Food'],
+      interests: data.interests && data.interests.length > 0 ? data.interests : [],
       dob: data.dob || '',
       gender: data.gender || '',
       isPremium: false,
@@ -268,7 +268,7 @@ export function signup(data: {
     profilePhoto: data.profilePhoto || '',
     coverPhoto: '',
     bio: data.role === 'organizer' ? 'Event organizer on E-VENT' : 'Hey there! I love events.',
-    interests: data.interests.length > 0 ? data.interests : ['Music', 'Tech', 'Food'],
+    interests: data.interests.length > 0 ? data.interests : [],
     dob: data.dob,
     gender: data.gender,
     isPremium: false,
