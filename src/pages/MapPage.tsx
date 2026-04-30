@@ -165,7 +165,6 @@ export default function MapPage() {
         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
       });
 
-<<<<<<< HEAD
       const map = L.map(mapRef.current, {
         zoomControl: true,
         bounceAtZoomLimits: false,
@@ -174,9 +173,6 @@ export default function MapPage() {
         maxBoundsViscosity: 1,
         minZoom: 3,
       }).setView([40.7128, -74.006], 3);
-=======
-      const map = L.map(mapRef.current, { zoomControl: true, minZoom: 2 }).setView([40.7128, -74.006], 11);
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
       mapInstance.current = map;
       map.setMaxBounds(WORLD_BOUNDS);
 
@@ -220,10 +216,7 @@ export default function MapPage() {
     const spread = spreadOverlapping(filteredEvents);
 
     spread.forEach(({ item: event, lat, lng }) => {
-<<<<<<< HEAD
       const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
-=======
-      const marker = L.marker([lat, lng]).addTo(layer);
 
       // Organizer display — name with avatar
       const organizerName = event.organizer || '';
@@ -238,7 +231,6 @@ export default function MapPage() {
         ? `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#22c55e20;color:#16a34a;font-size:10px;font-weight:700">Free</span>`
         : `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#6d28d920;color:#6d28d9;font-size:10px;font-weight:700">$${escapeHtml(String(event.budget))}</span>`;
 
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
       const preview = `
         <div style="font-family:system-ui,sans-serif;min-width:200px;max-width:260px">
           <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;line-height:1.3;color:#0f172a">${escapeHtml(event.title)}</h3>

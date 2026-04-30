@@ -49,8 +49,6 @@ export default function LoginPage() {
         setIsSubmitting(false);
         return;
       }
-<<<<<<< HEAD
-
       const accessToken = typeof data.access_token === 'string' ? data.access_token : '';
       const refreshToken = typeof data.refresh_token === 'string' ? data.refresh_token : '';
       if (!accessToken) {
@@ -61,21 +59,13 @@ export default function LoginPage() {
 
       setAuthToken(accessToken);
       if (supabase && refreshToken) {
-=======
-      setAuthToken(data.access_token);
-      if (supabase) {
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
         await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
       }
-<<<<<<< HEAD
 
       const me = await fetchAuthUserFromToken(accessToken);
-=======
-      const me = await fetchAuthUserFromToken(data.access_token);
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
       if (!me?.id) {
         setToast({ show: true, message: 'Signed in but could not load your account. Try again.', type: 'error' });
         setIsSubmitting(false);

@@ -3,13 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getNotifications, saveNotifications, type Notification } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-<<<<<<< HEAD
-import { deleteNotifications, fetchNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2 } from 'lucide-react';
-=======
-import { fetchNotifications, markNotificationRead, relativeTime, deleteNotification, type ApiNotification } from '@/lib/notificationsApi';
+import { deleteNotification, deleteNotifications, fetchNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
 import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck } from 'lucide-react';
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -99,13 +94,10 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [usingFallback, setUsingFallback] = useState(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
-<<<<<<< HEAD
   const [markingAll, setMarkingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-=======
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
   const [visibleCount, setVisibleCount] = useState(8);
   const PAGE_SIZE = 8;
@@ -292,23 +284,29 @@ export default function NotificationsPage() {
           <ArrowLeft className="h-5 w-5 text-foreground" />
         </button>
         <h1 className="text-lg font-bold text-foreground">Notifications</h1>
-<<<<<<< HEAD
-        <button
-          type="button"
-          onClick={() => void onMarkAllRead()}
-          disabled={loading || unreadCount === 0 || markingAll}
-          className="ml-auto rounded-full bg-secondary px-3 py-1 text-[10px] font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {markingAll ? 'Marking...' : 'Mark All as Read'}
-        </button>
-        <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
-          {unreadCount} unread
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void onMarkAllRead()}
+            disabled={loading || unreadCount === 0 || markingAll}
+            className="rounded-full bg-secondary px-3 py-1 text-[10px] font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {markingAll ? 'Marking...' : 'Mark All as Read'}
+          </button>
+          {unreadCount > 0 && (
+            <span className="rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">
+              {unreadCount} new
+            </span>
+          )}
+          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+            {items.length} total
+          </span>
+        </div>
       </header>
 
-      <div className="mx-auto max-w-lg divide-y divide-border">
+      <div className="mx-auto max-w-lg px-4 pt-3 space-y-2">
         {!loading && items.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl glass-card px-3 py-2">
             <button
               type="button"
               onClick={toggleSelectAll}
@@ -328,21 +326,6 @@ export default function NotificationsPage() {
             </button>
           </div>
         )}
-=======
-        <div className="ml-auto flex items-center gap-2">
-          {unreadCount > 0 && (
-            <span className="rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">
-              {unreadCount} new
-            </span>
-          )}
-          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-            {items.length} total
-          </span>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-lg px-4 pt-3 space-y-2">
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
         {usingFallback && (
           <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2 text-center text-xs text-amber-500">
             Offline mode: showing local notifications only.
@@ -366,7 +349,6 @@ export default function NotificationsPage() {
               className={`flex cursor-pointer items-start gap-3 rounded-2xl glass-card px-4 py-3.5 transition-all hover:border-border/60 ${n.read ? 'opacity-55' : 'border-l-2 border-l-primary/50'}`}
               onClick={() => void onOpenNotification(n)}
             >
-<<<<<<< HEAD
               <input
                 type="checkbox"
                 checked={selectedIds.has(n.id)}
@@ -375,10 +357,7 @@ export default function NotificationsPage() {
                 className="mt-3 h-4 w-4 shrink-0 accent-primary"
                 aria-label={`Select notification ${i + 1}`}
               />
-              <div className={`shrink-0 rounded-full p-2.5 ${colorMap[n.type]}`}>
-=======
               <div className={`shrink-0 rounded-xl p-2.5 ${colorMap[n.kind]}`}>
->>>>>>> ea17e1528119cb95b1af48a245392eadc449d2c1
                 <Icon className="h-4 w-4" />
               </div>
               <div className="flex-1 min-w-0">
