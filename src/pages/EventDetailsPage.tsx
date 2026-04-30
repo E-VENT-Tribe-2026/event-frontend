@@ -16,6 +16,8 @@ import { formatPageTitle } from '@/lib/documentTitle';
 import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 import EventLocationMap from '@/components/EventLocationMap';
 import { isEventUpcoming } from '@/lib/eventTime';
+import { getCategoryBanner } from '@/lib/categoryBanners';
+import { invalidatePrefix } from '@/lib/queryCache';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
@@ -92,6 +94,8 @@ export default function EventDetailsPage() {
       }
       await syncParticipationFromBackend();
       setToast({ show: true, message: 'Successfully joined!', type: 'success' });
+      invalidatePrefix(`/api/participants/${event.id}`);
+      invalidatePrefix('/api/events?');
       return true;
     } catch {
       setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
@@ -213,6 +217,7 @@ export default function EventDetailsPage() {
         if (!cancelled) {
           setApiEvent(mapApiEventToItem(data));
           setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+          setParticipationKnown(false); // reset so skeleton shows while sync runs
         }
       })
       .catch(() => {
@@ -265,7 +270,7 @@ export default function EventDetailsPage() {
     event &&
       (!useApiParticipation
         ? isEventOwner || Boolean(user && event.participants.includes(user.id))
-        : participationKnown && (isEventOwner || hasJoined)),
+        : (isEventOwner || (participationKnown && hasJoined))),
   );
 
   const wasRemovedFromEvent = Boolean(
@@ -342,6 +347,11 @@ export default function EventDetailsPage() {
   }
 
   const isPastEvent = !isEventUpcoming(event);
+  const isChatExpired = isPastEvent && (() => {
+    const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
+    const ts = new Date(normalized).getTime();
+    return !Number.isNaN(ts) && Date.now() - ts > 48 * 60 * 60 * 1000;
+  })();
 
   if (wasRemovedFromEvent) {
     return (
@@ -403,6 +413,10 @@ export default function EventDetailsPage() {
       setToast({ show: true, message: 'You cannot join or leave a past event.', type: 'error' });
       return;
     }
+    if (isAtCapacity) {
+      setToast({ show: true, message: 'This event has reached its maximum capacity.', type: 'error' });
+      return;
+    }
     if (hasJoined) {
       if (isUpdatingParticipation) return;
       setIsUpdatingParticipation(true);
@@ -427,6 +441,8 @@ export default function EventDetailsPage() {
           leaveEvent(event.id, user.id);
           setEventsState(getEvents());
           setToast({ show: true, message: 'You left the event.', type: 'success' });
+          invalidatePrefix(`/api/participants/${event.id}`);
+          invalidatePrefix('/api/events?');
         } catch {
           setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
         } finally {
@@ -437,6 +453,8 @@ export default function EventDetailsPage() {
       leaveEvent(event.id, user.id);
       setEventsState(getEvents());
       setToast({ show: true, message: 'You left the event.', type: 'success' });
+      invalidatePrefix(`/api/participants/${event.id}`);
+      invalidatePrefix('/api/events?');
       setIsUpdatingParticipation(false);
       return;
     }
@@ -506,6 +524,7 @@ export default function EventDetailsPage() {
 
   const handleRemoveAttendee = async (participantId: string) => {
     if (!isEventOwner || !user || String(participantId) === String(user.id)) return;
+    if (isPastEvent) return; // Cannot remove participants from past events
     if (!window.confirm('Remove this person from the event? They will lose access.')) return;
 
     if (useApiParticipation) {
@@ -526,6 +545,7 @@ export default function EventDetailsPage() {
         }
         await syncParticipationFromBackend();
         setToast({ show: true, message: 'Attendee removed.', type: 'success' });
+        invalidatePrefix(`/api/participants/${event.id}`);
       } catch {
         setToast({ show: true, message: 'Could not remove attendee. Try again.', type: 'error' });
       } finally {
@@ -538,6 +558,7 @@ export default function EventDetailsPage() {
     updateEvent(event.id, { participants: next });
     setEventsState(getEvents());
     setToast({ show: true, message: 'Attendee removed.', type: 'success' });
+    invalidatePrefix(`/api/participants/${event.id}`);
   };
 
   const handleDeleteEvent = async () => {
@@ -563,6 +584,8 @@ export default function EventDetailsPage() {
       deleteEvent(event.id);
       setEventsState(getEvents());
       setToast({ show: true, message: 'Event deleted.', type: 'success' });
+      invalidatePrefix('/api/events?');
+      invalidatePrefix(`/api/participants/${event.id}`);
       setTimeout(() => navigate('/home'), 600);
     } catch {
       setToast({ show: true, message: 'Could not delete the event.', type: 'error' });
@@ -572,6 +595,12 @@ export default function EventDetailsPage() {
   };
 
   const isFreeEvent = !(Number(event.budget) > 0);
+  const isAtCapacity = Boolean(
+    event.participantsLimit > 0 &&
+    attendeeDisplayCount >= event.participantsLimit &&
+    !hasJoined &&
+    !isEventOwner,
+  );
 
   const getJoinButtonText = () => {
     if (isUpdatingParticipation) return 'Please wait...';
@@ -579,6 +608,7 @@ export default function EventDetailsPage() {
     if (isPastEvent) return 'Event Ended';
     if (isEventOwner) return "You're hosting";
     if (hasJoined) return 'Leave Event';
+    if (isAtCapacity) return 'Event Full';
     if (isOrganizer) return "Organizers can't join";
     if (event.requiresApproval) {
       if (existingRequest?.status === 'pending') return 'Request Pending...';
@@ -598,22 +628,12 @@ export default function EventDetailsPage() {
 
       {/* Banner */}
       <div className="relative h-60">
-        <img src={event.image} alt={event.title} className="h-full w-full object-cover" />
+        <img src={event.image || getCategoryBanner(event.category)} alt={event.title} className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-transparent" />
         <button onClick={() => navigate(-1)} className="absolute top-4 left-4 rounded-full glass-card p-2.5">
           <ArrowLeft className="h-5 w-5 text-foreground" />
         </button>
         <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
-          {isEventOwner && (
-            <button
-              type="button"
-              onClick={() => navigate(`/event/${event.id}/edit`)}
-              className="flex items-center gap-1.5 rounded-full glass-card px-3 py-2 text-xs font-semibold text-foreground"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </button>
-          )}
           {event.requiresApproval && (
             <div className="flex items-center gap-1 rounded-full bg-accent/90 px-3 py-1 text-xs font-semibold text-accent-foreground backdrop-blur-sm">
               <ShieldCheck className="h-3 w-3" /> Approval Required
@@ -691,7 +711,16 @@ export default function EventDetailsPage() {
             Attendees
           </h2>
           {canViewFullAttendeeList ? (
-            fullAttendeeRows.length === 0 ? (
+            (!participationKnown || (useApiParticipation && apiParticipants.length === 0 && !participationKnown)) && useApiParticipation ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-2 rounded-xl bg-secondary/40 px-3 py-2.5">
+                    <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-secondary" />
+                    <div className="h-3 w-32 animate-pulse rounded bg-secondary" />
+                  </div>
+                ))}
+              </div>
+            ) : fullAttendeeRows.length === 0 ? (
               <p className="text-xs text-muted-foreground">No attendees yet.</p>
             ) : (
               <ul className="space-y-2">
@@ -712,7 +741,7 @@ export default function EventDetailsPage() {
                       />
                       <span className="truncate text-sm font-medium text-foreground">{row.name}</span>
                     </div>
-                    {isEventOwner && user && String(row.id) !== String(user.id) && (
+                    {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && (
                       <button
                         type="button"
                         disabled={removingParticipantId === row.id}
@@ -781,8 +810,10 @@ export default function EventDetailsPage() {
           <h2 className="text-base font-semibold text-foreground">Event chat</h2>
           {!user ? (
             <p className="text-xs text-muted-foreground">Sign in and join this event to access the event chat.</p>
-          ) : isCancelledEvent ? (
-            <p className="text-xs text-muted-foreground">This event is canceled. Chat is no longer available.</p>
+          ) : isCancelledEvent || isChatExpired ? (
+            <p className="text-xs text-muted-foreground">
+              {isChatExpired ? 'Chat is no longer available — this event ended more than 48 hours ago.' : 'This event is canceled. Chat is no longer available.'}
+            </p>
           ) : canAccessEventChat ? (
             <button
               type="button"
@@ -801,17 +832,26 @@ export default function EventDetailsPage() {
             <>
               <button
                 type="button"
-                onClick={() => navigate(`/event/${event.id}/edit`)}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-primary/45 bg-primary/15 py-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/25 active:scale-[0.98]"
+                disabled={isPastEvent}
+                onClick={() => !isPastEvent && navigate(`/event/${event.id}/edit`)}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
+                  isPastEvent
+                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                    : 'border-primary/45 bg-primary/15 text-primary hover:bg-primary/25'
+                }`}
               >
                 <Pencil className="h-4 w-4 shrink-0" />
                 Edit event
               </button>
               <button
                 type="button"
-                disabled={isDeletingEvent}
+                disabled={isDeletingEvent || isPastEvent}
                 onClick={() => void handleDeleteEvent()}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-destructive/45 bg-destructive/10 py-3.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-60 active:scale-[0.98]"
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
+                  isPastEvent
+                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                    : 'border-destructive/45 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-60'
+                }`}
               >
                 <Trash2 className="h-4 w-4 shrink-0" />
                 {isDeletingEvent ? 'Deleting…' : 'Delete'}
@@ -821,16 +861,16 @@ export default function EventDetailsPage() {
             <>
               <button
                 type="button"
-                onClick={() => { if (!hasJoined && !participationLoading) void handleJoinOrRequest(); }}
-                disabled={hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
+                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent && !isAtCapacity) void handleJoinOrRequest(); }}
+                disabled={isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  hasJoined || participationLoading || isUpdatingParticipation
+                  isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
                 <UserPlus className="h-4 w-4 shrink-0" />
-                Join Event
+                {isPastEvent ? 'Event Ended' : isAtCapacity ? 'Event Full' : 'Join Event'}
               </button>
               <button
                 type="button"
@@ -853,9 +893,9 @@ export default function EventDetailsPage() {
               <button
                 type="button"
                 onClick={() => void handleJoinOrRequest()}
-                disabled={isPastEvent || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
+                disabled={isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isPastEvent || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
+                  isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : hasJoined
                       ? 'border border-border bg-secondary text-foreground hover:bg-secondary/80'
@@ -867,21 +907,6 @@ export default function EventDetailsPage() {
                 ) : null}
                 {getJoinButtonText()}
               </button>
-              {hasJoined && !isPastEvent && (
-                <button
-                  type="button"
-                  onClick={() => void handleJoinOrRequest()}
-                  disabled={isUpdatingParticipation || participationLoading}
-                  className={`flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                    isUpdatingParticipation || participationLoading
-                      ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
-                      : 'bg-secondary text-foreground hover:bg-secondary/80'
-                  }`}
-                >
-                  <LogOut className="h-4 w-4 shrink-0" />
-                  Leave
-                </button>
-              )}
             </>
           )}
         </div>

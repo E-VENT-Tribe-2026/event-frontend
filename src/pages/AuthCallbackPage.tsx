@@ -6,13 +6,18 @@ import { setCurrentUserFromOAuth } from '@/lib/storage';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
-  if (!raw || !raw.trim()) return fallback;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('/')) return fallback;
-  // Avoid open redirects: only allow same-origin paths (no "//", no ":")
-  if (trimmed.startsWith('//') || trimmed.includes('://')) return fallback;
-  if (trimmed === '/') return fallback;
-  return trimmed;
+  if (!raw?.trim()) return fallback;
+  try {
+    // Use URL API to robustly detect cross-origin redirects
+    const url = new URL(raw.trim(), window.location.origin);
+    if (url.origin !== window.location.origin) return fallback;
+    const path = url.pathname;
+    // Only allow known app routes — reject bare '/' and anything suspicious
+    if (path === '/' || path.length > 200) return fallback;
+    return path + url.search;
+  } catch {
+    return fallback;
+  }
 }
 
 export default function AuthCallbackPage() {

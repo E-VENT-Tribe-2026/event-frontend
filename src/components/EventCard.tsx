@@ -5,6 +5,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
+import { getCategoryBanner } from '@/lib/categoryBanners';
+import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
 
 interface EventCardProps {
   event: EventItem;
@@ -34,16 +36,18 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     }
   }, [isAlreadyJoined, event.id]);
 
-  // Fetch Exact Attendee Count
+  // Fetch Exact Attendee Count (cached 30s)
   useEffect(() => {
     if (!event.id) return;
-
-    fetch(getApiUrl(`/api/participants/${event.id}/participants/count`))
-      .then((res) => res.ok ? res.json() : Promise.reject())
+    const cacheKey = `/api/participants/${event.id}/participants/count`;
+    cachedFetch(
+      cacheKey,
+      () => fetch(getApiUrl(`/api/participants/${event.id}/participants/count`))
+        .then((res) => res.ok ? res.json() : Promise.reject()),
+      TTL.SHORT,
+    )
       .then((data) => {
-        if (typeof data.count === 'number') {
-          setAttendeeCount(data.count);
-        }
+        if (typeof data.count === 'number') setAttendeeCount(data.count);
       })
       .catch(() => {
         setAttendeeCount(event.participants?.length || 0);
@@ -79,6 +83,8 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
 
       if (response.ok) {
         setFavorite(!favorite);
+        // Invalidate favorites cache so HomePage/ProfilePage get fresh data
+        invalidate(`/api/favorites/all:${user?.id ?? ''}`);
       }
     } catch (error) {
       console.error("Failed to update favorite status:", error);
@@ -115,7 +121,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     >
       <div className="relative h-40 overflow-hidden">
         <img 
-          src={event.image} 
+          src={event.image || getCategoryBanner(event.category)} 
           alt={event.title} 
           className="h-full w-full object-cover transition-transform duration-500 hover:scale-110" 
         />

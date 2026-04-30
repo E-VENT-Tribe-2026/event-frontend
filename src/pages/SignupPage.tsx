@@ -10,6 +10,7 @@ import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 import { supabase } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
+import { sanitizeText, sanitizeEmail } from '@/lib/sanitize';
 
 const MIN_AGE = 18;
 const EMAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60;
@@ -24,7 +25,6 @@ export default function SignupPage() {
   const [showPw, setShowPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [dob, setDob] = useState('');
-  const [dobInputType, setDobInputType] = useState<'text' | 'date'>('text');
   const [gender, setGender] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
   const [profilePhoto, setProfilePhoto] = useState('');
@@ -62,7 +62,9 @@ export default function SignupPage() {
     if (!email.trim()) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
     if (!password) e.password = 'Password is required';
-    else if (password.length < 6) e.password = 'Minimum 6 characters';
+    else if (password.length < 8) e.password = 'Minimum 8 characters';
+    else if (!/[A-Z]/.test(password)) e.password = 'Must contain at least one uppercase letter';
+    else if (!/[0-9]/.test(password)) e.password = 'Must contain at least one number';
     if (password !== confirmPw) e.confirmPw = 'Passwords do not match';
     if (!dob) e.dob = 'Date of birth is required';
     else if (!isAtLeastAge(dob, MIN_AGE)) e.dob = `You must be at least ${MIN_AGE} years old`;
@@ -98,7 +100,7 @@ export default function SignupPage() {
       const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, full_name: name, dob, gender, interests }),
+        body: JSON.stringify({ email: sanitizeEmail(email), password, full_name: sanitizeText(name), dob, gender, interests }),
         signal: controller.signal,
       });
 
@@ -168,6 +170,8 @@ export default function SignupPage() {
         interests,
       });
 
+      setPassword(''); // clear from memory after successful auth
+      setConfirmPw('');
       navigate('/home');
     } catch {
       setToast({ show: true, message: 'Server unreachable. Please try again later.', type: 'error' });
@@ -194,18 +198,40 @@ export default function SignupPage() {
   const inputCls = "w-full rounded-xl bg-secondary pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 transition-all";
 
 return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8 relative">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-8 relative overflow-hidden">
       <AppToast 
         message={toast.message} 
         type={toast.type} 
         show={toast.show} 
         onClose={() => setToast(t => ({ ...t, show: false }))} 
       />
+
+      {/* Ambient background */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-32 right-1/4 w-[500px] h-[500px] rounded-full bg-primary/15 blur-[140px]" />
+        <div className="absolute bottom-0 left-1/4 w-[400px] h-[400px] rounded-full bg-accent/10 blur-[140px]" />
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: 'linear-gradient(hsl(213 30% 60%) 1px, transparent 1px), linear-gradient(90deg, hsl(213 30% 60%) 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+          }}
+        />
+      </div>
       
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-6">
-        <div className="text-center">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm z-10">
+        <div className="rounded-3xl glass-card p-8 space-y-6">
+        <div className="text-center space-y-1">
+          <div className="mx-auto mb-3 relative h-16 w-16 flex items-center justify-center">
+            <motion.div
+              className="absolute inset-0 rounded-2xl border-2 border-primary/50"
+              animate={{ scale: [1, 1.25, 1], opacity: [0.5, 0, 0.5] }}
+              transition={{ duration: 2.2, repeat: Infinity }}
+            />
+            <div className="h-14 w-14 rounded-2xl gradient-primary flex items-center justify-center text-white text-2xl font-bold shadow-glow">E</div>
+          </div>
           <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Join E-VENT and discover events</p>
+          <p className="text-sm text-muted-foreground">Join E-VENT and discover events</p>
         </div>
 
         {/* Profile Photo */}
@@ -241,31 +267,18 @@ return (
           {errors.email && <p className="text-xs text-destructive px-1">{errors.email}</p>}
 
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label htmlFor="signup-dob" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
+            <div>
+              <label htmlFor="signup-dob" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5 mb-1">
                 Birthdate
               </label>
               <input
                 id="signup-dob"
-                type={dobInputType}
-                placeholder="YYYY-MM-DD (min. 18)"
+                type="date"
                 value={dob}
-                onFocus={() => setDobInputType('date')}
-                onBlur={() => {
-                  if (!dob) setDobInputType('text');
-                }}
                 onChange={e => setDob(e.target.value)}
-                className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50"
-                aria-describedby={errors.dob ? 'signup-dob-hint signup-dob-error' : 'signup-dob-hint'}
+                className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50"
               />
-              <p id="signup-dob-hint" className="text-[10px] text-muted-foreground px-0.5">
-                Tap the field to open the calendar picker.
-              </p>
-              {errors.dob && (
-                <p id="signup-dob-error" className="text-xs text-destructive mt-0.5">
-                  {errors.dob}
-                </p>
-              )}
+              {errors.dob && <p className="text-xs text-destructive mt-1">{errors.dob}</p>}
             </div>
             <div className="space-y-1">
               <label htmlFor="signup-gender" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
@@ -286,26 +299,63 @@ return (
           </div>
 
           {/* Interests */}
-          <button type="button" onClick={() => setShowInterests(!showInterests)} className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors">
-            <span className="truncate">
-              {interests.length ? interests.join(', ') : 'Select Interests'}
-            </span>
-            <ChevronDown className={`h-4 w-4 transition-transform ${showInterests ? 'rotate-180' : ''}`} />
-          </button>
-          
-          <AnimatePresence>
-            {showInterests && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <div className="flex flex-wrap gap-2 p-3 bg-secondary/50 rounded-xl border border-border/50">
-                  {ALL_INTERESTS.map(i => (
-                    <button key={i} type="button" onClick={() => toggleInterest(i)} className={`px-3 py-1 text-[10px] font-medium rounded-full transition-all ${interests.includes(i) ? 'bg-primary text-primary-foreground shadow-glow' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
-                      {i}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowInterests(!showInterests)}
+              className="w-full rounded-xl bg-secondary px-4 py-3 text-xs text-left flex justify-between items-center hover:bg-secondary/80 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-foreground">Interests</span>
+                {interests.length > 0 && (
+                  <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                    {interests.length} selected
+                  </span>
+                )}
+              </div>
+              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showInterests ? 'rotate-180' : ''}`} />
+            </button>
+
+            <AnimatePresence>
+              {showInterests && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {ALL_INTERESTS.map((i) => {
+                      const emoji: Record<string, string> = {
+                        Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+                        Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+                        Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+                      };
+                      const selected = interests.includes(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => toggleInterest(i)}
+                          className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-3 text-center transition-all active:scale-95 ${
+                            selected
+                              ? 'bg-primary/20 border border-primary/50 shadow-sm'
+                              : 'bg-secondary/60 border border-transparent hover:border-border'
+                          }`}
+                        >
+                          <span className="text-xl">{emoji[i] ?? '✨'}</span>
+                          <span className={`text-[10px] font-medium leading-tight ${selected ? 'text-primary' : 'text-muted-foreground'}`}>
+                            {i}
+                          </span>
+                          {selected && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Password */}
           <div className="relative">
@@ -350,6 +400,7 @@ return (
         <p className="text-center text-sm text-muted-foreground">
           Already have an account? <Link to="/login" className="text-primary font-medium hover:underline">Sign In</Link>
         </p>
+        </div>
       </motion.div>
     </div>
 )

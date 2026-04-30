@@ -69,8 +69,8 @@ describe('SignupPage', () => {
     renderPage();
     fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: 'Alex' } });
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
-    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret1' } });
-    fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'secret1' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
+    fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
     const dobInput = screen.getByLabelText(/birthdate/i) as HTMLInputElement;
     fireEvent.focus(dobInput);
     fireEvent.change(dobInput, { target: { value: '2000-01-15' } });
@@ -105,8 +105,8 @@ describe('SignupPage', () => {
     renderPage();
     fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: 'Alex' } });
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
-    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret1' } });
-    fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'secret1' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
+    fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
     const dobInput = screen.getByLabelText(/birthdate/i) as HTMLInputElement;
     fireEvent.focus(dobInput);
     fireEvent.change(dobInput, { target: { value: '2000-01-15' } });
