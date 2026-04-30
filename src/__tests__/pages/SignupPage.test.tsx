@@ -79,7 +79,7 @@ describe('SignupPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^create account$/i }));
 
-    expect(await screen.findByText('An account with this email already exists.')).toBeInTheDocument();
+    expect(await screen.findByText('An account with this email already exists. Please sign in instead.')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 

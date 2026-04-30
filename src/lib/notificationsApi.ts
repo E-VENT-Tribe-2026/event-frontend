@@ -84,3 +84,26 @@ export async function markNotificationRead(token: string, id: string): Promise<v
   }
   if (!res.ok) throw new Error('Failed to mark notification read');
 }
+
+export async function markAllNotificationsRead(token: string): Promise<void> {
+  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' } as const;
+  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/mark-all-read`), {
+    method: 'PATCH',
+    headers,
+  });
+  if (!res.ok) throw new Error('Failed to mark all notifications read');
+}
+
+export async function deleteNotifications(token: string, ids: string[]): Promise<void> {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  } as const;
+  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/bulk`), {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({ notification_ids: ids }),
+  });
+  if (!res.ok) throw new Error('Failed to delete notifications');
+}

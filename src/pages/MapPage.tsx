@@ -10,6 +10,19 @@ import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 
+const WORLD_BOUNDS: [[number, number], [number, number]] = [
+  [-85, -180],
+  [85, 180],
+];
+
+function clampToWorld(lat: number, lng: number): [number, number] {
+  const [[south, west], [north, east]] = WORLD_BOUNDS;
+  return [
+    Math.max(south, Math.min(north, lat)),
+    Math.max(west, Math.min(east, lng)),
+  ];
+}
+
 function escapeHtml(s: string) {
   return s
     .replace(/&/g, '&amp;')
@@ -152,15 +165,28 @@ export default function MapPage() {
         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
       });
 
-      const map = L.map(mapRef.current, { zoomControl: true }).setView([40.7128, -74.006], 11);
+      const map = L.map(mapRef.current, {
+        zoomControl: true,
+        bounceAtZoomLimits: false,
+        worldCopyJump: false,
+        maxBounds: WORLD_BOUNDS,
+        maxBoundsViscosity: 1,
+        minZoom: 3,
+      }).setView([40.7128, -74.006], 3);
       mapInstance.current = map;
+      map.setMaxBounds(WORLD_BOUNDS);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
+        noWrap: true,
+        bounds: WORLD_BOUNDS,
       }).addTo(map);
 
       const layer = L.layerGroup().addTo(map);
       markersLayerRef.current = layer;
+
+      const keepInsideWorld = () => map.panInsideBounds(WORLD_BOUNDS, { animate: false });
+      map.on('dragend zoomend moveend', keepInsideWorld);
 
       setMapReady(true);
       requestAnimationFrame(() => map.invalidateSize());
@@ -190,7 +216,7 @@ export default function MapPage() {
     const spread = spreadOverlapping(filteredEvents);
 
     spread.forEach(({ item: event, lat, lng }) => {
-      const marker = L.marker([lat, lng]).addTo(layer);
+      const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
       const preview = `
         <div style="font-family:system-ui,sans-serif;min-width:180px;max-width:240px">
           <h3 style="margin:0 0 6px;font-size:14px;font-weight:600">${escapeHtml(event.title)}</h3>
@@ -205,8 +231,9 @@ export default function MapPage() {
     });
 
     if (spread.length > 0) {
-      const bounds = L.latLngBounds(spread.map((s) => [s.lat, s.lng] as [number, number]));
-      map.fitBounds(bounds, { padding: [36, 36], maxZoom: 14 });
+      const bounds = L.latLngBounds(spread.map((s) => clampToWorld(s.lat, s.lng)));
+      map.fitBounds(bounds.pad(0.15), { padding: [36, 36], maxZoom: 14 });
+      map.panInsideBounds(WORLD_BOUNDS, { animate: false });
     }
   }, [filteredEvents, mapReady]);
 

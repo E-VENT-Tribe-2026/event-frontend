@@ -114,7 +114,7 @@ export default function SignupPage() {
         setToast({ 
           show: true, 
           message: isExisting
-            ? 'An account with this email already exists.'
+            ? 'An account with this email already exists. Please sign in instead.'
             : isRateLimited
               ? 'Too many email requests. Please wait 1 minute before trying again.'
               : (backendMessage || 'Signup failed'),
@@ -124,7 +124,10 @@ export default function SignupPage() {
         return;
       }
 
-      if (!data.access_token) {
+      const accessToken = typeof data.access_token === 'string' ? data.access_token : '';
+      const refreshToken = typeof data.refresh_token === 'string' ? data.refresh_token : '';
+
+      if (!accessToken) {
         setToast({
           show: true,
           message: data.message || 'Check your email to confirm your account, then sign in.',
@@ -136,15 +139,15 @@ export default function SignupPage() {
         return;
       }
 
-      setAuthToken(data.access_token);
-      if (supabase) {
+      setAuthToken(accessToken);
+      if (supabase && refreshToken) {
         await supabase.auth.setSession({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token || '',
+          access_token: accessToken,
+          refresh_token: refreshToken,
         });
       }
 
-      const me = await fetchAuthUserFromToken(data.access_token);
+      const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {
         setToast({
           show: true,

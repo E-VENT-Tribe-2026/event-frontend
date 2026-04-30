@@ -4,6 +4,7 @@ import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
+import { getOAuthRedirectBaseUrl } from '@/lib/oauthRedirect';
 
 const SUCCESS_RESEND_COOLDOWN_SECONDS = 60;
 const DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 120;
@@ -69,7 +70,10 @@ export default function ForgotPasswordPage() {
       const res = await fetch(getApiUrl('/api/auth/forgot-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({
+          email: email.trim(),
+          redirect_origin: getOAuthRedirectBaseUrl(),
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -115,7 +119,11 @@ export default function ForgotPasswordPage() {
       const res = await fetch(getApiUrl('/api/auth/reset-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: resetAccessToken, new_password: newPassword }),
+        body: JSON.stringify({
+          access_token: resetAccessToken,
+          new_password: newPassword,
+          confirm_password: confirmPassword,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

@@ -22,6 +22,7 @@ export default function LoginPage() {
   const validate = () => {
     const e: Record<string, string> = {};
     if (!email.trim()) e.email = 'Email required';
+    else if (!/\S+@\S+\.\S+/.test(email.trim())) e.email = 'Invalid email';
     if (!password) e.password = 'Password required';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -51,15 +52,23 @@ export default function LoginPage() {
         return;
       }
 
-      setAuthToken(data.access_token);
-      if (supabase) {
+      const accessToken = typeof data.access_token === 'string' ? data.access_token : '';
+      const refreshToken = typeof data.refresh_token === 'string' ? data.refresh_token : '';
+      if (!accessToken) {
+        setToast({ show: true, message: 'Login succeeded but no session token was returned.', type: 'error' });
+        setIsSubmitting(false);
+        return;
+      }
+
+      setAuthToken(accessToken);
+      if (supabase && refreshToken) {
         await supabase.auth.setSession({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token || '',
+          access_token: accessToken,
+          refresh_token: refreshToken,
         });
       }
 
-      const me = await fetchAuthUserFromToken(data.access_token);
+      const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {
         setToast({ show: true, message: 'Signed in but could not load your account. Try again.', type: 'error' });
         setIsSubmitting(false);
