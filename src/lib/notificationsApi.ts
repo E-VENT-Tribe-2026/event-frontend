@@ -132,7 +132,7 @@ export async function deleteNotifications(token: string, ids: string[]): Promise
     Accept: 'application/json',
     'Content-Type': 'application/json',
   } as const;
-  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/bulk`), {
+  const res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/bulk-delete`), {
     method: 'DELETE',
     headers,
     body: JSON.stringify({ notification_ids: ids }),
