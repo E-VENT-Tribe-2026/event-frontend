@@ -300,7 +300,7 @@ export default function HomePage() {
       if (debouncedDate && e.date !== debouncedDate) return false;
       const city = extractCityFromLocation(e.location || '');
       if (selectedCity && city !== selectedCity) return false;
-      if (debouncedSearch && !e.title.toLowerCase().includes(debouncedSearch.toLowerCase())) return false;
+      // Search is handled server-side by the API — no client-side title filter
       return true;
     });
 
