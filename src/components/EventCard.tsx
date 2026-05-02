@@ -188,7 +188,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
                   : 'gradient-primary text-primary-foreground shadow-glow'
               }`}
             >
-              {isAlreadyJoined ? 'Joined' : joinLocked ? 'Opening...' : 'Join'}
+              {isAlreadyJoined ? 'Joined' : joinLocked ? 'Opening...' : 'View Details'}
             </button>
           </div>
         </div>
