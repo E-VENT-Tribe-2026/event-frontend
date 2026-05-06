@@ -1,11 +1,49 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard } from 'lucide-react';
-import { getCurrentUser } from '@/lib/storage';
+import { getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
+import { getAuthToken } from '@/lib/auth';
+import { getApiUrl } from '@/lib/api';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { useEffect, useState } from 'react';
 
 export default function BottomNav() {
   const location = useLocation();
-  const user = getCurrentUser();
+  const [user, setUser] = useState(getCurrentUser);
+
+  useEffect(() => {
+    const sync = () => setUser(getCurrentUser());
+    window.addEventListener('eventapp:user-updated', sync);
+    return () => window.removeEventListener('eventapp:user-updated', sync);
+  }, []);
+
+  // Fetch profile on mount to load avatar
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then((data: Record<string, unknown>) => {
+        const p = (data.data || data.user || data) as Record<string, unknown>;
+        if (!p.id) return;
+        // Use setCurrentUserFromOAuth so it works even if user isn't in memory yet
+        setCurrentUserFromOAuth({
+          id: String(p.id),
+          email: String(p.email || ''),
+          name: String(p.full_name || p.name || ''),
+          avatar: String(p.avatar_url || ''),
+          bio: String(p.bio || ''),
+          interests: Array.isArray(p.interests) ? p.interests as string[] : [],
+        });
+        setUser(getCurrentUser());
+        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // once on mount
+
   const isOrganizer = user?.role === 'organizer';
 
   const navItems = isOrganizer
