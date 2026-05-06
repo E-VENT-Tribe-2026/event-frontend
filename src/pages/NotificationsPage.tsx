@@ -89,7 +89,13 @@ function fromLocal(n: Notification): UINotification {
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
-  const user = getCurrentUser();
+  const [user, setUser] = useState(getCurrentUser);
+
+  useEffect(() => {
+    const sync = () => setUser(getCurrentUser());
+    window.addEventListener('eventapp:user-updated', sync);
+    return () => window.removeEventListener('eventapp:user-updated', sync);
+  }, []);
   const [items, setItems] = useState<UINotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [usingFallback, setUsingFallback] = useState(false);
@@ -113,9 +119,14 @@ export default function NotificationsPage() {
   };
 
   const loadNotifications = async () => {
-    if (!user) { setItems([]); setLoading(false); return; }
     setLoading(true);
     const token = await resolveToken();
+    if (!token && !user) {
+      setItems(getNotifications().map(fromLocal));
+      setUsingFallback(true);
+      setLoading(false);
+      return;
+    }
     if (!token) {
       setItems(getNotifications().map(fromLocal));
       setUsingFallback(true);

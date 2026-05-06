@@ -24,9 +24,11 @@ import RouteDocumentTitle from "./components/RouteDocumentTitle";
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import { getAuthToken, clearAuthToken } from '@/lib/auth';
-import { logout } from '@/lib/storage';
+import { logout, updateUser, getCurrentUser } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
 import { clearCache } from '@/lib/queryCache';
+import { getApiUrl } from '@/lib/api';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
 
 const queryClient = new QueryClient();
 
@@ -35,6 +37,31 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [showWarning, setShowWarning] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(120);
+
+  // Fetch profile on app load to ensure avatar and user data are up to date
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then((data: Record<string, unknown>) => {
+        const profile = (data.data || data.user || data) as Record<string, unknown>;
+        if (!profile.id) return;
+        setCurrentUserFromOAuth({
+          id: String(profile.id),
+          email: String(profile.email || getCurrentUser()?.email || ''),
+          name: String(profile.full_name || profile.name || getCurrentUser()?.name || ''),
+          avatar: String(profile.avatar_url || ''),
+          bio: String(profile.bio || ''),
+          interests: Array.isArray(profile.interests) ? profile.interests as string[] : [],
+        });
+        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // once on app mount
 
   useEffect(() => {
     // Only start the timer when a user is logged in

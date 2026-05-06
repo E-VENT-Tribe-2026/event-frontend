@@ -1,10 +1,12 @@
 import { Search, Bell, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { getCurrentUser } from '@/lib/storage';
+import { getCurrentUser, updateUser } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getAuthToken } from '@/lib/auth';
 import { fetchNotifications } from '@/lib/notificationsApi';
 import { useEffect, useState } from 'react';
+import { getApiUrl } from '@/lib/api';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
 
 interface TopBarProps {
   search: string;
@@ -12,8 +14,43 @@ interface TopBarProps {
 }
 
 export default function TopBar({ search, onSearchChange }: TopBarProps) {
-  const user = getCurrentUser();
+  const [user, setUser] = useState(getCurrentUser);
   const [hasUnread, setHasUnread] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setUser(getCurrentUser());
+    window.addEventListener('eventapp:user-updated', sync);
+    window.addEventListener('focus', sync);
+    return () => {
+      window.removeEventListener('eventapp:user-updated', sync);
+      window.removeEventListener('focus', sync);
+    };
+  }, []);
+
+  // Fetch profile on mount to ensure avatar is up to date after refresh
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then((data: Record<string, unknown>) => {
+        const profile = (data.data || data.user || data) as Record<string, unknown>;
+        if (!profile.id) return;
+        updateUser({
+          name: String(profile.full_name || profile.name || ''),
+          avatar: String(profile.avatar_url || ''),
+          profilePhoto: String(profile.avatar_url || ''),
+          bio: String(profile.bio || ''),
+          interests: Array.isArray(profile.interests) ? profile.interests as string[] : [],
+        });
+        setUser(getCurrentUser());
+        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount
 
   useEffect(() => {
     const token = getAuthToken();
@@ -26,8 +63,7 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
     };
 
     check();
-    window.addEventListener('focus', check);
-    return () => window.removeEventListener('focus', check);
+    return () => {};
   }, [user?.id]);
 
   return (

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { setAuthToken } from '@/lib/auth';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
+import { getApiUrl } from '@/lib/api';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -74,10 +76,32 @@ export default function AuthCallbackPage() {
 
       setAuthToken(session.access_token);
 
+      // Fetch full profile to get avatar and other details
+      let avatarUrl = String(session.user.user_metadata?.avatar_url || '');
+      let fullName = String(session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '');
+      let bio = '';
+      let interests: string[] = [];
+      try {
+        const profileRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+          headers: { Authorization: `Bearer ${session.access_token}`, Accept: 'application/json' },
+        });
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
+          avatarUrl = String(p.avatar_url || avatarUrl);
+          fullName = String(p.full_name || p.name || fullName);
+          bio = String(p.bio || '');
+          interests = Array.isArray(p.interests) ? p.interests as string[] : [];
+        }
+      } catch { /* use metadata defaults */ }
+
       setCurrentUserFromOAuth({
         id: session.user.id,
         email: session.user.email || '',
-        name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '',
+        name: fullName,
+        avatar: avatarUrl,
+        bio,
+        interests,
       });
 
       navigate(nextPath, { replace: true });
