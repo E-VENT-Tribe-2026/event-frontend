@@ -1,4 +1,4 @@
-import { Search, Bell, Sparkles } from 'lucide-react';
+import { Search, Bell } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getCurrentUser, updateUser } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
@@ -7,6 +7,7 @@ import { fetchNotifications } from '@/lib/notificationsApi';
 import { useEffect, useState } from 'react';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
+import AppLogo from '@/components/AppLogo';
 
 interface TopBarProps {
   search: string;
@@ -70,12 +71,7 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
       <div className="mx-auto flex max-w-lg items-center gap-3">
         {/* Logo */}
-        <Link to="/home" className="shrink-0 flex items-center gap-1.5 group">
-          <div className="h-7 w-7 rounded-lg gradient-primary flex items-center justify-center shadow-glow group-hover:opacity-90 transition-opacity">
-            <Sparkles className="h-3.5 w-3.5 text-primary-foreground" />
-          </div>
-          <h1 className="text-lg font-bold text-gradient leading-none">E-VENT</h1>
-        </Link>
+        <AppLogo size="sm" linkTo="/home" className="shrink-0 hover:opacity-90 transition-opacity" />
 
         {/* Search */}
         <div className="flex-1 relative">
