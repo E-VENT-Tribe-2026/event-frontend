@@ -2,6 +2,11 @@ import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 
+const WORLD_BOUNDS: [[number, number], [number, number]] = [
+  [-85, -180],
+  [85, 180],
+];
+
 type EventLocationMapProps = {
   latitude: number;
   longitude: number;
@@ -11,6 +16,7 @@ type EventLocationMapProps = {
 
 /**
  * Read-only OSM map centered on the event with a fixed marker (pan/zoom allowed).
+ * Restricted to a single world copy — no infinite horizontal scrolling.
  */
 export default function EventLocationMap({
   latitude,
@@ -50,15 +56,26 @@ export default function EventLocationMap({
         boxZoom: true,
         keyboard: true,
         minZoom: 2,
+        bounceAtZoomLimits: false,
+        worldCopyJump: false,
+        maxBounds: WORLD_BOUNDS,
+        maxBoundsViscosity: 1,
       }).setView([latitude, longitude], 14);
 
       mapRef.current = map;
+      map.setMaxBounds(WORLD_BOUNDS);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
+        noWrap: true,
+        bounds: WORLD_BOUNDS,
       }).addTo(map);
 
       markerRef.current = L.marker([latitude, longitude]).addTo(map);
+
+      // Keep map inside world bounds after any movement
+      const keepInsideWorld = () => map.panInsideBounds(WORLD_BOUNDS, { animate: false });
+      map.on('dragend zoomend moveend', keepInsideWorld);
 
       requestAnimationFrame(() => map.invalidateSize());
     };
