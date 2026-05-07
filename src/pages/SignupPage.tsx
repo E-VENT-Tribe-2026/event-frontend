@@ -234,22 +234,7 @@ return (
           <p className="text-sm text-muted-foreground">Join E-VENT and discover events</p>
         </div>
 
-        {/* Profile Photo */}
-        <div className="flex justify-center">
-          <button type="button" onClick={() => fileRef.current?.click()} className="relative h-20 w-20 rounded-full bg-secondary ring-2 ring-primary/30 overflow-hidden group">
-            {profilePhoto ? (
-              <img src={profilePhoto} alt="Profile" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Camera className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
-              </div>
-            )}
-            <div className="absolute inset-0 bg-background/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <Camera className="h-5 w-5 text-foreground" />
-            </div>
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
-        </div>
+        
 
         <form onSubmit={handleSubmit} className="space-y-3">
           {/* Name */}
