@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, Eye, EyeOff, CheckCircle, XCircle, Loader } from 'lucide-react';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import AppLogo from '@/components/AppLogo';
 import { getApiUrl } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 
 type VerifyState = 'verifying' | 'valid' | 'invalid';
 
@@ -12,8 +13,21 @@ export default function ResetPasswordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // Token comes from the email link: /reset-password?token=<hash>
-  const token = searchParams.get('token') || searchParams.get('access_token') || '';
+  // Token comes from the email link in multiple possible formats:
+  // 1. Query param: /reset-password?token=xxx or ?access_token=xxx
+  // 2. Hash fragment: /reset-password#access_token=xxx&type=recovery (Supabase implicit flow)
+  // 3. PKCE code: /reset-password?code=xxx (Supabase PKCE flow — exchanged for session below)
+  const token = useMemo(() => {
+    const fromQuery = searchParams.get('token') || searchParams.get('access_token') || '';
+    if (fromQuery) return fromQuery;
+    if (typeof window !== 'undefined') {
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      return hashParams.get('access_token') || hashParams.get('token') || '';
+    }
+    return '';
+  }, [searchParams]);
+
+  const pkceCode = searchParams.get('code') || '';
 
   const [verifyState, setVerifyState] = useState<VerifyState>('verifying');
   const [verifyError, setVerifyError] = useState('');
@@ -26,42 +40,72 @@ export default function ResetPasswordPage() {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
 
-  // Step 1: Verify the token as soon as the page loads
+  // Step 1: Verify/exchange the token as soon as the page loads
   useEffect(() => {
-    if (!token) {
-      setVerifyState('invalid');
-      setVerifyError('No reset token found. Please request a new password reset link.');
-      return;
-    }
-
     let cancelled = false;
-    setVerifyState('verifying');
 
-    fetch(getApiUrl(`/api/auth/verify-reset-token?token=${encodeURIComponent(token)}`), {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    })
-      .then(async (res) => {
+    const verify = async () => {
+      // Case 1: PKCE code — exchange it for a session via Supabase
+      if (pkceCode && supabase) {
+        try {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(pkceCode);
+          if (cancelled) return;
+          if (error || !data?.session?.access_token) {
+            setVerifyState('invalid');
+            setVerifyError('This reset link is invalid or has expired. Please request a new one.');
+            return;
+          }
+          // Store the access token so the reset submit can use it
+          (window as any).__resetToken = data.session.access_token;
+          setVerifyState('valid');
+        } catch {
+          if (!cancelled) {
+            setVerifyState('invalid');
+            setVerifyError('Could not verify the reset link. Please try again.');
+          }
+        }
+        return;
+      }
+
+      // Case 2: Direct token (query param or hash)
+      if (!token) {
+        setVerifyState('invalid');
+        setVerifyError('No reset token found. Please request a new password reset link.');
+        return;
+      }
+
+      // Supabase JWTs are long (>100 chars) — skip the verify endpoint, go straight to form
+      if (token.length > 100) {
+        setVerifyState('valid');
+        return;
+      }
+
+      // Custom backend token — call verify endpoint
+      setVerifyState('verifying');
+      try {
+        const res = await fetch(getApiUrl(`/api/auth/verify-reset-token?token=${encodeURIComponent(token)}`), {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
         if (cancelled) return;
         if (res.ok) {
           setVerifyState('valid');
         } else {
           const data = await res.json().catch(() => ({}));
           setVerifyState('invalid');
-          setVerifyError(
-            String(data?.detail || data?.message || 'This reset link is invalid or has expired.')
-          );
+          setVerifyError(String(data?.detail || data?.message || 'This reset link is invalid or has expired.'));
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
           setVerifyState('invalid');
           setVerifyError('Could not verify the reset link. Please try again.');
         }
-      });
+      }
+    };
 
+    verify();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, pkceCode]);
 
   // Step 2: Submit new password
   const handleSubmit = async (e: React.FormEvent) => {
@@ -89,11 +133,14 @@ export default function ResetPasswordPage() {
     setSubmitting(true);
 
     try {
+      // Use the PKCE-exchanged token if available, otherwise use the direct token
+      const effectiveToken = (window as any).__resetToken || token;
       const res = await fetch(getApiUrl('/api/auth/reset-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          token,
+          token: effectiveToken,
+          access_token: effectiveToken,
           new_password: newPassword,
           confirm_password: confirmPassword,
         }),
