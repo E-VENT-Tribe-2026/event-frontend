@@ -22,6 +22,7 @@ import TicketPage from "./pages/TicketPage";
 import NotFound from "./pages/NotFound";
 import RouteDocumentTitle from "./components/RouteDocumentTitle";
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
+import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import { getAuthToken, clearAuthToken } from '@/lib/auth';
 import { logout, updateUser, getCurrentUser } from '@/lib/storage';
@@ -142,6 +143,7 @@ const App = () => (
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
             <Route path="/home" element={<HomePage />} />
             <Route path="/event/:id/edit" element={<EditEventPage />} />
