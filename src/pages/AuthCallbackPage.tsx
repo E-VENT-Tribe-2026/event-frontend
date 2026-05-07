@@ -37,7 +37,7 @@ export default function AuthCallbackPage() {
         queryParams.get('token');
 
       if (recoveryType === 'recovery' && recoveryToken) {
-        navigate(`/forgot-password?access_token=${encodeURIComponent(recoveryToken)}`, { replace: true });
+        navigate(`/reset-password?token=${encodeURIComponent(recoveryToken)}`, { replace: true });
         return;
       }
 
@@ -59,7 +59,7 @@ export default function AuthCallbackPage() {
       } else {
         const { data, error } = await supabase.auth.getSession();
         if (recoveryType === 'recovery' && data?.session?.access_token) {
-          navigate(`/forgot-password?access_token=${encodeURIComponent(data.session.access_token)}`, { replace: true });
+          navigate(`/reset-password?token=${encodeURIComponent(data.session.access_token)}`, { replace: true });
           return;
         }
         if (error || !data.session) {
@@ -70,7 +70,7 @@ export default function AuthCallbackPage() {
       }
 
       if (recoveryType === 'recovery' && session?.access_token) {
-        navigate(`/forgot-password?access_token=${encodeURIComponent(session.access_token)}`, { replace: true });
+        navigate(`/reset-password?token=${encodeURIComponent(session.access_token)}`, { replace: true });
         return;
       }
 
