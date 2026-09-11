@@ -59,7 +59,7 @@ npm run dev
 The app will be available at:
 
 ```
-http://localhost:8080
+http://localhost:8081
 ```
 
 ### 5. Backend Requirement
@@ -67,7 +67,7 @@ http://localhost:8080
 The frontend expects backend API at:
 
 ```
-http://127.0.0.1:8001
+http://127.0.0.1:8000
 ```
 
 If your backend uses another port, update `VITE_API_BASE_URL` in `.env.local`.
