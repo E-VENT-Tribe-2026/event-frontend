@@ -438,7 +438,7 @@ export default function HomePage() {
         <div className="rounded-2xl glass-card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase text-muted-foreground">Budget range</span>
-            <span className="text-xs font-medium text-foreground">${budgetMin} — ${budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
+            <span className="text-xs font-medium text-foreground">€{budgetMin} — €{budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
           </div>
           <div className="relative h-6 flex items-center">
             <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />

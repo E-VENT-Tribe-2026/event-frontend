@@ -229,7 +229,7 @@ export default function MapPage() {
 
       const costBadge = event.budget === 0
         ? `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#22c55e20;color:#16a34a;font-size:10px;font-weight:700">Free</span>`
-        : `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#6d28d920;color:#6d28d9;font-size:10px;font-weight:700">$${escapeHtml(String(event.budget))}</span>`;
+        : `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#6d28d920;color:#6d28d9;font-size:10px;font-weight:700">€${escapeHtml(String(event.budget))}</span>`;
 
       const preview = `
         <div style="font-family:system-ui,sans-serif;min-width:200px;max-width:260px">
