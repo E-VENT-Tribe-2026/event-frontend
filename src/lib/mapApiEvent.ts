@@ -26,9 +26,11 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
   const profiles = api.profiles as Record<string, unknown> | undefined;
   let organizerNameFromProfile = '';
   let organizerPhoto = '';
+  let organizerUsername = '';
   if (profiles && typeof profiles === 'object') {
     if (typeof profiles.full_name === 'string') organizerNameFromProfile = profiles.full_name;
     if (typeof profiles.avatar_url === 'string') organizerPhoto = profiles.avatar_url;
+    if (typeof profiles.username === 'string') organizerUsername = profiles.username;
   }
   const organizerFlat = typeof api.organizer_name === 'string' ? api.organizer_name : '';
   const organizerName = organizerNameFromProfile || organizerFlat;
@@ -53,6 +55,7 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizer: organizerName,
     organizerId: createdBy,
     organizerAvatar,
+    organizerUsername: organizerUsername || undefined,
     isPrivate: false,
     isDraft: false,
     requiresApproval: false,
