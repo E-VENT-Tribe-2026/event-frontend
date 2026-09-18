@@ -7,6 +7,7 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
+import { formatUserIdentity } from '@/lib/userIdentity';
 
 interface EventCardProps {
   event: EventItem;
@@ -152,7 +153,9 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
               size="xs" 
               className="ring-1 ring-primary/25" 
             />
-            <span className="text-[11px] text-muted-foreground truncate">{event.organizer || 'Organizer'}</span>
+            <span className="text-[11px] text-muted-foreground truncate">
+              {formatUserIdentity({ username: event.organizerUsername, fullName: event.organizer || 'Organizer' })}
+            </span>
           </div>
         )}
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
