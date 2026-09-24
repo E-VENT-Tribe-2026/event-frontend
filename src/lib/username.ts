@@ -36,7 +36,7 @@ export function isUsernameValid(raw: string): boolean {
 }
 
 export function hasChosenUsername(username?: string | null): boolean {
-  return Boolean(username && username.trim());
+  return Boolean(username?.trim());
 }
 
 export const FULL_NAME_RULES_HINT =

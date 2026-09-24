@@ -19,7 +19,9 @@ export const DEFAULT_ICON_SEEDS = [
 ] as const;
 
 export function pickDefaultIconUrl(): string {
-  const seed = DEFAULT_ICON_SEEDS[Math.floor(Math.random() * DEFAULT_ICON_SEEDS.length)];
+  const randomBytes = new Uint32Array(1);
+  crypto.getRandomValues(randomBytes);
+  const seed = DEFAULT_ICON_SEEDS[randomBytes[0] % DEFAULT_ICON_SEEDS.length];
   return getGeneratedAvatarUrl(seed);
 }
 
