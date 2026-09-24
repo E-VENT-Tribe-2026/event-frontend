@@ -51,7 +51,10 @@ describe('SignupPage', () => {
   it('shows validation messages when submitting empty form', async () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: /create account/i }));
-    expect(await screen.findByText('Name is required')).toBeInTheDocument();
+    expect(await screen.findByText('Full name is required')).toBeInTheDocument();
+    expect(screen.getByText('Username is required')).toBeInTheDocument();
+    expect(screen.getByText(/3–20 characters/)).toBeInTheDocument();
+    expect(screen.getByText(/3–50 characters/)).toBeInTheDocument();
     expect(screen.getByText('Email is required')).toBeInTheDocument();
     expect(screen.getByText('Password is required')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
@@ -60,13 +63,14 @@ describe('SignupPage', () => {
   it('shows conflict message when server returns 409', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ message: 'User exists' }), {
+      new Response(JSON.stringify({ detail: 'This email address is already in use.' }), {
         status: 409,
         headers: { 'content-type': 'application/json' },
       }),
     );
 
     renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: 'alex' } });
     fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: 'Alex' } });
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
@@ -79,7 +83,7 @@ describe('SignupPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^create account$/i }));
 
-    expect(await screen.findByText('An account with this email already exists. Please sign in instead.')).toBeInTheDocument();
+    expect(await screen.findByText('This email address is already in use.')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -103,6 +107,7 @@ describe('SignupPage', () => {
     });
 
     renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: 'alex' } });
     fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: 'Alex' } });
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
@@ -118,5 +123,47 @@ describe('SignupPage', () => {
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
+    const registerCall = fetchMock.mock.calls.find((call) => String(call[0]).includes('/api/auth/register'));
+    const body = JSON.parse(String((registerCall?.[1] as RequestInit).body));
+    expect(body.username).toBe('alex');
+    expect(body.full_name).toBe('Alex');
+  });
+
+  it('saves a capitalised username in lowercase and names the taken username', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'This username is already in use.' }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: 'John_42' } });
+    fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: 'John Smith' } });
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'john@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
+    fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
+    fireEvent.change(screen.getByLabelText(/birthdate/i), { target: { value: '2000-01-15' } });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Male' } });
+    fireEvent.click(screen.getByRole('button', { name: /^create account$/i }));
+
+    expect(await screen.findByText('This username is already in use.')).toBeInTheDocument();
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.username).toBe('john_42');
+    expect(body.full_name).toBe('John Smith');
+  });
+
+  it('refuses a full name that is only spaces', async () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: 'alex' } });
+    fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: '   ' } });
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
+    fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
+    fireEvent.change(screen.getByLabelText(/birthdate/i), { target: { value: '2000-01-15' } });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Male' } });
+    fireEvent.click(screen.getByRole('button', { name: /^create account$/i }));
+    expect(await screen.findByText('Full name is required')).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

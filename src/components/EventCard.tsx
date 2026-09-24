@@ -3,6 +3,7 @@ import { type EventItem, getCurrentUser } from '@/lib/storage';
 import { MapPin, Clock, Users, UserCheck, Heart } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/UserAvatar';
+import { formatUserDisplayName } from '@/lib/username';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
@@ -143,16 +144,19 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
 
       <div className="p-4 space-y-2">
         <h3 className="text-sm font-semibold text-foreground line-clamp-1">{event.title}</h3>
-        {(event.organizer || event.organizerId) && (
+        {(event.organizer || event.organizerUsername || event.organizerFullName || event.organizerId) && (
           <div className="flex items-center gap-2 pt-0.5">
             <UserAvatar 
               src={event.organizerAvatar} 
               seed={event.organizerId || event.organizer || event.id} 
-              name={event.organizer || 'Organizer'} 
+              name={event.organizerFullName || event.organizer || 'Organizer'} 
               size="xs" 
-              className="ring-1 ring-primary/25" 
+              className="ring-1 ring-primary/25"
+              alt=""
             />
-            <span className="text-[11px] text-muted-foreground truncate">{event.organizer || 'Organizer'}</span>
+            <span className="text-[11px] text-muted-foreground truncate" data-testid="organizer-label">
+              {formatUserDisplayName(event.organizerUsername, event.organizerFullName) || event.organizer || 'Organizer'}
+            </span>
           </div>
         )}
         <div className="flex items-center gap-4 text-xs text-muted-foreground">

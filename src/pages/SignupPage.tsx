@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User, Camera, ChevronDown } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, ChevronDown } from 'lucide-react';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
@@ -10,15 +10,17 @@ import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 import { supabase } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
-import { sanitizeText, sanitizeEmail } from '@/lib/sanitize';
+import { sanitizeEmail } from '@/lib/sanitize';
+import { FULL_NAME_RULES_HINT, USERNAME_RULES_HINT, fullNameError, normalizeUsername, usernameError } from '@/lib/username';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
 
 const MIN_AGE = 18;
 const EMAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60;
 
 export default function SignupPage() {
   const navigate = useNavigate();
-  const fileRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
@@ -27,20 +29,11 @@ export default function SignupPage() {
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
-  const [profilePhoto, setProfilePhoto] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [retryInSeconds, setRetryInSeconds] = useState(0);
   const [showInterests, setShowInterests] = useState(false);
-
-  const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setProfilePhoto(reader.result as string);
-    reader.readAsDataURL(file);
-  };
 
   const toggleInterest = (i: string) => {
     setInterests(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]);
@@ -58,7 +51,10 @@ export default function SignupPage() {
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!name.trim()) e.name = 'Name is required';
+    const nameProblem = fullNameError(name);
+    if (nameProblem) e.name = nameProblem;
+    const usernameProblem = usernameError(username);
+    if (usernameProblem) e.username = usernameProblem;
     if (!email.trim()) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
     if (!password) e.password = 'Password is required';
@@ -93,33 +89,43 @@ export default function SignupPage() {
     if (!validate() || isSubmitting || retryInSeconds > 0) return;
     setIsSubmitting(true);
 
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
-    
     try {
       const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: sanitizeEmail(email), password, full_name: sanitizeText(name), dob, gender, interests }),
-        signal: controller.signal,
+        body: JSON.stringify({
+          email: sanitizeEmail(email),
+          password,
+          username: normalizeUsername(username),
+          full_name: name.trim(),
+          dob,
+          gender,
+          interests,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const isExisting = res.status === 409 || data.message?.toLowerCase().includes('exists');
         const backendMessage = String(data.detail || data.message || '').trim();
+        const lowered = backendMessage.toLowerCase();
         const isRateLimited = isRateLimitError(backendMessage);
         if (isRateLimited) {
           startRetryCooldown();
         }
+        const unavailable = lowered.includes('username') && lowered.includes('already')
+          ? 'This username is already in use.'
+          : lowered.includes('email') && (lowered.includes('already') || lowered.includes('exists') || res.status === 409)
+            ? 'This email address is already in use.'
+            : res.status === 409
+              ? backendMessage || 'This email address is already in use.'
+              : '';
         setToast({ 
           show: true, 
-          message: isExisting
-            ? 'An account with this email already exists. Please sign in instead.'
-            : isRateLimited
+          message: unavailable
+            || (isRateLimited
               ? 'Too many email requests. Please wait 1 minute before trying again.'
-              : (backendMessage || 'Signup failed'),
+              : (backendMessage || 'Signup failed')),
           type: 'error' 
         });
         setIsSubmitting(false);
@@ -136,17 +142,20 @@ export default function SignupPage() {
           type: 'success',
         });
         setIsSubmitting(false);
-        window.clearTimeout(timeout);
         navigate('/login');
         return;
       }
 
       setAuthToken(accessToken);
       if (supabase && refreshToken) {
-        await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
+        try {
+          await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+        } catch {
+          // The account is already created. A session error should not look like the server is down.
+        }
       }
 
       const me = await fetchAuthUserFromToken(accessToken);
@@ -157,16 +166,21 @@ export default function SignupPage() {
           type: 'error',
         });
         setIsSubmitting(false);
-        window.clearTimeout(timeout);
         navigate('/login');
         return;
       }
 
+      const profileRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const profile = await profileRes.json().catch(() => ({} as { avatar_url?: string }));
+      const avatarUrl = typeof profile.avatar_url === 'string' ? profile.avatar_url : undefined;
+
       setCurrentUserFromOAuth({
         id: me.id,
         email: me.email || email,
-        name,
-        avatar: profilePhoto || undefined,
+        name: name.trim(),
+        avatar: avatarUrl,
         interests,
       });
 
@@ -176,8 +190,6 @@ export default function SignupPage() {
     } catch {
       setToast({ show: true, message: 'Server unreachable. Please try again later.', type: 'error' });
       setIsSubmitting(false);
-    } finally {
-      window.clearTimeout(timeout);
     }
   };
 
@@ -234,30 +246,26 @@ return (
           <p className="text-sm text-muted-foreground">Join E-VENT and discover events</p>
         </div>
 
-        {/* Profile Photo */}
-        <div className="flex justify-center">
-          <button type="button" onClick={() => fileRef.current?.click()} className="relative h-20 w-20 rounded-full bg-secondary ring-2 ring-primary/30 overflow-hidden group">
-            {profilePhoto ? (
-              <img src={profilePhoto} alt="Profile" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Camera className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
-              </div>
-            )}
-            <div className="absolute inset-0 bg-background/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <Camera className="h-5 w-5 text-foreground" />
-            </div>
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
-        </div>
-
         <form onSubmit={handleSubmit} className="space-y-3">
-          {/* Name */}
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input type="text" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className={inputCls} />
+          {/* Username */}
+          <div className="space-y-1">
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} className={inputCls} aria-describedby="username-rules" />
+            </div>
+            <p id="username-rules" className="text-[11px] text-muted-foreground px-1">{USERNAME_RULES_HINT}</p>
+            {errors.username && <p className="text-xs text-destructive px-1">{errors.username}</p>}
           </div>
-          {errors.name && <p className="text-xs text-destructive px-1">{errors.name}</p>}
+
+          {/* Name */}
+          <div className="space-y-1">
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input type="text" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className={inputCls} aria-describedby="full-name-rules" />
+            </div>
+            <p id="full-name-rules" className="text-[11px] text-muted-foreground px-1">{FULL_NAME_RULES_HINT}</p>
+            {errors.name && <p className="text-xs text-destructive px-1">{errors.name}</p>}
+          </div>
 
           {/* Email */}
           <div className="relative">

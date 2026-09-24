@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { getApiUrl } from '@/lib/api';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
+import { formatUserDisplayName } from '@/lib/username';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 
@@ -219,7 +220,7 @@ export default function MapPage() {
       const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
 
       // Organizer display — name with avatar
-      const organizerName = event.organizer || '';
+      const organizerName = formatUserDisplayName(event.organizerUsername, event.organizerFullName) || event.organizer || '';
       const organizerInitial = escapeHtml((organizerName || event.organizerId || 'O').charAt(0).toUpperCase());
       const organizerLabel = escapeHtml(organizerName || 'Event Organizer');
 

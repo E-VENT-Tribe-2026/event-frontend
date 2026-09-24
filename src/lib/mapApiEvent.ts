@@ -1,6 +1,11 @@
 import type { EventItem } from '@/lib/storage';
 import { getGeneratedAvatarUrl, pickImageUrl } from '@/lib/avatars';
 import { getCategoryBanner } from '@/lib/categoryBanners';
+import { formatUserDisplayName } from '@/lib/username';
+
+function textField(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 /** @deprecated Use getCategoryBanner() for category-aware defaults. */
 export const DEFAULT_EVENT_IMAGE =
@@ -24,15 +29,14 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     rawCreator != null && String(rawCreator).trim() !== '' ? String(rawCreator).trim() : '';
 
   const profiles = api.profiles as Record<string, unknown> | undefined;
-  let organizerNameFromProfile = '';
-  let organizerPhoto = '';
-  if (profiles && typeof profiles === 'object') {
-    if (typeof profiles.full_name === 'string') organizerNameFromProfile = profiles.full_name;
-    if (typeof profiles.avatar_url === 'string') organizerPhoto = profiles.avatar_url;
-  }
-  const organizerFlat = typeof api.organizer_name === 'string' ? api.organizer_name : '';
-  const organizerName = organizerNameFromProfile || organizerFlat;
-  const avatarSeed = createdBy || organizerName || (api.title as string) || 'organizer';
+  const organizerUsername = textField(api.organizer_username) || textField(profiles?.username);
+  const organizerFullName = textField(api.organizer_name) || textField(profiles?.full_name);
+  const organizerPhoto = textField(api.organizer_avatar) || textField(profiles?.avatar_url);
+  const fromApi = textField(api.organizer_display_name);
+  const organizerName =
+    (fromApi && fromApi !== 'User' ? fromApi : '') ||
+    formatUserDisplayName(organizerUsername, organizerFullName);
+  const avatarSeed = textField(api.organizer_icon_id) || createdBy || organizerName || (api.title as string) || 'organizer';
   const organizerAvatar =
     pickImageUrl(organizerPhoto) ?? getGeneratedAvatarUrl(avatarSeed);
 
@@ -53,6 +57,8 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizer: organizerName,
     organizerId: createdBy,
     organizerAvatar,
+    organizerUsername: organizerUsername || undefined,
+    organizerFullName: organizerFullName || undefined,
     isPrivate: false,
     isDraft: false,
     requiresApproval: false,

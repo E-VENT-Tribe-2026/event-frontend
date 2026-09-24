@@ -9,6 +9,8 @@ import { getApiUrl } from '@/lib/api';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { destinationAfterSignIn } from '@/lib/username';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -71,9 +73,17 @@ export default function LoginPage() {
         setIsSubmitting(false);
         return;
       }
-      setCurrentUserFromOAuth({ id: me.id, email: me.email || email, name: email.split('@')[0] });
+      const profileRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const profile = await profileRes.json().catch(() => ({} as { username?: string; full_name?: string }));
+      setCurrentUserFromOAuth({
+        id: me.id,
+        email: me.email || email,
+        name: (typeof profile.full_name === 'string' && profile.full_name.trim()) || email.split('@')[0],
+      });
       setPassword(''); // clear from memory after successful auth
-      navigate('/home');
+      navigate(destinationAfterSignIn(profile.username));
     } catch {
       setToast({ show: true, message: 'Connection failed', type: 'error' });
       setIsSubmitting(false);

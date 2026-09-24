@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { setAuthToken } from '@/lib/auth';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
+import { getApiUrl } from '@/lib/api';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { destinationAfterSignIn } from '@/lib/username';
+import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
+import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -74,13 +79,37 @@ export default function AuthCallbackPage() {
 
       setAuthToken(session.access_token);
 
+      const googleName = String(
+        session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+      ).trim();
+      rememberGoogleName(googleName);
+
+      const profileRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const profile = await profileRes.json().catch(() => ({} as { username?: string; full_name?: string; avatar_url?: string }));
+      const avatar = typeof profile.avatar_url === 'string' ? profile.avatar_url : '';
+      const googlePicture = /googleusercontent|ggpht\.com/i.test(avatar);
+      if (googlePicture) {
+        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ avatar_url: pickDefaultIconUrl() }),
+        });
+      }
+
+      const savedName = typeof profile.full_name === 'string' ? profile.full_name.trim() : '';
       setCurrentUserFromOAuth({
         id: session.user.id,
         email: session.user.email || '',
-        name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '',
+        name: savedName || googleName || session.user.email?.split('@')[0] || '',
       });
 
-      navigate(nextPath, { replace: true });
+      const next = destinationAfterSignIn(profile.username);
+      navigate(next === '/home' ? nextPath : next, { replace: true });
     };
 
     void handleCallback();
