@@ -27,6 +27,26 @@ import { invalidatePrefix, invalidate } from '@/lib/queryCache';
 import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } from '@/lib/username';
 import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
 import { storageRefusalMessage } from '@/lib/profilePhoto';
+import { PROFILE_ICONS } from '@/lib/profileAssets';
+import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
+import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
+
+// Profile banner choices reuse the category banners, at a larger size for a full-width header.
+const PROFILE_BANNERS = Object.entries(CATEGORY_BANNERS).map(([label, url]) => ({
+  id: label.toLowerCase(),
+  label,
+  url: url.replace('w=600', 'w=1200'),
+}));
+
+// Selectable avatars (people-style DiceBear faces), separate from the emoji-style icons.
+const AVATAR_SEEDS = [
+  'alex', 'sam', 'jordan', 'taylor', 'casey', 'riley',
+  'morgan', 'jamie', 'avery', 'quinn', 'drew', 'robin',
+];
+const PROFILE_AVATARS = AVATAR_SEEDS.map((seed) => ({
+  id: seed,
+  url: getGeneratedAvatarUrl(seed),
+}));
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -50,8 +70,6 @@ export default function ProfilePage() {
   const [savedBio, setSavedBio] = useState(user?.bio || '');
   const [savedInterests, setSavedInterests] = useState<string[]>(user?.interests || []);
   const [nameError, setNameError] = useState('');
-  const [icons, setIcons] = useState<Array<{ id: string; url: string }>>([]);
-  const [banners, setBanners] = useState<Array<{ id: string; label: string; url: string }>>([]);
   const photoRef = useRef<HTMLInputElement>(null);
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
@@ -147,14 +165,20 @@ export default function ProfilePage() {
               interests: Array.isArray(data.interests) ? data.interests : [],
             });
             const loadedName = String(data.full_name || data.name || '');
+            const loadedAvatar = typeof data.avatar_url === 'string' ? data.avatar_url : '';
             setName(loadedName);
             setSavedName(loadedName);
             setSavedBio(String(data.bio || ''));
             setSavedInterests(Array.isArray(data.interests) ? data.interests : []);
             setUsername(typeof data.username === 'string' ? data.username : '');
-            setAvatarUrl(typeof data.avatar_url === 'string' ? data.avatar_url : '');
+            setAvatarUrl(loadedAvatar);
             setAvatarKind(data.avatar_kind === 'photo' ? 'photo' : 'icon');
-            setIconId(typeof data.icon_id === 'string' ? data.icon_id : '');
+            // Backend may not return icon_id, so match the saved avatar URL against the local catalog.
+            setIconId(
+              typeof data.icon_id === 'string' && data.icon_id
+                ? data.icon_id
+                : PROFILE_ICONS.find((i) => i.url === loadedAvatar)?.id ?? ''
+            );
             setBannerUrl(typeof data.banner_url === 'string' ? data.banner_url : '');
             setBio(data.bio || "");
             setInterests(Array.isArray(data.interests) ? data.interests : []);
@@ -230,28 +254,6 @@ export default function ProfilePage() {
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => {
-    if (!editing) return;
-    const token = getAuthToken();
-    if (!token) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(getApiUrl('/api/profile/assets'), {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (cancelled) return;
-        setIcons(Array.isArray(data.icons) ? data.icons : []);
-        setBanners(Array.isArray(data.banners) ? data.banners : []);
-      } catch {
-        /* catalog is optional until the user opens edit */
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [editing]);
-
   const persistProfileFields = async (body: Record<string, unknown>) => {
     const token = getAuthToken();
     if (!token) return null;
@@ -297,6 +299,15 @@ export default function ProfilePage() {
     updateUser({ avatar: icon.url });
   };
 
+  const handlePickAvatar = async (avatar: { id: string; url: string }) => {
+    const saved = await persistProfileFields({ avatar_url: avatar.url });
+    if (!saved) return;
+    setAvatarUrl(avatar.url);
+    setAvatarKind('icon');
+    setIconId('');
+    updateUser({ avatar: avatar.url });
+  };
+
   const handlePickBanner = async (url: string | null) => {
     const saved = await persistProfileFields({ banner_url: url });
     if (!saved) return;
@@ -333,7 +344,7 @@ export default function ProfilePage() {
         if (savedProfile && typeof savedProfile === 'object') {
           if (typeof savedProfile.avatar_url === 'string') setAvatarUrl(savedProfile.avatar_url);
           if (savedProfile.avatar_kind === 'photo' || savedProfile.avatar_kind === 'icon') setAvatarKind(savedProfile.avatar_kind);
-          if (typeof savedProfile.icon_id === 'string') setIconId(savedProfile.icon_id);
+          if (typeof savedProfile.icon_id === 'string' && savedProfile.icon_id) setIconId(savedProfile.icon_id);
           if (typeof savedProfile.banner_url === 'string') setBannerUrl(savedProfile.banner_url);
           if (savedProfile.banner_url === null) setBannerUrl('');
         }
@@ -417,7 +428,7 @@ export default function ProfilePage() {
       <div
         data-testid="profile-banner"
         className={`relative h-36 bg-gradient-to-r from-primary/30 to-accent/30 ${bannerUrl ? 'bg-cover bg-center' : ''}`}
-        style={bannerUrl ? { backgroundImage: `url(${bannerUrl})` } : undefined}
+        style={bannerUrl ? { backgroundImage: `url("${bannerUrl}")` } : undefined}
       >
         <button onClick={handleLogout} className="absolute top-3 right-3 z-10 flex items-center gap-1 text-xs text-foreground/80 glass-card rounded-full px-3 py-1.5 transition-transform active:scale-95"><LogOut className="h-3 w-3" /> Logout</button>
       </div>
@@ -426,7 +437,7 @@ export default function ProfilePage() {
         <div className="flex flex-col items-center gap-2">
           <span data-testid="profile-picture" data-avatar-kind={avatarKind} data-icon-id={iconId}>
             <UserAvatar
-              src={avatarUrl || user.avatar}
+              src={resolveAvatarDisplayUrl({ photoUrl: avatarUrl, altUrl: user.avatar, seed: iconId || user.id })}
               seed={iconId || user.id}
               name={name}
               size="xl"
@@ -456,10 +467,20 @@ export default function ProfilePage() {
                 <p className="text-[11px] text-muted-foreground text-center">JPEG, PNG or WebP, up to 5 MB.</p>
               </div>
               <div className="space-y-2">
+                <p className="text-xs font-semibold text-center">Avatar</p>
+                <div className="grid grid-cols-6 gap-2">
+                  {PROFILE_AVATARS.map((avatar) => (
+                    <button key={avatar.id} type="button" onClick={() => handlePickAvatar(avatar)} aria-label={`Avatar ${avatar.id}`} className={`rounded-full ring-2 ${avatarUrl === avatar.url ? 'ring-primary' : 'ring-transparent'}`}>
+                      <img src={avatar.url} alt="" className="h-10 w-10 rounded-full bg-secondary" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
                 <p className="text-xs font-semibold text-center">Icon</p>
                 <div className="grid grid-cols-6 gap-2">
-                  {icons.map((icon) => (
-                    <button key={icon.id} type="button" onClick={() => handlePickIcon(icon)} aria-label={`Icon ${icon.id}`} className={`rounded-full ring-2 ${iconId === icon.id && avatarKind === 'icon' ? 'ring-primary' : 'ring-transparent'}`}>
+                  {PROFILE_ICONS.map((icon) => (
+                    <button key={icon.id} type="button" onClick={() => handlePickIcon(icon)} aria-label={`Icon ${icon.id}`} className={`rounded-full ring-2 ${avatarUrl === icon.url ? 'ring-primary' : 'ring-transparent'}`}>
                       <img src={icon.url} alt="" className="h-10 w-10 rounded-full" />
                     </button>
                   ))}
@@ -471,8 +492,8 @@ export default function ProfilePage() {
                   No banner
                 </button>
                 <div className="grid grid-cols-3 gap-2">
-                  {banners.map((banner) => (
-                    <button key={banner.id} type="button" onClick={() => handlePickBanner(banner.url)} aria-label={`Banner ${banner.label}`} className={`h-12 rounded-lg bg-cover bg-center ring-2 ${bannerUrl === banner.url ? 'ring-primary' : 'ring-transparent'}`} style={{ backgroundImage: `url(${banner.url})` }} />
+                  {PROFILE_BANNERS.map((banner) => (
+                    <button key={banner.id} type="button" onClick={() => handlePickBanner(banner.url)} aria-label={`Banner ${banner.label}`} className={`h-12 rounded-lg bg-cover bg-center ring-2 ${bannerUrl === banner.url ? 'ring-primary' : 'ring-transparent'}`} style={{ backgroundImage: `url("${banner.url}")` }} />
                   ))}
                 </div>
               </div>
