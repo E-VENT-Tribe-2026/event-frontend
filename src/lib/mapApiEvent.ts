@@ -25,9 +25,16 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
 
   const profiles = api.profiles as Record<string, unknown> | undefined;
   const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-  const organizerFullName = text(api.organizer_name) || text(profiles?.full_name);
-  const organizerUsername = text(api.organizer_username) || text(profiles?.username);
-  const organizerPhoto = text(api.organizer_avatar) || text(profiles?.avatar_url);
+
+  const organizerFullName =
+    text(api.organizer_name) || text(profiles?.full_name);
+
+  const organizerUsername =
+    text(api.organizer_username) || text(profiles?.username);
+
+  const organizerPhoto =
+    text(api.organizer_avatar) || text(profiles?.avatar_url);
+
   const organizerName = organizerFullName || organizerUsername;
   const avatarSeed = createdBy || organizerName || (api.title as string) || 'organizer';
   const organizerAvatar =

@@ -18,6 +18,7 @@ import EventLocationMap from '@/components/EventLocationMap';
 import { isEventUpcoming } from '@/lib/eventTime';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { invalidatePrefix } from '@/lib/queryCache';
+import { formatUserIdentity } from '@/lib/userIdentity';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
@@ -41,7 +42,7 @@ export default function EventDetailsPage() {
   const [loadingApi, setLoadingApi] = useState(true);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [showVenuePaymentModal, setShowVenuePaymentModal] = useState(false);
-  const [apiParticipants, setApiParticipants] = useState<Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }>>([]);
+  const [apiParticipants, setApiParticipants] = useState<Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string; username?: string } }>>([]);
   const [isUpdatingParticipation, setIsUpdatingParticipation] = useState(false);
   const [attendeeCount, setAttendeeCount] = useState<number | null>(null);
   const [myParticipationStatus, setMyParticipationStatus] = useState<ParticipationStatus | null>(null);
@@ -283,7 +284,7 @@ export default function EventDetailsPage() {
 
   const participantUsers = useMemo(() => {
     if (!event || !canViewFullAttendeeList) {
-      return [] as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
+      return [] as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
     }
     if (useApiParticipation && apiParticipants.length > 0) {
       return apiParticipants
@@ -294,6 +295,7 @@ export default function EventDetailsPage() {
           profilePhoto: p.profiles?.avatar_url,
           avatar: p.profiles?.avatar_url,
           name: p.profiles?.full_name || 'Participant',
+          username: p.profiles?.username,
         }));
     }
     return event.participants
@@ -303,12 +305,12 @@ export default function EventDetailsPage() {
         return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
       })
       .filter(Boolean)
-      .slice(0, 6) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
+      .slice(0, 6) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
   const fullAttendeeRows = useMemo(() => {
     if (!event || !canViewFullAttendeeList) {
-      return [] as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
+      return [] as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
     }
     if (useApiParticipation && apiParticipants.length > 0) {
       return apiParticipants
@@ -318,6 +320,7 @@ export default function EventDetailsPage() {
           profilePhoto: p.profiles?.avatar_url,
           avatar: p.profiles?.avatar_url,
           name: p.profiles?.full_name || 'Participant',
+          username: p.profiles?.username,
         }));
     }
     return event.participants
@@ -326,7 +329,7 @@ export default function EventDetailsPage() {
         if (!u) return null;
         return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
       })
-      .filter(Boolean) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string }>;
+      .filter(Boolean) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
   useEffect(() => {
@@ -653,10 +656,15 @@ export default function EventDetailsPage() {
             <img src={event.organizerAvatar} alt="" className="h-10 w-10 rounded-full bg-secondary ring-2 ring-primary/30" />
             <div>
               <p className="text-sm font-medium text-foreground" data-testid="organizer-full-name">
-                {(event.organizerFullName || organizerNameOverride || event.organizer || 'Organizer').trim()}
+                {formatUserIdentity({
+                  username: event.organizerUsername,
+                  fullName: event.organizerFullName || organizerNameOverride || event.organizer || 'Organizer',
+                })}
               </p>
               {event.organizerUsername ? (
-                <p className="text-xs text-muted-foreground" data-testid="organizer-username">{event.organizerUsername}</p>
+                <p className="text-xs text-muted-foreground" data-testid="organizer-username">
+                  {event.organizerUsername}
+                </p>
               ) : null}
               <p className="text-xs text-muted-foreground">Organizer</p>
             </div>
@@ -744,7 +752,9 @@ export default function EventDetailsPage() {
                         size="sm"
                         className="shrink-0 border border-border/50"
                       />
-                      <span className="truncate text-sm font-medium text-foreground">{row.name}</span>
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {formatUserIdentity({ username: row.username, fullName: row.name })}
+                      </span>
                     </div>
                     {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && (
                       <button
