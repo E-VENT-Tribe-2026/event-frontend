@@ -84,25 +84,22 @@ describe('ChatPage sender identity display (#215)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows "username (Full Name)" for another user\'s message when a username exists', async () => {
-    vi.stubGlobal('fetch', mockFetchWithSenderProfile({ full_name: 'Jane Doe', username: 'jane_doe' }));
+  async function openDjLunaChatAndWaitForMessage() {
     renderChat();
-
     await waitFor(() => expect(screen.getByText('Chats')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /DJ Luna/i }));
-
     await waitFor(() => expect(screen.getByText('Welcome!')).toBeInTheDocument());
+  }
+
+  it('shows "username (Full Name)" for another user\'s message when a username exists', async () => {
+    vi.stubGlobal('fetch', mockFetchWithSenderProfile({ full_name: 'Jane Doe', username: 'jane_doe' }));
+    await openDjLunaChatAndWaitForMessage();
     expect(screen.getByText('jane_doe (Jane Doe)')).toBeInTheDocument();
   });
 
   it('falls back to full name alone when the sender has no username yet', async () => {
     vi.stubGlobal('fetch', mockFetchWithSenderProfile({ full_name: 'Jane Doe' }));
-    renderChat();
-
-    await waitFor(() => expect(screen.getByText('Chats')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /DJ Luna/i }));
-
-    await waitFor(() => expect(screen.getByText('Welcome!')).toBeInTheDocument());
+    await openDjLunaChatAndWaitForMessage();
     expect(screen.getByText('Jane Doe')).toBeInTheDocument();
     expect(screen.queryByText(/\(/)).not.toBeInTheDocument();
   });
