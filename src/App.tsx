@@ -3,6 +3,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { queryClient } from '@/lib/queryClient';
+import { clearAllQueries } from '@/lib/queries';
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import WelcomePage from "./pages/WelcomePage";
 import LoginPage from "./pages/LoginPage";
@@ -33,7 +38,13 @@ import { clearCache } from '@/lib/queryCache';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 
-const queryClient = new QueryClient();
+const persister = typeof window !== 'undefined'
+  ? createSyncStoragePersister({
+      storage: window.localStorage,
+      key: 'event-tribe-query-cache',
+    })
+  : undefined;
+
 
 // ── Session timeout wrapper (needs to be inside BrowserRouter for useNavigate) ──
 function SessionGuard({ children }: { children: React.ReactNode }) {
@@ -111,6 +122,7 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     logout();
     clearAuthToken();
     clearCache();
+    clearAllQueries();
     navigate('/login', { replace: true });
   };
 
@@ -133,7 +145,10 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
 }
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
+  <PersistQueryClientProvider
+    client={queryClient}
+    persistOptions={{ persister: persister! }}
+  >
     <TooltipProvider>
       <Toaster />
       <Sonner />
@@ -164,7 +179,8 @@ const App = () => (
         </SessionGuard>
       </BrowserRouter>
     </TooltipProvider>
-  </QueryClientProvider>
+    {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-left" />}
+  </PersistQueryClientProvider>
 );
 
 export default App;

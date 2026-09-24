@@ -110,7 +110,10 @@ export default function ChooseUsernamePage() {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ username: normalizeUsername(username) }),
+        body: JSON.stringify({
+          username: normalizeUsername(username),
+          full_name: normalizeFullName(fullName),
+        }),
       });
       const usernameData = await usernameRes.json().catch(() => ({} as { detail?: string }));
       if (!usernameRes.ok) {

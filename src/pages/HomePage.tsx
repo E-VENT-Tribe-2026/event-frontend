@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
 import { getCurrentUser, getUsers, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
-import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ALL_INTERESTS } from '@/lib/interests';
 import TopBar from '@/components/TopBar';
@@ -14,7 +13,9 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming } from '@/lib/eventTime';
-import { cachedFetch, invalidatePrefix, TTL } from '@/lib/queryCache';
+import { useMaxPrice, useFavorites, useEvents, useRecommendations, invalidateProfile } from '@/lib/queries';
+import { queryClient } from '@/lib/queryClient';
+import { invalidatePrefix } from '@/lib/queryCache';
 
 export default function HomePage() {
   const INTEREST_PROMPT_DISMISSED_KEY = 'event_interest_prompt_dismissed';
@@ -28,9 +29,7 @@ export default function HomePage() {
   const [debouncedDate, setDebouncedDate] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [events, setEvents] = useState<EventItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [maxPrice, setMaxPrice] = useState(500);
+  const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleInterests, setVisibleInterests] = useState(3);
   const [visibleAll, setVisibleAll] = useState(6);
@@ -38,10 +37,6 @@ export default function HomePage() {
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-  // ── Favorites ────────────────────────────────────────────────────────────
-  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
-  const [interestRecommendations, setInterestRecommendations] = useState<EventItem[]>([]);
-  const [interestRecommendationsLoading, setInterestRecommendationsLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [interestsRefreshTick, setInterestsRefreshTick] = useState(0);
   const [showInterestPrompt, setShowInterestPrompt] = useState(false);
@@ -50,7 +45,36 @@ export default function HomePage() {
   const [profileLoaded, setProfileLoaded] = useState(false);
 
   const user = currentUser;
+
+  // ── TanStack Query hooks ──────────────────────────────────────────────────
+  const { data: maxPriceData } = useMaxPrice();
+  const { data: favoriteIdsData } = useFavorites(user?.id);
+  const { data: eventsData, isLoading: eventsLoading } = useEvents({
+    category: category !== 'All' ? category : undefined,
+    search: debouncedSearch || undefined,
+    event_date: debouncedDate || undefined,
+  });
+  const { data: recommendationsData, isLoading: recsLoading } = useRecommendations(
+    user?.id,
+    Boolean(user?.interests?.length),
+  );
+
+  // ── Derive values from query data ─────────────────────────────────────────
+  const maxPrice = maxPriceData?.max_price ?? 500;
+  const favoriteIds = favoriteIdsData ?? new Set<string>();
+  const loading = eventsLoading;
+  const apiEvents = eventsData ?? [];
+  const interestRecommendationsLoading = recsLoading;
+  const interestRecommendations = recommendationsData ?? [];
   const allUsers = getUsers();
+
+  // Sync budget slider max when maxPrice loads from the API
+  useEffect(() => {
+    if (maxPriceData?.max_price) {
+      setBudgetMax(maxPriceData.max_price);
+      setBudgetMin(0);
+    }
+  }, [maxPriceData?.max_price]);
 
   useEffect(() => {
     const syncUser = () => {
@@ -74,13 +98,10 @@ export default function HomePage() {
 
     let cancelled = false;
 
-    cachedFetch(
-      `/api/profile/me:${user.id}`,
-      () => fetch(getApiUrl('/api/profile/me'), {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      }).then((res) => res.ok ? res.json() : Promise.reject()),
-      TTL.MEDIUM,
-    )
+    fetch(getApiUrl('/api/profile/me'), {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    })
+      .then((res) => res.ok ? res.json() : Promise.reject())
       .then((data: Record<string, unknown>) => {
         if (cancelled) return;
         const profile = (data.data || data.user || data) as Record<string, unknown>;
@@ -166,125 +187,31 @@ export default function HomePage() {
     }
   };
 
-  // ── 1. Load Max Price (cached 5 min — rarely changes) ────────────────────
-  useEffect(() => {
-    cachedFetch(
-      '/api/events/max-price',
-      () => fetch(getApiUrl('/api/events/max-price')).then((res) => res.ok ? res.json() : Promise.reject()),
-      TTL.LONG,
-      true, // persist to sessionStorage
-    )
-      .then((data: { max_price: number }) => {
-        setMaxPrice(data.max_price);
-        setBudgetMax(data.max_price);
-        setBudgetMin(0);
-      })
-      .catch(() => {});
-  }, []);
-
-  // ── 2. Load Favorites (cached 2 min, per user) ────────────────────────────
-  useEffect(() => {
-    const token = getAuthToken();
-    if (!user || !token) return;
-
-    cachedFetch(
-      `/api/favorites/all:${user.id}`,
-      () => fetch(getApiUrl('/api/favorites/all'), { headers: { Authorization: `Bearer ${token}` } })
-        .then((res) => res.ok ? res.json() : Promise.reject()),
-      TTL.MEDIUM,
-    )
-      .then((data: any[]) => {
-        const ids = data.map(fav => fav.id || fav.event_id);
-        setFavoriteIds(new Set(ids));
-      })
-      .catch(() => console.error("Failed to load favorites"));
-  }, [user?.id, interestsRefreshTick]);
-
-  // ── 3. Load Interest Recommendations (cached 2 min, per user) ────────────
-  useEffect(() => {
-    const token = getAuthToken();
-    if (!user?.id || !token || !user.interests?.length) {
-      setInterestRecommendations([]);
-      setInterestRecommendationsLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setInterestRecommendationsLoading(true);
-
-    cachedFetch(
-      `/api/recommendations:${user.id}`,
-      () => fetch(getApiUrl('/api/recommendations?limit=6'), { headers: { Authorization: `Bearer ${token}` } })
-        .then((res) => (res.ok ? res.json() : Promise.reject())),
-      TTL.MEDIUM,
-    )
-      .then((data: { data?: unknown[] }) => {
-        if (cancelled) return;
-        const rows = Array.isArray(data.data) ? data.data : [];
-        setInterestRecommendations(rows.map((row) => mapApiEventToItem(row as Record<string, unknown>)).filter(isEventUpcoming));
-      })
-      .catch(() => {
-        if (!cancelled) setInterestRecommendations([]);
-      })
-      .finally(() => {
-        if (!cancelled) setInterestRecommendationsLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [user?.id, user?.interests, interestsRefreshTick]);
-
   // ── 4. Debouncing ─────────────────────────────────────────────────────────
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => window.clearTimeout(t);
   }, [search]);
 
+  // ── 5. Debouncing (date) ──────────────────────────────────────────────────
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedDate(filterDate.trim()), 350);
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
-  // ── 5. Main Events Fetch (cached 2 min per filter combination) ───────────
-  useEffect(() => {
-    let cancelled = false;
-    const params = new URLSearchParams({ limit: '50', page: '1' });
-    if (category !== 'All') params.set('category', category);
-    if (debouncedSearch) params.set('search', debouncedSearch);
-    if (debouncedDate) params.set('event_date', debouncedDate);
-
-    const cacheKey = `/api/events?${params}`;
-    setLoading(true);
-
-    cachedFetch(
-      cacheKey,
-      () => {
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 8000);
-        return fetch(getApiUrl(`/api/events?${params}`), { signal: controller.signal })
-          .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load events'))))
-          .finally(() => window.clearTimeout(timeout));
-      },
-      TTL.MEDIUM,
-    )
-      .then((data: unknown) => {
-        if (cancelled) return;
-        const list = parseEventsApiList(data).map(mapApiEventToItem);
-        const local = getLocalEvents().filter((e) => !e.isDraft);
-        const byId = new Map<string, EventItem>();
-        [...list, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
-        setEvents(Array.from(byId.values()));
-      })
-      .catch(() => {
-        if (!cancelled) {
-          const local = getLocalEvents().filter((e) => !e.isDraft && isEventUpcoming(e));
-          setEvents(local);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [category, debouncedSearch, debouncedDate]);
+  // ── Merge API events with local events ────────────────────────────────────
+  const events = useMemo(() => {
+    const local = getLocalEvents().filter((e) => !e.isDraft);
+    const byId = new Map<string, EventItem>();
+    [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
+    // If API returned nothing and we have local events, flag as local fallback
+    if (apiEvents.length === 0 && local.length > 0 && !eventsLoading) {
+      setUsingLocalFallback(true);
+    } else if (apiEvents.length > 0) {
+      setUsingLocalFallback(false);
+    }
+    return Array.from(byId.values());
+  }, [apiEvents, eventsLoading]);
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
@@ -435,7 +362,7 @@ export default function HomePage() {
         <div className="rounded-2xl glass-card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase text-muted-foreground">Budget range</span>
-            <span className="text-xs font-medium text-foreground">${budgetMin} — ${budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
+            <span className="text-xs font-medium text-foreground">€{budgetMin} — €{budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
           </div>
           <div className="relative h-6 flex items-center">
             <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />
@@ -463,14 +390,14 @@ export default function HomePage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-muted-foreground">Min ($)</label>
+              <label className="text-[10px] text-muted-foreground">Min (€)</label>
               <input type="number" min={0} max={budgetMax - 1} value={budgetMin}
                 onChange={(e) => { const v = Math.min(Math.max(0, Number(e.target.value)), budgetMax - 1); setBudgetMin(isNaN(v) ? 0 : v); }}
                 className="rounded-lg bg-secondary px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-muted-foreground">Max ($)</label>
+              <label className="text-[10px] text-muted-foreground">Max (€)</label>
               <input type="number" min={budgetMin + 1} max={maxPrice} value={budgetMax}
                 onChange={(e) => { const v = Math.max(Math.min(maxPrice, Number(e.target.value)), budgetMin + 1); setBudgetMax(isNaN(v) ? maxPrice : v); }}
                 className="rounded-lg bg-secondary px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
