@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import type { User } from '@/lib/storage';
-import ChatPage from '@/pages/ChatPage';
+import { chatUser, renderChat, buildMyEventsResponse, emptyMyEventsResponse, unhandledResponse } from './chatTestFixtures';
 
 const { getCurrentUserMock, getAuthTokenMock } = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn<[], User | null>(),
@@ -35,55 +34,14 @@ vi.mock('@/lib/authProfile', () => ({
     Boolean(a && b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()),
 }));
 
-const chatUser = {
-  id: 'u-chat',
-  name: 'Chatter',
-  email: 'c@test.com',
-  role: 'participant' as const,
-  password: 'secret123',
-  avatar: '',
-  profilePhoto: '',
-  coverPhoto: '',
-  bio: '',
-  interests: [],
-  dob: '',
-  gender: '',
-  isPremium: false,
-  friends: [],
-  createdAt: '',
-} satisfies User;
-
 function mockFetchWithSenderProfile(profiles: { full_name?: string; username?: string } | undefined) {
   return vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url.includes('/api/participants/my/events')) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify([
-            {
-              events: {
-                id: 'evt-1',
-                title: 'DJ Luna',
-                description: 'desc',
-                category: 'Music',
-                start_datetime: '2030-05-01T12:00:00.000Z',
-                end_datetime: '2030-06-01T12:00:00.000Z',
-                cost: 10,
-                max_capacity: 20,
-                location_name: 'Paris',
-                latitude: 0,
-                longitude: 0,
-                created_by: 'org-1',
-                status: 'active',
-              },
-            },
-          ]),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      );
+      return Promise.resolve(buildMyEventsResponse({ id: 'evt-1', title: 'DJ Luna' }));
     }
     if (url.includes('/api/events/my-events')) {
-      return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      return Promise.resolve(emptyMyEventsResponse());
     }
     if (url.includes('/api/chats/evt-1/messages')) {
       return Promise.resolve(
@@ -111,18 +69,8 @@ function mockFetchWithSenderProfile(profiles: { full_name?: string; username?: s
         new Response(JSON.stringify({ id: 'evt-1', status: 'active' }), { status: 200, headers: { 'content-type': 'application/json' } }),
       );
     }
-    return Promise.resolve(new Response('{}', { status: 500 }));
+    return Promise.resolve(unhandledResponse());
   });
-}
-
-function renderChat() {
-  render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/chat']}>
-      <Routes>
-        <Route path="/chat" element={<ChatPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
 }
 
 describe('ChatPage sender identity display (#215)', () => {
