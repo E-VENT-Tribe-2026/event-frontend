@@ -14,6 +14,7 @@ const ROUTES: Array<{ pattern: string; title: string }> = [
   { pattern: '/forgot-password', title: 'Reset password' },
   { pattern: '/signup', title: 'Create account' },
   { pattern: '/login', title: 'Sign in' },
+  { pattern: '/choose-username', title: 'Choose your name' },
   { pattern: '/create', title: 'Create event' },
   { pattern: '/dashboard', title: 'Organizer dashboard' },
   { pattern: '/notifications', title: 'Notifications' },

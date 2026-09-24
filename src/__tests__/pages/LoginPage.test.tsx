@@ -93,6 +93,12 @@ describe('LoginPage', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
+      if (url.includes('/api/profile/me')) {
+        return new Response(JSON.stringify({ username: 'alex', full_name: 'Alex Smith' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       return new Response('not mocked', { status: 500 });
     });
 
@@ -103,6 +109,41 @@ describe('LoginPage', () => {
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/home');
+    });
+  });
+
+  it('opens the username step when the account has no username', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/auth/login')) {
+        return new Response(JSON.stringify({ access_token: 'at1', refresh_token: 'rt1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/auth/me')) {
+        return new Response(JSON.stringify({ id: 'user-99', email: 'a@b.com' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/profile/me')) {
+        return new Response(JSON.stringify({ username: null, full_name: 'Alex Smith' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('not mocked', { status: 500 });
+    });
+
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'a@b.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/choose-username');
     });
   });
 });
