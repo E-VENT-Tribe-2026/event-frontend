@@ -23,9 +23,11 @@ import NotFound from "./pages/NotFound";
 import RouteDocumentTitle from "./components/RouteDocumentTitle";
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
+import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
+import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import { getAuthToken, clearAuthToken } from '@/lib/auth';
-import { logout, updateUser, getCurrentUser } from '@/lib/storage';
+import { logout, getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
 import { clearCache } from '@/lib/queryCache';
 import { getApiUrl } from '@/lib/api';
@@ -145,17 +147,18 @@ const App = () => (
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
-            <Route path="/home" element={<HomePage />} />
-            <Route path="/event/:id/edit" element={<EditEventPage />} />
-            <Route path="/event/:id" element={<EventDetailsPage />} />
-            <Route path="/create" element={<CreateEventPage />} />
-            <Route path="/map" element={<MapPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/payment/:eventId" element={<PaymentPage />} />
-            <Route path="/dashboard" element={<OrganizerDashboardPage />} />
-            <Route path="/ticket/:ticketId" element={<TicketPage />} />
+            <Route path="/choose-username" element={<ChooseUsernamePage />} />
+            <Route path="/home" element={<RequireUsername><HomePage /></RequireUsername>} />
+            <Route path="/event/:id/edit" element={<RequireUsername><EditEventPage /></RequireUsername>} />
+            <Route path="/event/:id" element={<RequireUsername><EventDetailsPage /></RequireUsername>} />
+            <Route path="/create" element={<RequireUsername><CreateEventPage /></RequireUsername>} />
+            <Route path="/map" element={<RequireUsername><MapPage /></RequireUsername>} />
+            <Route path="/profile" element={<RequireUsername><ProfilePage /></RequireUsername>} />
+            <Route path="/chat" element={<RequireUsername><ChatPage /></RequireUsername>} />
+            <Route path="/notifications" element={<RequireUsername><NotificationsPage /></RequireUsername>} />
+            <Route path="/payment/:eventId" element={<RequireUsername><PaymentPage /></RequireUsername>} />
+            <Route path="/dashboard" element={<RequireUsername><OrganizerDashboardPage /></RequireUsername>} />
+            <Route path="/ticket/:ticketId" element={<RequireUsername><TicketPage /></RequireUsername>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </SessionGuard>

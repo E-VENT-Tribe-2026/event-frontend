@@ -31,7 +31,6 @@ export default function HomePage() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [maxPrice, setMaxPrice] = useState(500);
-  const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleInterests, setVisibleInterests] = useState(3);
   const [visibleAll, setVisibleAll] = useState(6);
@@ -274,13 +273,11 @@ export default function HomePage() {
         const byId = new Map<string, EventItem>();
         [...list, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
         setEvents(Array.from(byId.values()));
-        setUsingLocalFallback(false);
       })
       .catch(() => {
         if (!cancelled) {
           const local = getLocalEvents().filter((e) => !e.isDraft && isEventUpcoming(e));
           setEvents(local);
-          setUsingLocalFallback(true);
         }
       })
       .finally(() => {
@@ -573,13 +570,6 @@ export default function HomePage() {
               </div>
             ) : (
               <>
-                {usingLocalFallback && (
-                  <div className="mb-2 flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 text-xs text-amber-500">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
-                    Offline mode — showing cached local events.
-                  </div>
-                )}
-                
                 <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {filtered.slice(0, visibleAll).map((event, i) => (
                     <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>

@@ -9,6 +9,7 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
+import { destinationAfterSignIn } from '@/lib/username';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 
 export default function LoginPage() {
@@ -72,25 +73,25 @@ export default function LoginPage() {
         setIsSubmitting(false);
         return;
       }
-
-      // Fetch full profile to get avatar and other details
       let avatarUrl = '';
       let fullName = email.split('@')[0];
       let bio = '';
       let interests: string[] = [];
+      let username: string | undefined;
       try {
         const profileRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
           headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
         });
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
-          avatarUrl = String(p.avatar_url || '');
-          fullName = String(p.full_name || p.name || fullName);
-          bio = String(p.bio || '');
-          interests = Array.isArray(p.interests) ? p.interests as string[] : [];
-        }
-      } catch { /* use defaults */ }
+        const profileData = await profileRes.json().catch(() => ({} as Record<string, unknown>));
+        const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
+        avatarUrl = String(p.avatar_url || '');
+        fullName = String(p.full_name || p.name || fullName);
+        bio = String(p.bio || '');
+        interests = Array.isArray(p.interests) ? (p.interests as string[]) : [];
+        username = typeof p.username === 'string' ? p.username : undefined;
+      } catch {
+        /* use defaults */
+      }
 
       setCurrentUserFromOAuth({
         id: me.id,
@@ -101,7 +102,7 @@ export default function LoginPage() {
         interests,
       });
       setPassword('');
-      navigate('/home');
+      navigate(destinationAfterSignIn(username));
     } catch {
       setToast({ show: true, message: 'Connection failed', type: 'error' });
       setIsSubmitting(false);
