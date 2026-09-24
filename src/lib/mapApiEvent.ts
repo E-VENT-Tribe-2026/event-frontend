@@ -30,7 +30,14 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     if (typeof profiles.full_name === 'string') organizerNameFromProfile = profiles.full_name;
     if (typeof profiles.avatar_url === 'string') organizerPhoto = profiles.avatar_url;
   }
-  const organizerFlat = typeof api.organizer_name === 'string' ? api.organizer_name : '';
+  // Try every field name the backend might use for organizer name
+  const organizerFlat =
+    (typeof api.organizer_name === 'string' && api.organizer_name) ||
+    (typeof api.creator_name === 'string' && api.creator_name) ||
+    (typeof api.host_name === 'string' && api.host_name) ||
+    (typeof api.user_name === 'string' && api.user_name) ||
+    (typeof api.full_name === 'string' && api.full_name) ||
+    '';
   const organizerName = organizerNameFromProfile || organizerFlat;
   const avatarSeed = createdBy || organizerName || (api.title as string) || 'organizer';
   const organizerAvatar =

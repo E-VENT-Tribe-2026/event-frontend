@@ -61,7 +61,7 @@ export default function PremiumPage() {
         </div>
 
         <div className="rounded-xl gradient-card p-6 shadow-card text-center border border-border/30 space-y-3">
-          <p className="text-3xl font-bold text-foreground">$9.99<span className="text-sm font-normal text-muted-foreground">/month</span></p>
+          <p className="text-3xl font-bold text-foreground">€9.99<span className="text-sm font-normal text-muted-foreground">/month</span></p>
           <p className="text-xs text-muted-foreground">Cancel anytime</p>
         </div>
 

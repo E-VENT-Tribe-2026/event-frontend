@@ -616,7 +616,7 @@ export default function EventDetailsPage() {
       if (existingRequest?.status === 'rejected') return 'Request Rejected';
       return 'Request to Join';
     }
-    return !isFreeEvent ? `Join — Pay $${event.budget} at Venue` : 'Join Event';
+    return !isFreeEvent ? `Join — Pay €${event.budget} at Venue` : 'Join Event';
   };
 
   const showSplitJoinLeave =
@@ -664,7 +664,7 @@ export default function EventDetailsPage() {
             <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4 text-accent" /><span className="truncate">{event.location}</span></div>
             <div className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4 text-primary" />{attendeeDisplayCount}/{event.participantsLimit}</div>
             <div className="flex items-center gap-2 text-foreground font-semibold">
-              {isFreeEvent ? 'Free' : `$${event.budget} at venue`}
+              {isFreeEvent ? 'Free' : `€${event.budget} at venue`}
             </div>
           </div>
 
@@ -930,7 +930,7 @@ export default function EventDetailsPage() {
               <h3 className="text-lg font-bold text-foreground">Payment at Venue</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 This event has a fee of{' '}
-                <span className="font-semibold text-foreground">${event.budget}</span>. Payment is
+                <span className="font-semibold text-foreground">€{event.budget}</span>. Payment is
                 collected at the venue on arrival. By joining, you agree to pay when you get there.
               </p>
               <div className="flex gap-3">

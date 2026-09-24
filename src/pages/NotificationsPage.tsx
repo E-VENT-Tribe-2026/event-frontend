@@ -8,6 +8,7 @@ import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, U
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
+import { useNotifications, invalidateNotifications } from '@/lib/queries';
 
 type NotificationKind =
   | 'user_joined'
@@ -96,9 +97,6 @@ export default function NotificationsPage() {
     window.addEventListener('eventapp:user-updated', sync);
     return () => window.removeEventListener('eventapp:user-updated', sync);
   }, []);
-  const [items, setItems] = useState<UINotification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [usingFallback, setUsingFallback] = useState(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
@@ -118,41 +116,29 @@ export default function NotificationsPage() {
     return null;
   };
 
-  const loadNotifications = async () => {
-    setLoading(true);
-    const token = await resolveToken();
-    if (!token && !user) {
-      setItems(getNotifications().map(fromLocal));
-      setUsingFallback(true);
-      setLoading(false);
-      return;
-    }
-    if (!token) {
-      setItems(getNotifications().map(fromLocal));
-      setUsingFallback(true);
-      setLoading(false);
-      return;
-    }
-    try {
-      const apiRows = await fetchNotifications(token);
-      const mapped = apiRows.map(fromApi).sort((a, b) => {
-        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return tb - ta;
-      });
-      setItems(mapped);
-      setSelectedIds(new Set());
-      setUsingFallback(false);
-    } catch {
-      setItems(getNotifications().map(fromLocal));
-      setSelectedIds(new Set());
-      setUsingFallback(true);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // TanStack Query — primary data source, persisted to localStorage
+  const { data: rawNotifications, isLoading: queryLoading, refetch } = useNotifications();
+  const [usingFallback, setUsingFallback] = useState(false);
+  const loading = queryLoading;
 
-  useEffect(() => { loadNotifications(); }, [user?.id]);
+  // Local items state — seeded from query, updated optimistically by handlers
+  const [items, setItems] = useState<UINotification[]>([]);
+  useEffect(() => {
+    if (rawNotifications && Array.isArray(rawNotifications)) {
+      const mapped = rawNotifications
+        .map(fromApi)
+        .sort((a, b) => {
+          const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tb - ta;
+        });
+      setItems(mapped);
+      setUsingFallback(false);
+    } else if (!queryLoading) {
+      setItems(getNotifications().map(fromLocal));
+      setUsingFallback(true);
+    }
+  }, [rawNotifications, queryLoading]);
 
   const unreadCount = useMemo(() => items.filter((n) => !n.read).length, [items]);
   const selectedCount = selectedIds.size;
@@ -251,6 +237,7 @@ export default function NotificationsPage() {
     try {
       if (token) await deleteNotification(token, id);
       setItems((prev) => prev.filter((x) => x.id !== id));
+      invalidateNotifications();
     } catch {
       setToast({ show: true, message: 'Could not delete notification.', type: 'error' });
     } finally {

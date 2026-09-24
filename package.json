@@ -44,7 +44,9 @@
     "@radix-ui/react-tooltip": "^1.2.7",
     "@supabase/supabase-js": "^2.99.3",
     "@sveltejs/adapter-vercel": "^6.3.3",
+    "@tanstack/query-sync-storage-persister": "^5.103.2",
     "@tanstack/react-query": "^5.83.0",
+    "@tanstack/react-query-persist-client": "^5.103.2",
     "@types/leaflet": "^1.9.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -74,6 +76,7 @@
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@tailwindcss/typography": "^0.5.16",
+    "@tanstack/react-query-devtools": "^5.103.2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.3.2",

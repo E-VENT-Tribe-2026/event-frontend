@@ -7,6 +7,7 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
+import { useParticipantCount, invalidateFavorites } from '@/lib/queries';
 
 interface EventCardProps {
   event: EventItem;
@@ -22,8 +23,11 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
   
   const [favorite, setFavorite] = useState(initialIsFavorite);
   const [loadingFav, setLoadingFav] = useState(false);
-  const [attendeeCount, setAttendeeCount] = useState<number>(event.participants?.length || 0);
   const [joinLocked, setJoinLocked] = useState(false);
+
+  // Use TanStack Query for participant count (persisted to localStorage)
+  const { data: countData } = useParticipantCount(event.id);
+  const attendeeCount = countData?.count ?? event.participants?.length ?? 0;
 
   // Sync favorite state from props
   useEffect(() => {
@@ -35,24 +39,6 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
       setJoinLocked(false);
     }
   }, [isAlreadyJoined, event.id]);
-
-  // Fetch Exact Attendee Count (cached 30s)
-  useEffect(() => {
-    if (!event.id) return;
-    const cacheKey = `/api/participants/${event.id}/participants/count`;
-    cachedFetch(
-      cacheKey,
-      () => fetch(getApiUrl(`/api/participants/${event.id}/participants/count`))
-        .then((res) => res.ok ? res.json() : Promise.reject()),
-      TTL.SHORT,
-    )
-      .then((data) => {
-        if (typeof data.count === 'number') setAttendeeCount(data.count);
-      })
-      .catch(() => {
-        setAttendeeCount(event.participants?.length || 0);
-      });
-  }, [event.id, event.participants?.length]);
 
   const friendJoined = user?.isPremium && user?.friends?.some(fId => event.participants?.includes(fId));
 
@@ -83,8 +69,9 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
 
       if (response.ok) {
         setFavorite(!favorite);
-        // Invalidate favorites cache so HomePage/ProfilePage get fresh data
+        // Invalidate favorites cache (both custom cache and TanStack Query)
         invalidate(`/api/favorites/all:${user?.id ?? ''}`);
+        invalidateFavorites(user?.id ?? '');
       }
     } catch (error) {
       console.error("Failed to update favorite status:", error);
@@ -132,7 +119,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
         {event.budget === 0 ? (
           <div className="absolute top-2 left-2 rounded-full bg-accent/90 px-3 py-1 text-xs font-semibold text-accent-foreground backdrop-blur-sm">Free</div>
         ) : (
-          <div className="absolute top-2 left-2 rounded-full bg-secondary/90 px-3 py-1 text-xs font-semibold text-secondary-foreground backdrop-blur-sm">${event.budget}</div>
+          <div className="absolute top-2 left-2 rounded-full bg-secondary/90 px-3 py-1 text-xs font-semibold text-secondary-foreground backdrop-blur-sm">€{event.budget}</div>
         )}
         {(showFriendBadge || friendJoined) && (
           <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-accent/90 px-2.5 py-1 text-[10px] font-semibold text-accent-foreground backdrop-blur-sm">
@@ -152,7 +139,9 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
               size="xs" 
               className="ring-1 ring-primary/25" 
             />
-            <span className="text-[11px] text-muted-foreground truncate">{event.organizer || 'Organizer'}</span>
+            <span className="text-[11px] text-muted-foreground truncate">
+              {event.organizer || 'Organizer'}
+            </span>
           </div>
         )}
         <div className="flex items-center gap-4 text-xs text-muted-foreground">

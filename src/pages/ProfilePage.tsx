@@ -505,7 +505,7 @@ export default function ProfilePage() {
               <div key={item.request.id} className="flex items-center gap-3 rounded-xl bg-secondary/50 p-3">
                 <img src={item.event.image} className="h-10 w-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{item.event.title}</p><p className="text-[10px] text-accent">Approved — Pay to join</p></div>
-                <button onClick={() => navigate(`/payment/${item.event.id}`)} className="gradient-primary rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow">Pay ${item.event.budget}</button>
+                <button onClick={() => navigate(`/payment/${item.event.id}`)} className="gradient-primary rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow">Pay €{item.event.budget}</button>
               </div>
             ))}
           </div>

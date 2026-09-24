@@ -387,7 +387,7 @@ export default function CreateEventPage() {
           <div className="rounded-2xl glass-card p-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor="create-event-budget" className="block text-xs font-semibold text-foreground">Budget (USD)</label>
+                <label htmlFor="create-event-budget" className="block text-xs font-semibold text-foreground">Budget (€)</label>
                 <input id="create-event-budget" type="number" min={0} step="1" placeholder="0 = free event" value={form.budget} onChange={e => update('budget', e.target.value)} className={inputCls('budget')} aria-describedby="create-event-budget-hint" />
                 <p id="create-event-budget-hint" className="text-[10px] text-muted-foreground px-0.5">Leave empty or enter 0 for free.</p>
                 {errors.budget && <span className="text-[10px] text-destructive px-1">{errors.budget}</span>}

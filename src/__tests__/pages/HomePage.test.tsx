@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { EventItem, User } from '@/lib/storage';
 import HomePage from '@/pages/HomePage';
 
@@ -107,12 +108,17 @@ describe('HomePage', () => {
   });
 
   function renderHome() {
+    const testQueryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/home']}>
-        <Routes>
-          <Route path="/home" element={<HomePage />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient}>
+        <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/home']}>
+          <Routes>
+            <Route path="/home" element={<HomePage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
   }
 
