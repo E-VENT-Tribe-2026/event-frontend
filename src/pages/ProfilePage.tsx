@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   getCurrentUser, 
   setCurrentUserFromOAuth,
@@ -24,6 +24,9 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { invalidatePrefix, invalidate } from '@/lib/queryCache';
+import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } from '@/lib/username';
+import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
+import { storageRefusalMessage } from '@/lib/profilePhoto';
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -38,6 +41,18 @@ export default function ProfilePage() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
+  const [username, setUsername] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
+  const [avatarKind, setAvatarKind] = useState<'photo' | 'icon'>('icon');
+  const [iconId, setIconId] = useState('');
+  const [bannerUrl, setBannerUrl] = useState('');
+  const [savedName, setSavedName] = useState(user?.name || '');
+  const [savedBio, setSavedBio] = useState(user?.bio || '');
+  const [savedInterests, setSavedInterests] = useState<string[]>(user?.interests || []);
+  const [nameError, setNameError] = useState('');
+  const [icons, setIcons] = useState<Array<{ id: string; url: string }>>([]);
+  const [banners, setBanners] = useState<Array<{ id: string; label: string; url: string }>>([]);
+  const photoRef = useRef<HTMLInputElement>(null);
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
   const [showInterests, setShowInterests] = useState(false);
@@ -131,7 +146,16 @@ export default function ProfilePage() {
               avatar: data.avatar_url,
               interests: Array.isArray(data.interests) ? data.interests : [],
             });
-            setName(data.full_name || data.name || "");
+            const loadedName = String(data.full_name || data.name || '');
+            setName(loadedName);
+            setSavedName(loadedName);
+            setSavedBio(String(data.bio || ''));
+            setSavedInterests(Array.isArray(data.interests) ? data.interests : []);
+            setUsername(typeof data.username === 'string' ? data.username : '');
+            setAvatarUrl(typeof data.avatar_url === 'string' ? data.avatar_url : '');
+            setAvatarKind(data.avatar_kind === 'photo' ? 'photo' : 'icon');
+            setIconId(typeof data.icon_id === 'string' ? data.icon_id : '');
+            setBannerUrl(typeof data.banner_url === 'string' ? data.banner_url : '');
             setBio(data.bio || "");
             setInterests(Array.isArray(data.interests) ? data.interests : []);
           }
@@ -206,12 +230,114 @@ export default function ProfilePage() {
     } catch (err) { console.error(err); }
   };
 
+  useEffect(() => {
+    if (!editing) return;
+    const token = getAuthToken();
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(getApiUrl('/api/profile/assets'), {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setIcons(Array.isArray(data.icons) ? data.icons : []);
+        setBanners(Array.isArray(data.banners) ? data.banners : []);
+      } catch {
+        /* catalog is optional until the user opens edit */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [editing]);
+
+  const persistProfileFields = async (body: Record<string, unknown>) => {
+    const token = getAuthToken();
+    if (!token) return null;
+    const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({} as { detail?: string }));
+    if (!res.ok) {
+      const detail = String(data.detail || 'Could not save profile');
+      setToast({ show: true, message: storageRefusalMessage(detail) || detail, type: 'error' });
+      return null;
+    }
+    return data;
+  };
+
+  const handlePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !user) return;
+    try {
+      const url = await uploadProfilePhotoToStorage(user.id, file);
+      const saved = await persistProfileFields({ avatar_url: url });
+      if (!saved) return;
+      setAvatarUrl(url);
+      setAvatarKind('photo');
+      setIconId('');
+      updateUser({ avatar: url });
+      setToast({ show: true, message: 'Photo uploaded.', type: 'success' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Photo upload failed.';
+      setToast({ show: true, message: storageRefusalMessage(message) || message, type: 'error' });
+    }
+  };
+
+  const handlePickIcon = async (icon: { id: string; url: string }) => {
+    const saved = await persistProfileFields({ avatar_url: icon.url });
+    if (!saved) return;
+    setAvatarUrl(icon.url);
+    setAvatarKind('icon');
+    setIconId(icon.id);
+    updateUser({ avatar: icon.url });
+  };
+
+  const handlePickBanner = async (url: string | null) => {
+    const saved = await persistProfileFields({ banner_url: url });
+    if (!saved) return;
+    setBannerUrl(url || '');
+  };
+
   const handleSave = async () => {
+    const problem = getFullNameValidationError(name);
+    if (problem) {
+      setNameError(problem);
+      setToast({ show: true, message: problem, type: 'error' });
+      return;
+    }
+    const cleaned = normalizeFullName(name);
     const token = getAuthToken();
     if (token) {
       try {
-        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ full_name: name, bio, interests }) });
-        updateUser({ name, bio, interests });
+        const saveRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ full_name: cleaned, bio, interests }) });
+        if (!saveRes.ok) {
+          const failed = await saveRes.json().catch(() => ({} as { detail?: string }));
+          const detail = String(failed.detail || 'Could not save profile');
+          setNameError(detail);
+          setToast({ show: true, message: detail, type: 'error' });
+          return;
+        }
+        const saved = await saveRes.json().catch(() => ({} as Record<string, unknown>));
+        const savedProfile = (saved as { data?: Record<string, unknown> }).data || saved;
+        const nextName = savedProfile && typeof savedProfile.full_name === 'string' ? savedProfile.full_name : cleaned;
+        setName(nextName);
+        setSavedName(nextName);
+        setSavedBio(bio);
+        setSavedInterests(interests);
+        setNameError('');
+        if (savedProfile && typeof savedProfile === 'object') {
+          if (typeof savedProfile.avatar_url === 'string') setAvatarUrl(savedProfile.avatar_url);
+          if (savedProfile.avatar_kind === 'photo' || savedProfile.avatar_kind === 'icon') setAvatarKind(savedProfile.avatar_kind);
+          if (typeof savedProfile.icon_id === 'string') setIconId(savedProfile.icon_id);
+          if (typeof savedProfile.banner_url === 'string') setBannerUrl(savedProfile.banner_url);
+          if (savedProfile.banner_url === null) setBannerUrl('');
+        }
+        updateUser({ name: nextName, bio, interests, avatar: avatarUrl });
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
         setEditing(false);
         setToast({ show: true, message: 'Profile updated!', type: 'success' });
@@ -288,22 +414,78 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
 
-      <div className="relative h-36 bg-gradient-to-r from-primary/30 to-accent/30">
+      <div
+        data-testid="profile-banner"
+        className={`relative h-36 bg-gradient-to-r from-primary/30 to-accent/30 ${bannerUrl ? 'bg-cover bg-center' : ''}`}
+        style={bannerUrl ? { backgroundImage: `url(${bannerUrl})` } : undefined}
+      >
         <button onClick={handleLogout} className="absolute top-3 right-3 z-10 flex items-center gap-1 text-xs text-foreground/80 glass-card rounded-full px-3 py-1.5 transition-transform active:scale-95"><LogOut className="h-3 w-3" /> Logout</button>
       </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-14 relative z-10 space-y-5">
         <div className="flex flex-col items-center gap-2">
-          <UserAvatar src={user.avatar} seed={user.id} name={name} size="xl" className="ring-4 ring-background shadow-glow" />
-          {editing ? <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" /> : <h2 className="text-xl font-bold">{name || 'User'}</h2>}
-          <p className="text-sm text-muted-foreground">{user.email}</p>
+          <span data-testid="profile-picture" data-avatar-kind={avatarKind} data-icon-id={iconId}>
+            <UserAvatar
+              src={avatarUrl || user.avatar}
+              seed={iconId || user.id}
+              name={name}
+              size="xl"
+              alt={avatarKind === 'photo' ? 'Profile photo' : `Profile icon${iconId ? ` ${iconId}` : ''}`}
+              className="ring-4 ring-background shadow-glow"
+            />
+          </span>
+          {editing ? (
+            <div className="w-full space-y-1">
+              <input value={name} onChange={e => { setName(e.target.value); setNameError(''); }} aria-label="Full name" className="w-full rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" aria-describedby="edit-full-name-rules" />
+              <p id="edit-full-name-rules" className="text-[11px] text-muted-foreground text-center">{FULL_NAME_RULES_HINT}</p>
+              {nameError && <p className="text-xs text-destructive text-center">{nameError}</p>}
+            </div>
+          ) : (
+            <h2 className="text-xl font-bold" data-testid="profile-full-name">{name}</h2>
+          )}
+          <p className="text-sm text-muted-foreground" data-testid="profile-username">{username}</p>
+          {editing && <p className="text-[11px] text-muted-foreground">Username cannot be changed</p>}
+          {editing && (
+            <div className="w-full space-y-4">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-center">Profile photo</p>
+                <button type="button" onClick={() => photoRef.current?.click()} className="mx-auto block rounded-full border border-border px-4 py-1.5 text-xs font-semibold">
+                  Upload photo
+                </button>
+                <input ref={photoRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhoto} className="hidden" />
+                <p className="text-[11px] text-muted-foreground text-center">JPEG, PNG or WebP, up to 5 MB.</p>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-center">Icon</p>
+                <div className="grid grid-cols-6 gap-2">
+                  {icons.map((icon) => (
+                    <button key={icon.id} type="button" onClick={() => handlePickIcon(icon)} aria-label={`Icon ${icon.id}`} className={`rounded-full ring-2 ${iconId === icon.id && avatarKind === 'icon' ? 'ring-primary' : 'ring-transparent'}`}>
+                      <img src={icon.url} alt="" className="h-10 w-10 rounded-full" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-center">Banner</p>
+                <button type="button" onClick={() => handlePickBanner(null)} className={`rounded-lg px-3 py-1 text-xs ${bannerUrl ? 'bg-secondary' : 'ring-2 ring-primary'}`}>
+                  No banner
+                </button>
+                <div className="grid grid-cols-3 gap-2">
+                  {banners.map((banner) => (
+                    <button key={banner.id} type="button" onClick={() => handlePickBanner(banner.url)} aria-label={`Banner ${banner.label}`} className={`h-12 rounded-lg bg-cover bg-center ring-2 ${bannerUrl === banner.url ? 'ring-primary' : 'ring-transparent'}`} style={{ backgroundImage: `url(${banner.url})` }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           {editing ? (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
-                  setName(user.name || '');
-                  setBio(user.bio || '');
-                  setInterests(user.interests || []);
+                  setName(savedName);
+                  setBio(savedBio);
+                  setInterests(savedInterests);
+                  setNameError('');
                   setEditing(false);
                 }}
                 className="flex items-center gap-1.5 rounded-full border border-border bg-secondary px-4 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors"

@@ -8,6 +8,7 @@ import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
 import { useParticipantCount, invalidateFavorites } from '@/lib/queries';
+import { formatUserIdentity } from '@/lib/userIdentity';
 
 interface EventCardProps {
   event: EventItem;
@@ -140,7 +141,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
               className="ring-1 ring-primary/25" 
             />
             <span className="text-[11px] text-muted-foreground truncate">
-              {event.organizer || 'Organizer'}
+              {formatUserIdentity({ username: event.organizerUsername, fullName: event.organizer || 'Organizer' })}
             </span>
           </div>
         )}

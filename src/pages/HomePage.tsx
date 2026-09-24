@@ -15,6 +15,7 @@ import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming } from '@/lib/eventTime';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, invalidateProfile } from '@/lib/queries';
 import { queryClient } from '@/lib/queryClient';
+import { invalidatePrefix } from '@/lib/queryCache';
 
 export default function HomePage() {
   const INTEREST_PROMPT_DISMISSED_KEY = 'event_interest_prompt_dismissed';
@@ -496,13 +497,6 @@ export default function HomePage() {
               </div>
             ) : (
               <>
-                {usingLocalFallback && (
-                  <div className="mb-2 flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 text-xs text-amber-500">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
-                    Offline mode — showing cached local events.
-                  </div>
-                )}
-                
                 <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {filtered.slice(0, visibleAll).map((event, i) => (
                     <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>

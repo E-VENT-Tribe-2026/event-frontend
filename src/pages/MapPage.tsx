@@ -9,6 +9,7 @@ import { getApiUrl } from '@/lib/api';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
+import { formatUserIdentity } from '@/lib/userIdentity';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -218,10 +219,12 @@ export default function MapPage() {
     spread.forEach(({ item: event, lat, lng }) => {
       const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
 
-      // Organizer display — name with avatar
+      // Organizer display — username (Full Name) with avatar
       const organizerName = event.organizer || '';
       const organizerInitial = escapeHtml((organizerName || event.organizerId || 'O').charAt(0).toUpperCase());
-      const organizerLabel = escapeHtml(organizerName || 'Event Organizer');
+      const organizerLabel = escapeHtml(
+        formatUserIdentity({ username: event.organizerUsername, fullName: organizerName || 'Event Organizer' })
+      );
 
       const avatarHtml = event.organizerAvatar
         ? `<img src="${escapeHtml(event.organizerAvatar)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #6d28d9;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'" /><span style="display:none;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`

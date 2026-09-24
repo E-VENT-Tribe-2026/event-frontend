@@ -5,6 +5,9 @@ import { setAuthToken } from '@/lib/auth';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { destinationAfterSignIn } from '@/lib/username';
+import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
+import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -76,24 +79,45 @@ export default function AuthCallbackPage() {
 
       setAuthToken(session.access_token);
 
-      // Fetch full profile to get avatar and other details
+      const googleName = String(
+        session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+      ).trim();
+      rememberGoogleName(googleName);
+
       let avatarUrl = String(session.user.user_metadata?.avatar_url || '');
-      let fullName = String(session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '');
+      let fullName = googleName || session.user.email?.split('@')[0] || '';
       let bio = '';
       let interests: string[] = [];
+      let username: string | undefined;
+
       try {
         const profileRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
           headers: { Authorization: `Bearer ${session.access_token}`, Accept: 'application/json' },
         });
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
-          avatarUrl = String(p.avatar_url || avatarUrl);
-          fullName = String(p.full_name || p.name || fullName);
-          bio = String(p.bio || '');
-          interests = Array.isArray(p.interests) ? p.interests as string[] : [];
+        const profileData = await profileRes.json().catch(() => ({} as Record<string, unknown>));
+        const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
+        avatarUrl = String(p.avatar_url || avatarUrl);
+        fullName = String(p.full_name || p.name || fullName);
+        bio = String(p.bio || '');
+        interests = Array.isArray(p.interests) ? (p.interests as string[]) : [];
+        username = typeof p.username === 'string' ? p.username : undefined;
+
+        if (/googleusercontent|ggpht\.com/i.test(avatarUrl)) {
+          const defaultIcon = pickDefaultIconUrl();
+          await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({ avatar_url: defaultIcon }),
+          });
+          avatarUrl = defaultIcon;
         }
-      } catch { /* use metadata defaults */ }
+      } catch {
+        /* use metadata defaults */
+      }
 
       setCurrentUserFromOAuth({
         id: session.user.id,
@@ -104,7 +128,8 @@ export default function AuthCallbackPage() {
         interests,
       });
 
-      navigate(nextPath, { replace: true });
+      const dest = destinationAfterSignIn(username);
+      navigate(dest === '/home' ? nextPath : dest, { replace: true });
     };
 
     void handleCallback();

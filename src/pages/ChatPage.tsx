@@ -11,6 +11,7 @@ import AppToast from '@/components/AppToast';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
+import { formatUserIdentity } from '@/lib/userIdentity';
 
 type ChatEvent = {
   id: string;
@@ -36,6 +37,7 @@ type ChatMessage = {
   mimeType?: string;
   dataUrl?: string;
   senderName?: string;
+  senderUsername?: string;
   senderAvatar?: string;
   senderId?: string;
 };
@@ -175,6 +177,8 @@ export default function ChatPage() {
       const senderObj = row.sender as Record<string, unknown> | undefined;
       const senderName =
         String(profiles?.full_name || senderObj?.full_name || senderObj?.name || row.sender_name || '').trim() || undefined;
+      const senderUsername =
+        String(profiles?.username || senderObj?.username || row.sender_username || '').trim() || undefined;
       const senderAvatar =
         String(profiles?.avatar_url || senderObj?.avatar_url || senderObj?.avatar || row.sender_avatar || '').trim() || undefined;
 
@@ -190,6 +194,7 @@ export default function ChatPage() {
         mimeType: parsed?.mimeType,
         dataUrl: parsed?.dataUrl,
         senderName,
+        senderUsername,
         senderAvatar,
         senderId: senderId || undefined,
       };
@@ -542,7 +547,9 @@ export default function ChatPage() {
                       <div className={`max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}>
                         {m.from === 'them' && (
                           <div className="flex items-center gap-1.5 px-1">
-                            <span className="text-[11px] font-semibold text-foreground">{m.senderName || 'Unknown'}</span>
+                            <span className="text-[11px] font-semibold text-foreground">
+                              {formatUserIdentity({ username: m.senderUsername, fullName: m.senderName || 'Unknown' })}
+                            </span>
                             {m.senderId && (
                               <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
                                 m.senderId === chat.organizerId

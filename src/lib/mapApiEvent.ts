@@ -24,21 +24,18 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     rawCreator != null && String(rawCreator).trim() !== '' ? String(rawCreator).trim() : '';
 
   const profiles = api.profiles as Record<string, unknown> | undefined;
-  let organizerNameFromProfile = '';
-  let organizerPhoto = '';
-  if (profiles && typeof profiles === 'object') {
-    if (typeof profiles.full_name === 'string') organizerNameFromProfile = profiles.full_name;
-    if (typeof profiles.avatar_url === 'string') organizerPhoto = profiles.avatar_url;
-  }
-  // Try every field name the backend might use for organizer name
-  const organizerFlat =
-    (typeof api.organizer_name === 'string' && api.organizer_name) ||
-    (typeof api.creator_name === 'string' && api.creator_name) ||
-    (typeof api.host_name === 'string' && api.host_name) ||
-    (typeof api.user_name === 'string' && api.user_name) ||
-    (typeof api.full_name === 'string' && api.full_name) ||
-    '';
-  const organizerName = organizerNameFromProfile || organizerFlat;
+  const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+  const organizerFullName =
+    text(api.organizer_name) || text(profiles?.full_name);
+
+  const organizerUsername =
+    text(api.organizer_username) || text(profiles?.username);
+
+  const organizerPhoto =
+    text(api.organizer_avatar) || text(profiles?.avatar_url);
+
+  const organizerName = organizerFullName || organizerUsername;
   const avatarSeed = createdBy || organizerName || (api.title as string) || 'organizer';
   const organizerAvatar =
     pickImageUrl(organizerPhoto) ?? getGeneratedAvatarUrl(avatarSeed);
@@ -60,6 +57,8 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizer: organizerName,
     organizerId: createdBy,
     organizerAvatar,
+    organizerUsername: organizerUsername || undefined,
+    organizerFullName: organizerFullName || undefined,
     isPrivate: false,
     isDraft: false,
     requiresApproval: false,
