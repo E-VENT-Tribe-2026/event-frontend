@@ -655,12 +655,17 @@ export default function EventDetailsPage() {
           <div className="flex items-center gap-3">
             <img src={event.organizerAvatar} alt="" className="h-10 w-10 rounded-full bg-secondary ring-2 ring-primary/30" />
             <div>
-              <p className="text-sm font-medium text-foreground">
+              <p className="text-sm font-medium text-foreground" data-testid="organizer-full-name">
                 {formatUserIdentity({
                   username: event.organizerUsername,
-                  fullName: event.organizer || organizerNameOverride || 'Organizer',
+                  fullName: event.organizerFullName || organizerNameOverride || event.organizer || 'Organizer',
                 })}
               </p>
+              {event.organizerUsername ? (
+                <p className="text-xs text-muted-foreground" data-testid="organizer-username">
+                  {event.organizerUsername}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">Organizer</p>
             </div>
           </div>

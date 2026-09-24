@@ -8,6 +8,7 @@ import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
+import { destinationAfterSignIn } from '@/lib/username';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 
 export default function LoginPage() {
@@ -62,8 +63,12 @@ export default function LoginPage() {
         return;
       }
       setCurrentUserFromOAuth({ id: me.id, email: me.email || email, name: email.split('@')[0] });
-      setPassword(''); // clear from memory after successful auth
-      navigate('/home');
+      setPassword('');
+      const profileRes = await fetch(getApiUrl('/api/profile/me'), {
+        headers: { Authorization: `Bearer ${data.access_token}`, Accept: 'application/json' },
+      });
+      const profile = await profileRes.json().catch(() => ({} as { username?: string }));
+      navigate(destinationAfterSignIn(profile.username));
     } catch {
       setToast({ show: true, message: 'Connection failed', type: 'error' });
       setIsSubmitting(false);

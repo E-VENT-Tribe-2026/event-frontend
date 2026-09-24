@@ -60,11 +60,7 @@ export function getFullNameValidationError(raw: string): string | null {
   return null;
 }
 
-export function destinationAfterSignIn(
-  username?: string | null,
-  fullName?: string | null,
-): '/home' | '/choose-username' {
-  if (!hasChosenUsername(username)) return '/choose-username';
-  if (fullName !== undefined && !String(fullName).trim()) return '/choose-username';
-  return '/home';
+/** Accounts without a username must pick one, and a full name, before the app. */
+export function destinationAfterSignIn(username?: string | null): '/home' | '/choose-username' {
+  return hasChosenUsername(username) ? '/home' : '/choose-username';
 }

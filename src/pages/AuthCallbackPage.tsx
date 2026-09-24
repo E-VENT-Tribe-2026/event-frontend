@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { setAuthToken } from '@/lib/auth';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
+import { getApiUrl } from '@/lib/api';
+import { destinationAfterSignIn } from '@/lib/username';
+import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
+import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -74,13 +78,36 @@ export default function AuthCallbackPage() {
 
       setAuthToken(session.access_token);
 
+      const googleName = String(
+        session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+      ).trim();
+      rememberGoogleName(googleName);
+
       setCurrentUserFromOAuth({
         id: session.user.id,
         email: session.user.email || '',
-        name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '',
+        name: googleName || session.user.email?.split('@')[0] || '',
       });
 
-      navigate(nextPath, { replace: true });
+      const profileRes = await fetch(getApiUrl('/api/profile/me'), {
+        headers: { Authorization: `Bearer ${session.access_token}`, Accept: 'application/json' },
+      });
+      const profile = await profileRes.json().catch(() => ({} as { username?: string; avatar_url?: string }));
+      const avatar = String(profile.avatar_url || session.user.user_metadata?.avatar_url || '');
+      if (/googleusercontent|ggpht\.com/i.test(avatar)) {
+        await fetch(getApiUrl('/api/profile/me'), {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ avatar_url: pickDefaultIconUrl() }),
+        });
+      }
+
+      const dest = destinationAfterSignIn(profile.username);
+      navigate(dest === '/home' ? nextPath : dest, { replace: true });
     };
 
     void handleCallback();

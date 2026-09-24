@@ -62,6 +62,7 @@ export interface EventItem {
   organizerId: string;
   organizerAvatar: string;
   organizerUsername?: string;
+  organizerFullName?: string;
   isPrivate: boolean;
   isDraft: boolean;
   requiresApproval: boolean;
