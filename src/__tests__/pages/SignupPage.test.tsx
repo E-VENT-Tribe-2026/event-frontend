@@ -51,23 +51,26 @@ describe('SignupPage', () => {
   it('shows validation messages when submitting empty form', async () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: /create account/i }));
-    expect(await screen.findByText('Name is required')).toBeInTheDocument();
+    expect(await screen.findByText('Username is required')).toBeInTheDocument();
     expect(screen.getByText('Email is required')).toBeInTheDocument();
     expect(screen.getByText('Password is required')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it('shows conflict message when server returns 409', async () => {
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ message: 'User exists' }), {
-        status: 409,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
+  const fetchMock = vi.mocked(fetch);
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ message: 'Email already exists' }), {
+      status: 409,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
 
     renderPage();
-    fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: 'Alex' } });
+       fireEvent.change(screen.getByPlaceholderText('Username'), {
+      target: { value: 'alex_user' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Full name'), { target: { value: 'Alex' } });
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
     fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
@@ -79,7 +82,7 @@ describe('SignupPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^create account$/i }));
 
-    expect(await screen.findByText('An account with this email already exists.')).toBeInTheDocument();
+    expect(await screen.findByText('This email address is already in use.', { selector: 'div.fixed' })).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -103,7 +106,10 @@ describe('SignupPage', () => {
     });
 
     renderPage();
-    fireEvent.change(screen.getByPlaceholderText('Full Name'), { target: { value: 'Alex' } });
+      fireEvent.change(screen.getByPlaceholderText('Username'), {
+      target: { value: 'alex_user' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Full name'), { target: { value: 'Alex' } });
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
     fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
@@ -120,3 +126,6 @@ describe('SignupPage', () => {
     });
   });
 });
+
+
+

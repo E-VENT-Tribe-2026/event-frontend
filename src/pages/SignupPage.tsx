@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User, Camera, ChevronDown } from 'lucide-react';
+import { AtSign, Eye, EyeOff, Mail, Lock, User, ChevronDown } from 'lucide-react';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
@@ -10,15 +10,24 @@ import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 import { supabase } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
-import { sanitizeText, sanitizeEmail } from '@/lib/sanitize';
+import { sanitizeEmail } from '@/lib/sanitize';
+import {
+  FULL_NAME_RULES_HINT,
+  USERNAME_RULES_HINT,
+  getFullNameValidationError,
+  getUsernameValidationError,
+  normalizeFullName,
+  normalizeUsername,
+} from '@/lib/username';
+import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 
 const MIN_AGE = 18;
 const EMAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60;
 
 export default function SignupPage() {
   const navigate = useNavigate();
-  const fileRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
@@ -27,20 +36,14 @@ export default function SignupPage() {
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
-  const [profilePhoto, setProfilePhoto] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [retryInSeconds, setRetryInSeconds] = useState(0);
   const [showInterests, setShowInterests] = useState(false);
 
-  const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setProfilePhoto(reader.result as string);
-    reader.readAsDataURL(file);
-  };
+  const usernameErrorLive = username ? getUsernameValidationError(username) : null;
+  const nameErrorLive = name ? getFullNameValidationError(name) : null;
 
   const toggleInterest = (i: string) => {
     setInterests(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]);
@@ -58,7 +61,10 @@ export default function SignupPage() {
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!name.trim()) e.name = 'Name is required';
+    const usernameIssue = getUsernameValidationError(username);
+    if (usernameIssue) e.username = usernameIssue;
+    const nameIssue = getFullNameValidationError(name);
+    if (nameIssue) e.name = nameIssue;
     if (!email.trim()) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
     if (!password) e.password = 'Password is required';
@@ -74,6 +80,22 @@ export default function SignupPage() {
   };
 
   const isRateLimitError = (message: string) => /rate limit|too many|email rate/i.test(message);
+
+  const conflictMessage = (backendMessage: string) => {
+    const lowered = backendMessage.toLowerCase();
+    if (lowered.includes('username')) return 'This username is already in use.';
+    if (lowered.includes('email')) return 'This email address is already in use.';
+    return backendMessage || 'This email address or username is already in use.';
+  };
+
+  const applyConflictToFields = (message: string) => {
+    const lowered = message.toLowerCase();
+    if (lowered.includes('username') && !lowered.includes('email')) {
+      setErrors(prev => ({ ...prev, username: message }));
+    } else if (lowered.includes('email') && !lowered.includes('username')) {
+      setErrors(prev => ({ ...prev, email: message }));
+    }
+  };
 
   const startRetryCooldown = () => {
     setRetryInSeconds(EMAIL_RATE_LIMIT_COOLDOWN_SECONDS);
@@ -95,38 +117,59 @@ export default function SignupPage() {
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 8000);
-    
+    const normalizedUsername = normalizeUsername(username);
+    const defaultIconUrl = pickDefaultIconUrl();
+    const cleanedName = normalizeFullName(name);
+
     try {
       const res = await fetch(getApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: sanitizeEmail(email), password, full_name: sanitizeText(name), dob, gender, interests }),
+        body: JSON.stringify({
+          email: sanitizeEmail(email),
+          password,
+          username: normalizedUsername,
+          full_name: cleanedName,
+          avatar_url: defaultIconUrl,
+          dob,
+          gender,
+          interests,
+        }),
         signal: controller.signal,
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const isExisting = res.status === 409 || data.message?.toLowerCase().includes('exists');
-        const backendMessage = String(data.detail || data.message || '').trim();
+        const rawDetail = data.detail ?? data.message ?? '';
+        const backendMessage = (typeof rawDetail === 'string' ? rawDetail : '').trim();
+        const isExisting = res.status === 409 || /already|in use|exists/i.test(backendMessage);
         const isRateLimited = isRateLimitError(backendMessage);
         if (isRateLimited) {
           startRetryCooldown();
         }
-        setToast({ 
-          show: true, 
-          message: isExisting
-            ? 'An account with this email already exists.'
-            : isRateLimited
-              ? 'Too many email requests. Please wait 1 minute before trying again.'
-              : (backendMessage || 'Signup failed'),
-          type: 'error' 
+        const shown = isExisting
+          ? conflictMessage(backendMessage)
+          : isRateLimited
+            ? 'Too many email requests. Please wait 1 minute before trying again.'
+            : (backendMessage || 'Signup failed');
+        if (isExisting) {
+          applyConflictToFields(shown);
+        } else if (res.status === 400 && /username/i.test(backendMessage)) {
+          setErrors(prev => ({ ...prev, username: backendMessage }));
+        }
+        setToast({
+          show: true,
+          message: shown,
+          type: 'error',
         });
-        setIsSubmitting(false);
         return;
       }
 
-      if (!data.access_token) {
+      const accessToken = typeof data.access_token === 'string' ? data.access_token : '';
+      const refreshToken = typeof data.refresh_token === 'string' ? data.refresh_token : '';
+
+      if (!accessToken) {
         setToast({
           show: true,
           message: data.message || 'Check your email to confirm your account, then sign in.',
@@ -138,15 +181,15 @@ export default function SignupPage() {
         return;
       }
 
-      setAuthToken(data.access_token);
-      if (supabase) {
+      setAuthToken(accessToken);
+      if (supabase && refreshToken) {
         await supabase.auth.setSession({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token || '',
+          access_token: accessToken,
+          refresh_token: refreshToken,
         });
       }
 
-      const me = await fetchAuthUserFromToken(data.access_token);
+      const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {
         setToast({
           show: true,
@@ -159,22 +202,24 @@ export default function SignupPage() {
         return;
       }
 
+      const avatarUrl = defaultIconUrl;
+
       setCurrentUserFromOAuth({
         id: me.id,
         email: me.email || email,
-        name,
-        avatar: profilePhoto || undefined,
+        name: cleanedName,
+        username: normalizedUsername,
+        avatar: avatarUrl,
         interests,
       });
-
-      setPassword(''); // clear from memory after successful auth
+      setPassword('');
       setConfirmPw('');
       navigate('/home');
     } catch {
       setToast({ show: true, message: 'Server unreachable. Please try again later.', type: 'error' });
-      setIsSubmitting(false);
     } finally {
       window.clearTimeout(timeout);
+      setIsSubmitting(false);
     }
   };
 
@@ -231,30 +276,59 @@ return (
           <p className="text-sm text-muted-foreground">Join E-VENT and discover events</p>
         </div>
 
-        {/* Profile Photo */}
-        <div className="flex justify-center">
-          <button type="button" onClick={() => fileRef.current?.click()} className="relative h-20 w-20 rounded-full bg-secondary ring-2 ring-primary/30 overflow-hidden group">
-            {profilePhoto ? (
-              <img src={profilePhoto} alt="Profile" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Camera className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
-              </div>
-            )}
-            <div className="absolute inset-0 bg-background/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <Camera className="h-5 w-5 text-foreground" />
-            </div>
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
-        </div>
-
         <form onSubmit={handleSubmit} className="space-y-3">
-          {/* Name */}
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input type="text" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} className={inputCls} />
+          {/* Username (required) */}
+          <div className="space-y-1">
+            <div className="relative">
+              <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                id="signup-username"
+                type="text"
+                placeholder="Username"
+                value={username}
+                autoComplete="username"
+                aria-required="true"
+                aria-invalid={Boolean(errors.username || usernameErrorLive)}
+                onChange={e => {
+                  setUsername(e.target.value);
+                  if (errors.username) setErrors(prev => ({ ...prev, username: '' }));
+                }}
+                className={inputCls}
+                aria-describedby="username-rules"
+              />
+            </div>
+            <p id="username-rules" className="text-[10px] text-muted-foreground px-1 leading-snug">
+              {USERNAME_RULES_HINT}
+            </p>
+            {(errors.username || usernameErrorLive) && (
+              <p className="text-xs text-destructive px-1">{errors.username || usernameErrorLive}</p>
+            )}
           </div>
-          {errors.name && <p className="text-xs text-destructive px-1">{errors.name}</p>}
+
+          <div className="space-y-1">
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                id="signup-full-name"
+                type="text"
+                placeholder="Full name"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (errors.name) setErrors(prev => ({ ...prev, name: '' }));
+                }}
+                aria-invalid={Boolean(errors.name || nameErrorLive)}
+                aria-describedby="full-name-rules"
+                className={inputCls}
+              />
+            </div>
+            <p id="full-name-rules" className="text-[10px] text-muted-foreground px-1 leading-snug">
+              {FULL_NAME_RULES_HINT}
+            </p>
+            {(errors.name || nameErrorLive) && (
+              <p className="text-xs text-destructive px-1">{errors.name || nameErrorLive}</p>
+            )}
+          </div>
 
           {/* Email */}
           <div className="relative">
