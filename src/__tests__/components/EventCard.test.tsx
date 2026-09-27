@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { EventItem, User } from '@/lib/storage';
 import EventCard from '@/components/EventCard';
 
@@ -45,10 +46,15 @@ function makeEvent(over: Partial<EventItem>): EventItem {
 }
 
 function renderCard(event: EventItem) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <MemoryRouter>
-      <EventCard event={event} />
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <EventCard event={event} />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
