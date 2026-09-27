@@ -6,10 +6,10 @@ import { useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { getApiUrl } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
-import { formatUserIdentity } from '@/lib/userIdentity';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -75,6 +75,7 @@ export default function MapPage() {
   const [debouncedTitle, setDebouncedTitle] = useState('');
   const [debouncedFilterDate, setDebouncedFilterDate] = useState('');
   const [rawEvents, setRawEvents] = useState<EventItem[]>([]);
+  const [organizerProfiles, setOrganizerProfiles] = useState<Record<string, { full_name?: string; username?: string; avatar_url?: string }>>({});
   const [loading, setLoading] = useState(true);
   const [geoStatus, setGeoStatus] = useState<'idle' | 'pending' | 'granted' | 'denied' | 'unavailable'>('idle');
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
@@ -100,7 +101,12 @@ export default function MapPage() {
       if (category !== 'All') params.set('category', category);
       if (debouncedTitle) params.set('search', debouncedTitle);
       if (debouncedFilterDate) params.set('date', debouncedFilterDate);
-      const res = await fetch(getApiUrl(`/api/events?${params}`), { signal: controller.signal });
+      
+      const token = getAuthToken();
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(getApiUrl(`/api/events?${params}`), { headers, signal: controller.signal });
       if (!res.ok) throw new Error('fetch failed');
       const body = await res.json();
       const rows = parseEventsApiList(body);
@@ -108,7 +114,35 @@ export default function MapPage() {
       const local = getLocalEvents().filter((e) => !e.isDraft);
       const byId = new Map<string, EventItem>();
       [...list, ...local].forEach((e) => byId.set(e.id, e));
-      setRawEvents(Array.from(byId.values()));
+      const combinedEvents = Array.from(byId.values());
+      setRawEvents(combinedEvents);
+
+      // Fetch organizer profiles for events that have creator GUIDs
+      const profileMap: Record<string, { full_name?: string; username?: string; avatar_url?: string }> = {};
+      await Promise.all(
+        rows.map(async (row: any) => {
+          const creatorId = row.created_by || row.organizer_id;
+          if (creatorId && !profileMap[creatorId]) {
+            try {
+              const profRes = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
+              if (profRes.ok) {
+                const profData = await profRes.json().catch(() => null);
+                const prof = profData?.data || profData?.profile || profData;
+                if (prof) {
+                  profileMap[creatorId] = {
+                    full_name: prof.full_name || prof.name,
+                    username: prof.username,
+                    avatar_url: prof.avatar_url,
+                  };
+                }
+              }
+            } catch {
+              // ignore individual profile fetch error
+            }
+          }
+        })
+      );
+      setOrganizerProfiles((prev) => ({ ...prev, ...profileMap }));
     } catch {
       const local = getLocalEvents().filter((e) => !e.isDraft);
       setRawEvents(local);
@@ -219,15 +253,18 @@ export default function MapPage() {
     spread.forEach(({ item: event, lat, lng }) => {
       const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
 
-      // Organizer display — username (Full Name) with avatar
-      const organizerName = event.organizer || '';
-      const organizerInitial = escapeHtml((organizerName || event.organizerId || 'O').charAt(0).toUpperCase());
-      const organizerLabel = escapeHtml(
-        formatUserIdentity({ username: event.organizerUsername, fullName: organizerName || 'Event Organizer' })
-      );
+      const creatorId = event.organizerId || (event as any).created_by;
+      const prof = creatorId ? organizerProfiles[creatorId] : null;
 
-      const avatarHtml = event.organizerAvatar
-        ? `<img src="${escapeHtml(event.organizerAvatar)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #6d28d9;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'" /><span style="display:none;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`
+      const organizerFullName = prof?.full_name || event.organizerFullName || (event.organizer !== 'Organizer' ? event.organizer : '') || 'Organizer';
+      const rawUsername = prof?.username || event.organizerUsername;
+      const organizerUsername = rawUsername ? `@${rawUsername.replace(/^@/, '')}` : null;
+      const organizerAvatar = prof?.avatar_url || event.organizerAvatar;
+
+      const organizerInitial = escapeHtml((organizerFullName || 'O').charAt(0).toUpperCase());
+
+      const avatarHtml = organizerAvatar
+        ? `<img src="${escapeHtml(organizerAvatar)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #6d28d9;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'" /><span style="display:none;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`
         : `<span style="display:flex;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`;
 
       const costBadge = event.budget === 0
@@ -241,9 +278,9 @@ export default function MapPage() {
           <p style="margin:0 0 10px;font-size:11px;color:#64748b">${escapeHtml(event.location || '—')}</p>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f8fafc;border-radius:8px">
             ${avatarHtml}
-            <div style="min-width:0">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${organizerLabel}</p>
-              <p style="margin:0;font-size:10px;color:#94a3b8">Organizer</p>
+            <div style="min-width:0;line-height:1.2">
+              <p style="margin:0;font-size:11px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(organizerFullName)}</p>
+              ${organizerUsername ? `<p style="margin:0;font-size:10px;color:#64748b">${escapeHtml(organizerUsername)}</p>` : ''}
             </div>
             <div style="margin-left:auto">${costBadge}</div>
           </div>
@@ -260,7 +297,7 @@ export default function MapPage() {
       map.fitBounds(bounds.pad(0.15), { padding: [36, 36], maxZoom: 14 });
       map.panInsideBounds(WORLD_BOUNDS, { animate: false });
     }
-  }, [filteredEvents, mapReady]);
+  }, [filteredEvents, mapReady, organizerProfiles]);
 
   useEffect(() => {
     const map = mapInstance.current;

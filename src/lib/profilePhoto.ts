@@ -35,7 +35,6 @@ export type ProfilePhotoValidationResult =
 export function validateProfilePhotoFile(file: File): ProfilePhotoValidationResult {
   const mime = (file.type || mimeFromName(file.name) || '').toLowerCase();
   const allowed = PROFILE_PHOTO_MIME_TYPES as readonly string[];
-  console.log('DEBUG mime:', JSON.stringify(mime), 'allowed:', allowed, 'includes:', allowed.includes(mime));
   if (!mime || !allowed.includes(mime)) {
     return { ok: false, reason: 'format', message: 'Photo format not accepted. Use JPEG, PNG or WebP.' };
   }

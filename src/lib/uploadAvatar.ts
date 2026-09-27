@@ -33,7 +33,6 @@ export async function uploadProfilePhotoToStorage(
   }
 
   const token = getAuthToken();
-  console.log('Token being sent:', token);
   if (!token) {
     throw new Error('You must be logged in to upload a profile photo.');
 }

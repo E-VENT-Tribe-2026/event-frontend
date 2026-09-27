@@ -6,6 +6,7 @@ export interface User {
   id: string;
   role: UserRole;
   name: string;
+  username: string;
   email: string;
   password: string;
   avatar: string;
@@ -178,6 +179,7 @@ export function setCurrentUserFromOAuth(data: {
   id: string; 
   email: string; 
   name?: string; 
+  username: string;
   avatar?: string;
   bio?: string;
   dob?: string;
@@ -212,6 +214,7 @@ export function setCurrentUserFromOAuth(data: {
       id: data.id,
       role: (data.role as UserRole) || 'participant',
       name,
+      username: data.username, 
       email: data.email,
       password: '',
       avatar,
@@ -249,6 +252,7 @@ export function signup(data: {
   role: UserRole;
   name: string;
   email: string;
+  username: string;
   password: string;
   profilePhoto: string;
   dob: string;
@@ -265,6 +269,7 @@ export function signup(data: {
     role: data.role,
     name: data.name,
     email: data.email,
+    username: data.username,
     password: data.password,
     avatar: `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
     profilePhoto: data.profilePhoto || '',

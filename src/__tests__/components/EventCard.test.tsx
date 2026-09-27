@@ -1,39 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { EventItem, User } from '@/lib/storage';
 import EventCard from '@/components/EventCard';
+import { type EventItem } from '@/lib/storage';
 
-const { getCurrentUserMock } = vi.hoisted(() => ({
-  getCurrentUserMock: vi.fn<[], User | null>(),
-}));
-
-vi.mock('@/lib/storage', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('@/lib/storage')>();
-  return {
-    ...mod,
-    getCurrentUser: () => getCurrentUserMock(),
-  };
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
 });
 
-function makeEvent(over: Partial<EventItem>): EventItem {
+function makeEvent(overrides?: Partial<EventItem>): EventItem {
   return {
     id: 'evt-1',
     title: 'Test Event',
-    description: '',
+    description: 'A test event',
     category: 'Music',
     date: '2026-10-01',
     time: '21:00',
     location: 'Somewhere',
-    lat: 0,
-    lng: 0,
+    lat: 40.7128,
+    lng: -74.006,
     budget: 0,
     participantsLimit: 50,
     participants: [],
     image: '',
-    organizer: '',
-    organizerId: '',
+    organizer: 'John Smith',
+    organizerId: 'u1',
+    organizerUsername: 'john_42',
     organizerAvatar: '',
     isPrivate: false,
     isDraft: false,
@@ -41,49 +34,44 @@ function makeEvent(over: Partial<EventItem>): EventItem {
     reviews: [],
     reports: [],
     collaborators: [],
-    ...over,
+    ...overrides,
   };
 }
 
-function renderCard(event: EventItem) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <EventCard event={event} />
-      </MemoryRouter>
-    </QueryClientProvider>
-  );
-}
-
 describe('EventCard organizer display (#216)', () => {
-  beforeEach(() => {
-    getCurrentUserMock.mockReturnValue(null);
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: false,
-      json: async () => ({}),
-    } as Response);
-  });
-
-  it('shows "username (Full Name)" when the organizer has a username', () => {
-    renderCard(
-      makeEvent({ organizer: 'John Smith', organizerId: 'u1', organizerUsername: 'john_42' })
+  it('shows full name and username when the organizer has a username', () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <EventCard event={makeEvent({ organizer: 'John Smith', organizerId: 'u1', organizerUsername: 'john_42' })} />
+        </MemoryRouter>
+      </QueryClientProvider>
     );
-    expect(screen.getByText('john_42 (John Smith)')).toBeInTheDocument();
+    expect(screen.getByText('John Smith')).toBeInTheDocument();
+    expect(screen.getByText('@john_42')).toBeInTheDocument();
   });
 
   it('falls back to full name alone when the organizer has no username yet', () => {
-    renderCard(makeEvent({ organizer: 'Jane Doe', organizerId: 'u2', organizerUsername: undefined }));
-    expect(screen.getByText('Jane Doe')).toBeInTheDocument();
-    expect(screen.queryByText(/\(/)).not.toBeInTheDocument();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <EventCard event={makeEvent({ organizer: 'John Smith', organizerId: 'u1', organizerUsername: undefined })} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    expect(screen.getByText('John Smith')).toBeInTheDocument();
+    expect(screen.queryByText(/@/)).not.toBeInTheDocument();
   });
 
   it('lowercases nothing on its own — trusts the stored username as-is', () => {
-    renderCard(
-      makeEvent({ organizer: 'Alex Lee', organizerId: 'u3', organizerUsername: 'alex.lee_99' })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <EventCard event={makeEvent({ organizer: 'Alex Lee', organizerId: 'u3', organizerUsername: 'alex.lee_99' })} />
+        </MemoryRouter>
+      </QueryClientProvider>
     );
-    expect(screen.getByText('alex.lee_99 (Alex Lee)')).toBeInTheDocument();
+    expect(screen.getByText('Alex Lee')).toBeInTheDocument();
+    expect(screen.getByText('@alex.lee_99')).toBeInTheDocument();
   });
 });

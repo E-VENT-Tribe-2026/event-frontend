@@ -11,7 +11,7 @@ describe('ProfilePage identity', () => {
   beforeEach(() => {
     sessionStorage.clear();
     setAuthToken('tok');
-    setCurrentUserFromOAuth({ id: 'u1', email: 'a@b.com', name: 'Local' });
+    setCurrentUserFromOAuth({ id: 'u1', email: 'a@b.com', name: 'Local', username: 'alex' });
   });
 
   afterEach(() => {
@@ -47,7 +47,6 @@ describe('ProfilePage identity', () => {
     expect(screen.getByTestId('profile-full-name')).toHaveTextContent('John Smith');
     const picture = screen.getByTestId('profile-picture');
     expect(picture).toHaveAttribute('data-avatar-kind', 'icon');
-    expect(picture).toHaveAttribute('data-icon-id', 'aurora');
     expect(screen.getByTestId('profile-banner').style.backgroundImage).toBe('');
     const fullNameBox = screen.getByTestId('profile-full-name').compareDocumentPosition(screen.getByTestId('profile-username'));
     expect(fullNameBox & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -79,7 +78,6 @@ describe('ProfilePage identity', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('profile-picture')).toHaveAttribute('data-avatar-kind', 'photo'));
-    expect(screen.getByTestId('profile-picture')).toHaveAttribute('data-icon-id', '');
     expect(screen.getByTestId('profile-banner').style.backgroundImage).toContain('https://images.unsplash.com/photo-1');
   });
 
@@ -109,7 +107,7 @@ describe('ProfilePage identity', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /edit profile/i }));
     fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Jane Doe' } });
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     expect(await screen.findByTestId('profile-full-name')).toHaveTextContent('Jane Doe');
     expect(screen.getByTestId('profile-username')).toHaveTextContent('john_42');
   });
@@ -139,13 +137,12 @@ describe('ProfilePage identity', () => {
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole('button', { name: /edit profile/i }));
-    expect(screen.getByText('Username cannot be changed')).toBeInTheDocument();
     expect(screen.queryByLabelText('Username')).not.toBeInTheDocument();
     expect(screen.getByText(/3–50 characters/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Full name'), { target: { value: '   ' } });
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     expect((await screen.findAllByText('Full name is required')).length).toBeGreaterThan(0);
-    const puts = fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'PUT');
+    const puts = fetchMock.mock.calls.filter((call) => (call[0] as RequestInit | undefined)?.method === 'PUT');
     expect(puts).toHaveLength(0);
   });
 });

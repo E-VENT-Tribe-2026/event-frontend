@@ -6,9 +6,7 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
-import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
 import { useParticipantCount, invalidateFavorites } from '@/lib/queries';
-import { formatUserIdentity } from '@/lib/userIdentity';
 
 interface EventCardProps {
   event: EventItem;
@@ -25,6 +23,9 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
   const [favorite, setFavorite] = useState(initialIsFavorite);
   const [loadingFav, setLoadingFav] = useState(false);
   const [joinLocked, setJoinLocked] = useState(false);
+  
+  // Organizer fetched state from GUID reference
+  const [organizerProfile, setOrganizerProfile] = useState<{ full_name?: string; username?: string; avatar_url?: string } | null>(null);
 
   // Use TanStack Query for participant count (persisted to localStorage)
   const { data: countData } = useParticipantCount(event.id);
@@ -40,6 +41,38 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
       setJoinLocked(false);
     }
   }, [isAlreadyJoined, event.id]);
+
+  // Fetch organizer profile via created_by / organizerId GUID if name is generic
+  useEffect(() => {
+    const creatorId = event.organizerId || (event as any).created_by;
+    if (!creatorId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getAuthToken();
+        const headers: Record<string, string> = { Accept: 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const res = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
+        if (res.ok) {
+          const profData = await res.json().catch(() => null);
+          const prof = profData?.data || profData?.profile || profData;
+          if (prof && !cancelled) {
+            setOrganizerProfile({
+              full_name: prof.full_name || prof.name,
+              username: prof.username,
+              avatar_url: prof.avatar_url,
+            });
+          }
+        }
+      } catch {
+        // ignore profile lookup failure
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [event.organizerId, (event as any).created_by]);
 
   const friendJoined = user?.isPremium && user?.friends?.some(fId => event.participants?.includes(fId));
 
@@ -70,8 +103,6 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
 
       if (response.ok) {
         setFavorite(!favorite);
-        // Invalidate favorites cache (both custom cache and TanStack Query)
-        invalidate(`/api/favorites/all:${user?.id ?? ''}`);
         invalidateFavorites(user?.id ?? '');
       }
     } catch (error) {
@@ -82,7 +113,6 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
   };
 
   const handleJoinClick = (e: React.MouseEvent) => {
-    // CRITICAL: Stop the parent Link from navigating
     e.preventDefault();
     e.stopPropagation();
 
@@ -100,6 +130,11 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
       onJoin(event.id);
     }
   };
+
+  const organizerFullName = organizerProfile?.full_name || event.organizerFullName || (event.organizer !== 'Organizer' ? event.organizer : '') || 'Organizer';
+  const organizerUsername = organizerProfile?.username || event.organizerUsername;
+  const formattedUsername = organizerUsername ? `@${organizerUsername.replace(/^@/, '')}` : null;
+  const organizerAvatar = organizerProfile?.avatar_url || event.organizerAvatar;
 
   return (
     <Link
@@ -131,18 +166,21 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
 
       <div className="p-4 space-y-2">
         <h3 className="text-sm font-semibold text-foreground line-clamp-1">{event.title}</h3>
-        {(event.organizer || event.organizerId) && (
+        {(event.organizer || event.organizerId || (event as any).created_by) && (
           <div className="flex items-center gap-2 pt-0.5">
             <UserAvatar 
-              src={event.organizerAvatar} 
-              seed={event.organizerId || event.organizer || event.id} 
-              name={event.organizer || 'Organizer'} 
+              src={organizerAvatar} 
+              seed={event.organizerId || (event as any).created_by || event.id} 
+              name={organizerFullName} 
               size="xs" 
               className="ring-1 ring-primary/25" 
             />
-            <span className="text-[11px] text-muted-foreground truncate">
-              {formatUserIdentity({ username: event.organizerUsername, fullName: event.organizer || 'Organizer' })}
-            </span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="text-[11px] font-medium text-foreground truncate">{organizerFullName}</p>
+              {formattedUsername && (
+                <p className="text-[10px] text-muted-foreground truncate">{formattedUsername}</p>
+              )}
+            </div>
           </div>
         )}
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
