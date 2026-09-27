@@ -514,58 +514,50 @@ export default function ProfilePage() {
 
           {editing && (
             <div className="w-full space-y-5 pt-3 border-t border-border/40 mt-2 px-4">
-              {/* Combined Avatars & Icons Carousel with Upload Button as the SECOND item */}
-              <CarouselSection title="Profile Picture">
-                {/* 1. First Avatar */}
+              {/* Combined Avatars & Icons Carousel with Upload Button FIRST */}
+            <CarouselSection title="Profile Picture">
+              {/* 1. First item: Upload Button Circle with Tooltip */}
+              <div className="relative group flex-shrink-0">
                 <button
                   type="button"
-                  onClick={() => { setPreviewAvatarUrl(PROFILE_AVATARS[0].url); setPreviewAvatarKind('icon'); }}
-                  className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === PROFILE_AVATARS[0].url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  onClick={() => photoRef.current?.click()}
+                  className={`h-12 w-12 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 ring-2 transition-transform active:scale-95 ${previewAvatarKind === 'photo' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  title="Upload photo"
                 >
-                  <img src={PROFILE_AVATARS[0].url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
+                  <Upload className="h-5 w-5 text-primary" />
                 </button>
-
-                {/* 2. Second item: Upload Button Circle with Tooltip */}
-                <div className="relative group flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => photoRef.current?.click()}
-                    className={`h-12 w-12 rounded-full border-2 border-dashed border-primary/60 bg-primary/10 flex items-center justify-center text-primary hover:bg-primary/20 transition-transform active:scale-95 ${previewAvatarKind === 'photo' ? 'ring-2 ring-primary bg-primary/20' : ''}`}
-                  >
-                    <Upload className="h-5 w-5" />
-                  </button>
-                  <input ref={photoRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoUploadPreview} className="hidden" />
-                  
-                  {/* Tooltip */}
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-40 p-2 rounded-xl bg-popover text-popover-foreground text-[10px] text-center shadow-xl border border-border pointer-events-none z-50">
-                    Upload photo (JPEG, PNG, WebP · Max 5MB)
-                  </div>
+                <input ref={photoRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoUploadPreview} className="hidden" />
+                
+                {/* Tooltip */}
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-40 p-2 rounded-xl bg-popover text-popover-foreground text-[10px] text-center shadow-xl border border-border pointer-events-none z-50">
+                  Upload photo (JPEG, PNG, WebP · Max 5MB)
                 </div>
+              </div>
 
-                {/* Remaining Avatars */}
-                {PROFILE_AVATARS.slice(1).map((avatar) => (
-                  <button
-                    key={avatar.id}
-                    type="button"
-                    onClick={() => { setPreviewAvatarUrl(avatar.url); setPreviewAvatarKind('icon'); }}
-                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === avatar.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
-                  >
-                    <img src={avatar.url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
-                  </button>
-                ))}
+              {/* 2. Followed by all Avatars */}
+              {PROFILE_AVATARS.map((avatar) => (
+                <button
+                  key={avatar.id}
+                  type="button"
+                  onClick={() => { setPreviewAvatarUrl(avatar.url); setPreviewAvatarKind('icon'); }}
+                  className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === avatar.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                >
+                  <img src={avatar.url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
+                </button>
+              ))}
 
-                {/* Icons */}
-                {PROFILE_ICONS.map((icon) => (
-                  <button
-                    key={icon.id}
-                    type="button"
-                    onClick={() => { setPreviewAvatarUrl(icon.url); setPreviewAvatarKind('icon'); setIconId(icon.id); }}
-                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === icon.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
-                  >
-                    <img src={icon.url} alt="" className="h-12 w-12 rounded-full object-cover" />
-                  </button>
-                ))}
-              </CarouselSection>
+              {/* 3. Followed by Icons */}
+              {PROFILE_ICONS.map((icon) => (
+                <button
+                  key={icon.id}
+                  type="button"
+                  onClick={() => { setPreviewAvatarUrl(icon.url); setPreviewAvatarKind('icon'); setIconId(icon.id); }}
+                  className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === icon.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                >
+                  <img src={icon.url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                </button>
+              ))}
+            </CarouselSection>
 
               <CarouselSection title="Banner">
                 <button
