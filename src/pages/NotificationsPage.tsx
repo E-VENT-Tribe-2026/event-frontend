@@ -103,6 +103,7 @@ export default function NotificationsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
+  const [subFilter, setSubFilter] = useState<'all' | 'activity' | 'updates' | 'reminders'>('all');
   const [visibleCount, setVisibleCount] = useState(8);
   const PAGE_SIZE = 8;
 
@@ -116,12 +117,10 @@ export default function NotificationsPage() {
     return null;
   };
 
-  // TanStack Query — primary data source, persisted to localStorage
   const { data: rawNotifications, isLoading: queryLoading, refetch } = useNotifications();
   const [usingFallback, setUsingFallback] = useState(false);
   const loading = queryLoading;
 
-  // Local items state — seeded from query, updated optimistically by handlers
   const [items, setItems] = useState<UINotification[]>([]);
   useEffect(() => {
     if (rawNotifications && Array.isArray(rawNotifications)) {
@@ -140,9 +139,22 @@ export default function NotificationsPage() {
     }
   }, [rawNotifications, queryLoading]);
 
+  const filteredItems = useMemo(() => {
+    if (subFilter === 'activity') {
+      return items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created');
+    }
+    if (subFilter === 'updates') {
+      return items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted');
+    }
+    if (subFilter === 'reminders') {
+      return items.filter(n => n.kind === 'reminder');
+    }
+    return items;
+  }, [items, subFilter]);
+
   const unreadCount = useMemo(() => items.filter((n) => !n.read).length, [items]);
   const selectedCount = selectedIds.size;
-  const allSelected = items.length > 0 && selectedCount === items.length;
+  const allSelected = filteredItems.length > 0 && selectedCount === filteredItems.length;
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -154,7 +166,7 @@ export default function NotificationsPage() {
   };
 
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(items.map((n) => n.id)));
+    setSelectedIds(allSelected ? new Set() : new Set(filteredItems.map((n) => n.id)));
   };
 
   const onDeleteSelected = async () => {
@@ -273,78 +285,108 @@ export default function NotificationsPage() {
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-        <button
-          onClick={() => navigate(-1)}
-          className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
-          aria-label="Back"
-        >
-          <ArrowLeft className="h-5 w-5 text-foreground" />
-        </button>
-        <h1 className="text-lg font-bold text-foreground">Notifications</h1>
-        <div className="ml-auto flex items-center gap-2">
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-5 w-5 text-foreground" />
+          </button>
+          <h1 className="text-lg font-bold text-foreground">Notifications</h1>
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => void onMarkAllRead()}
             disabled={loading || unreadCount === 0 || markingAll}
-            className="rounded-full bg-secondary px-3 py-1 text-[10px] font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
           >
-            {markingAll ? 'Marking...' : 'Mark All as Read'}
+            {markingAll ? 'Marking...' : 'Mark Read'}
           </button>
           {unreadCount > 0 && (
             <span className="rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">
-              {unreadCount} new
+              {unreadCount}
             </span>
           )}
-          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-            {items.length} total
-          </span>
         </div>
       </header>
 
-      <div className="mx-auto max-w-lg px-4 pt-3 space-y-2">
-        {!loading && items.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl glass-card px-3 py-2">
+      <div className="mx-auto max-w-lg px-4 pt-3 space-y-3">
+        {/* Sub-filter Tabs */}
+        <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
+          <button
+            type="button"
+            onClick={() => { setSubFilter('all'); setVisibleCount(8); }}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'all' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            All ({items.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => { setSubFilter('activity'); setVisibleCount(8); }}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'activity' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            Activity
+          </button>
+          <button
+            type="button"
+            onClick={() => { setSubFilter('updates'); setVisibleCount(8); }}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'updates' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            Updates
+          </button>
+          <button
+            type="button"
+            onClick={() => { setSubFilter('reminders'); setVisibleCount(8); }}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'reminders' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            Reminders
+          </button>
+        </div>
+
+        {!loading && filteredItems.length > 0 && (
+          <div className="flex items-center justify-between rounded-xl glass-card px-3.5 py-2 text-xs">
             <button
               type="button"
               onClick={toggleSelectAll}
-              className="rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary/80"
+              className="font-medium text-foreground hover:text-primary transition-colors"
             >
-              {allSelected ? 'Clear Selection' : 'Select All'}
+              {allSelected ? 'Deselect All' : 'Select All'} ({selectedCount})
             </button>
-            <span className="text-xs text-muted-foreground">{selectedCount} selected</span>
             <button
               type="button"
               onClick={() => void onDeleteSelected()}
               disabled={selectedCount === 0 || deletingSelected}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/25 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1 font-semibold text-destructive transition-colors hover:opacity-80 disabled:opacity-40"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              {deletingSelected ? 'Deleting...' : 'Delete Selected'}
+              {deletingSelected ? 'Deleting...' : 'Delete'}
             </button>
           </div>
         )}
         {usingFallback && (
-          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2 text-center text-xs text-amber-500">
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-3.5 py-2 text-center text-xs text-amber-500">
             Offline mode: showing local notifications only.
           </div>
         )}
         {loading && (
-          <div className="py-16 text-center text-sm text-muted-foreground">
+          <div className="py-12 text-center text-sm text-muted-foreground">
             <RefreshCw className="mx-auto mb-2 h-4 w-4 animate-spin" />
             Loading notifications...
           </div>
         )}
-        {!loading && items.slice(0, visibleCount).map((n, i) => {
+        {!loading && filteredItems.slice(0, visibleCount).map((n, i) => {
           const Icon = iconMap[n.kind];
           const isDeleting = deletingIds.has(n.id);
           return (
             <motion.div
               key={n.id}
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.04 }}
-              className={`flex cursor-pointer items-start gap-3 rounded-2xl glass-card px-4 py-3.5 transition-all hover:border-border/60 ${n.read ? 'opacity-55' : 'border-l-2 border-l-primary/50'}`}
+              transition={{ delay: i * 0.03 }}
+              className={`flex cursor-pointer items-center gap-3 rounded-2xl glass-card px-4 py-3.5 transition-all hover:border-border/60 ${n.read ? 'opacity-60' : 'border-l-2 border-l-primary'}`}
               onClick={() => void onOpenNotification(n)}
             >
               <input
@@ -352,42 +394,39 @@ export default function NotificationsPage() {
                 checked={selectedIds.has(n.id)}
                 onChange={() => toggleSelected(n.id)}
                 onClick={(event) => event.stopPropagation()}
-                className="mt-3 h-4 w-4 shrink-0 accent-primary"
+                className="h-4 w-4 shrink-0 accent-primary"
                 aria-label={`Select notification ${i + 1}`}
               />
               <div className={`shrink-0 rounded-xl p-2.5 ${colorMap[n.kind]}`}>
                 <Icon className="h-4 w-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{n.kind.replace(/_/g, ' ')}</p>
-                <p className="text-sm font-medium text-foreground leading-snug">{n.message}</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-primary">{n.kind.replace(/_/g, ' ')}</span>
+                  <span className="text-[10px] text-muted-foreground">· {relativeTime(n.createdAt)}</span>
+                </div>
+                <p className="text-sm font-medium text-foreground truncate mt-0.5">{n.message}</p>
                 {n.eventTitle && (
-                  <p className="text-xs text-muted-foreground mt-0.5">Event: {n.eventTitle}</p>
-                )}
-                {n.relatedEventId && (
-                  <p className="text-[10px] text-primary mt-0.5 font-medium">Tap to open event →</p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">Event: {n.eventTitle}</p>
                 )}
               </div>
-              <div className="shrink-0 flex flex-col items-end gap-2">
-                <span className="text-[10px] text-muted-foreground whitespace-nowrap">{relativeTime(n.createdAt)}</span>
+              <div className="shrink-0 flex items-center gap-1.5">
                 {!n.read && (
                   <button
                     type="button"
                     disabled={markingId === n.id}
                     onClick={(e) => void onMarkRead(n, e)}
-                    className="rounded-lg p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-40 transition-colors"
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                     aria-label="Mark as read"
                   >
-                    {markingId === n.id
-                      ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      : <CheckCheck className="h-3.5 w-3.5" />}
+                    {markingId === n.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}
                   </button>
                 )}
                 <button
                   type="button"
                   disabled={isDeleting}
                   onClick={(e) => void onDelete(n.id, e)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 transition-colors"
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
                   aria-label="Delete notification"
                 >
                   {isDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -396,32 +435,32 @@ export default function NotificationsPage() {
             </motion.div>
           );
         })}
-        {!loading && items.length === 0 && (
+        {!loading && filteredItems.length === 0 && (
           <div className="py-20 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60">
               <BellOff className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="text-sm font-medium text-foreground">No notifications yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">You're all caught up!</p>
+            <p className="text-sm font-medium text-foreground">No notifications found</p>
+            <p className="mt-1 text-xs text-muted-foreground">You're all caught up in this category!</p>
           </div>
         )}
       </div>
 
-      {!loading && items.length > 0 && (
+      {!loading && filteredItems.length > 0 && (
         <div className="mx-auto max-w-lg px-4 py-4">
-          {items.length > visibleCount ? (
+          {filteredItems.length > visibleCount ? (
             <button
               type="button"
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-primary hover:bg-secondary/50 transition-colors"
+              className="w-full rounded-xl border border-border py-2.5 text-xs font-semibold text-primary hover:bg-secondary/50 transition-colors"
             >
-              Show more · {items.length - visibleCount} remaining
+              Show more · {filteredItems.length - visibleCount} remaining
             </button>
           ) : visibleCount > PAGE_SIZE ? (
             <button
               type="button"
               onClick={() => setVisibleCount(PAGE_SIZE)}
-              className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-primary hover:bg-secondary/50 transition-colors"
+              className="w-full rounded-xl border border-border py-2.5 text-xs font-semibold text-primary hover:bg-secondary/50 transition-colors"
             >
               Show less
             </button>
