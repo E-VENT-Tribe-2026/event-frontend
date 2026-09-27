@@ -73,8 +73,7 @@ describe('ChooseUsernamePage', () => {
       .filter((call) => (call[1] as RequestInit | undefined)?.body)
       .map((call) => JSON.parse(String((call[1] as RequestInit).body)));
     expect(bodies).toEqual(expect.arrayContaining([
-      { full_name: 'Alex Smith' },
-      { username: 'john_42' },
+      { full_name: 'Alex Smith', username: 'john_42' },
     ]));
   });
 });
