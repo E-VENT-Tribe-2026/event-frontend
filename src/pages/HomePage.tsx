@@ -92,7 +92,7 @@ export default function HomePage() {
     if (!user?.id) return;
     const token = getAuthToken();
     if (!token) {
-      setProfileLoaded(true); // no token — treat as loaded so prompt can show
+      setProfileLoaded(true);
       return;
     }
 
@@ -127,12 +127,10 @@ export default function HomePage() {
       setShowInterestPrompt(false);
       return;
     }
-    // Don't show if user already has interests (including when still loading — undefined)
     if (Array.isArray(user.interests) && user.interests.length > 0) {
       setShowInterestPrompt(false);
       return;
     }
-    // Don't show if user previously dismissed it
     try {
       const raw = window.localStorage.getItem(INTEREST_PROMPT_DISMISSED_KEY);
       const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
@@ -152,9 +150,7 @@ export default function HomePage() {
         const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
         parsed[user.id] = true;
         window.localStorage.setItem(INTEREST_PROMPT_DISMISSED_KEY, JSON.stringify(parsed));
-      } catch {
-        // ignore storage errors
-      }
+      } catch { /* ignore */ }
     }
     setShowInterestPrompt(false);
   };
@@ -170,15 +166,12 @@ export default function HomePage() {
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ interests: pickedInterests }),
         });
-        // Invalidate profile cache so next visit re-fetches fresh data
         invalidatePrefix(`/api/profile/me:${user?.id ?? ''}`);
       }
-      // Update local user state
       updateUser({ interests: pickedInterests });
       window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       setShowInterestPrompt(false);
     } catch {
-      // Still update locally even if API fails
       updateUser({ interests: pickedInterests });
       window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       setShowInterestPrompt(false);
@@ -187,13 +180,12 @@ export default function HomePage() {
     }
   };
 
-  // ── 4. Debouncing ─────────────────────────────────────────────────────────
+  // ── Debouncing ─────────────────────────────────────────────────────────
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => window.clearTimeout(t);
   }, [search]);
 
-  // ── 5. Debouncing (date) ──────────────────────────────────────────────────
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedDate(filterDate.trim()), 350);
     return () => window.clearTimeout(t);
@@ -204,7 +196,6 @@ export default function HomePage() {
     const local = getLocalEvents().filter((e) => !e.isDraft);
     const byId = new Map<string, EventItem>();
     [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
-    // If API returned nothing and we have local events, flag as local fallback
     if (apiEvents.length === 0 && local.length > 0 && !eventsLoading) {
       setUsingLocalFallback(true);
     } else if (apiEvents.length > 0) {
@@ -215,7 +206,6 @@ export default function HomePage() {
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
-  // ── 6. Filtered Events logic ──────────────────────────────────────────────
   const applyFilters = (list: EventItem[]) =>
     list.filter((e) => {
       if (!isEventUpcoming(e)) return false;
@@ -224,7 +214,6 @@ export default function HomePage() {
       if (debouncedDate && e.date !== debouncedDate) return false;
       const city = extractCityFromLocation(e.location || '');
       if (selectedCity && city !== selectedCity) return false;
-      // Search is handled server-side by the API — no client-side title filter
       return true;
     });
 
@@ -261,7 +250,6 @@ export default function HomePage() {
     navigate(`/event/${id}`, { state: selectedEvent ? { event: selectedEvent } : undefined });
   };
 
-  // ── 7. Components ──────────────────────────────────────────────────────────
   const SectionHeader = ({ icon: Icon, title, badge, sectionKey }: { icon: any; title: string; badge?: string; sectionKey: string }) => (
     <button type="button" onClick={() => toggleSection(sectionKey)} className="flex w-full items-center gap-2 pt-6 pb-2 group">
       <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 group-hover:bg-primary/25 transition-colors shrink-0">
@@ -273,73 +261,66 @@ export default function HomePage() {
     </button>
   );
 
+  const cats = [
+    { id: 'All',        icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
+    { id: 'Music',      icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
+    { id: 'Tech',       icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
+    { id: 'Food',       icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
+    { id: 'Fitness',    icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
+    { id: 'Art',        icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
+    { id: 'Gaming',     icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
+    { id: 'Sports',     icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
+    { id: 'Movies',     icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
+    { id: 'Study',      icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
+    { id: 'Travel',     icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
+    { id: 'Coffee',     icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
+    { id: 'Networking', icon: Network,    iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
+    { id: 'Wellness',   icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
+  ] as const;
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
       <TopBar search={search} onSearchChange={setSearch} />
 
-      {/* Category Filter — two centred rows */}
-      <div className="px-4 pt-3 pb-5 space-y-2">
-        {(() => {
-          const cats = [
-            { id: 'All',        icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
-            { id: 'Music',      icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
-            { id: 'Tech',       icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
-            { id: 'Food',       icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
-            { id: 'Fitness',    icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
-            { id: 'Art',        icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
-            { id: 'Gaming',     icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
-            { id: 'Sports',     icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
-            { id: 'Movies',     icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
-            { id: 'Study',      icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
-            { id: 'Travel',     icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
-            { id: 'Coffee',     icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
-            { id: 'Networking', icon: Network,    iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
-            { id: 'Wellness',   icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
-          ] as const;
-          const mid = Math.ceil(cats.length / 2);
-          const rows = [cats.slice(0, mid), cats.slice(mid)];
-          return rows.map((row, ri) => (
-            <div key={ri} className="flex justify-center gap-2 flex-wrap">
-              {row.map(({ id, icon: Icon, iconColor, activeBg, activeBorderColor }) => {
-                const active = category === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setCategory(id)}
-                    style={active ? { background: activeBg, borderColor: activeBorderColor, color: iconColor } : { background: activeBg.replace('0.15', '0.08'), borderColor: activeBorderColor.replace('0.5', '0.25') }}
-                    className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
-                      active
-                        ? 'border-transparent'
-                        : 'border-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Icon className="h-3 w-3 shrink-0" style={{ color: iconColor }} />
-                    {id}
-                  </button>
-                );
-              })}
-            </div>
-          ));
-        })()}
+      {/* Category Filter Wrapping Grid */}
+      <div className="mx-auto max-w-3xl px-4 pt-3 pb-4">
+        <div className="flex flex-wrap justify-center gap-1.5">
+          {cats.map(({ id, icon: Icon, iconColor, activeBg, activeBorderColor }) => {
+            const active = category === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setCategory(id)}
+                style={active ? { background: activeBg, borderColor: activeBorderColor, color: iconColor } : { background: activeBg.replace('0.15', '0.08'), borderColor: activeBorderColor.replace('0.5', '0.25') }}
+                className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all active:scale-95 ${
+                  active ? 'border-transparent shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: iconColor }} />
+                {id}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="mx-auto max-w-3xl space-y-4 px-4">
+      <div className="mx-auto max-w-3xl space-y-3 px-4">
 
         {/* Search/Location Filters */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1.5 rounded-2xl glass-card p-3">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 rounded-2xl glass-card p-2.5">
             <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground"><Calendar className="h-3 w-3" /> Event date</span>
             <input
               type="date"
               value={filterDate}
               min={minDate}
               onChange={(e) => setFilterDate(e.target.value)}
-              className="rounded-lg bg-secondary/80 px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              className="rounded-lg bg-secondary/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
             />
           </label>
-          <label className="flex flex-col gap-1.5 rounded-2xl glass-card p-3">
+          <label className="flex flex-col gap-1 rounded-2xl glass-card p-2.5">
             <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
               <MapPin className="h-3 w-3" /> Location
             </span>
@@ -347,7 +328,7 @@ export default function HomePage() {
               id="home-city-filter"
               value={selectedCity}
               onChange={(e) => setSelectedCity(e.target.value)}
-              className="rounded-lg bg-secondary/80 px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              className="rounded-lg bg-secondary/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
               aria-label="Filter events by location"
             >
               <option value="">All locations</option>
@@ -359,12 +340,12 @@ export default function HomePage() {
         </div>
 
         {/* Budget Range */}
-        <div className="rounded-2xl glass-card p-4 space-y-3">
+        <div className="rounded-2xl glass-card p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase text-muted-foreground">Budget range</span>
             <span className="text-xs font-medium text-foreground">€{budgetMin} — €{budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
           </div>
-          <div className="relative h-6 flex items-center">
+          <div className="relative h-5 flex items-center">
             <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />
             <div
               className="absolute h-1.5 rounded-full bg-primary pointer-events-none"
@@ -383,26 +364,10 @@ export default function HomePage() {
               className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               style={{ zIndex: 4 }}
             />
-            <div className="absolute h-4 w-4 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-              style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 8px)` }} />
-            <div className="absolute h-4 w-4 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-              style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 8px)` }} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-muted-foreground">Min (€)</label>
-              <input type="number" min={0} max={budgetMax - 1} value={budgetMin}
-                onChange={(e) => { const v = Math.min(Math.max(0, Number(e.target.value)), budgetMax - 1); setBudgetMin(isNaN(v) ? 0 : v); }}
-                className="rounded-lg bg-secondary px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-muted-foreground">Max (€)</label>
-              <input type="number" min={budgetMin + 1} max={maxPrice} value={budgetMax}
-                onChange={(e) => { const v = Math.max(Math.min(maxPrice, Number(e.target.value)), budgetMin + 1); setBudgetMax(isNaN(v) ? maxPrice : v); }}
-                className="rounded-lg bg-secondary px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              />
-            </div>
+            <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+              style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 7px)` }} />
+            <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+              style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 7px)` }} />
           </div>
         </div>
 
@@ -411,7 +376,7 @@ export default function HomePage() {
           <div className="space-y-1">
             <SectionHeader icon={Users} title="Friend Activity" sectionKey="friends" />
             {!collapsed['friends'] && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="space-y-3 rounded-2xl glass-card p-5">
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="space-y-3 rounded-2xl glass-card p-4">
                 {friendActivity.map((item: any, i: number) => (
                   <div key={i} className="flex items-center gap-3">
                     <UserAvatar seed={item.friend.id} name={item.friend.name} size="sm" />
@@ -550,7 +515,7 @@ export default function HomePage() {
       </div>
       <BottomNav />
 
-      {/* ── Interest selection modal — shown immediately for new users ── */}
+      {/* Interest selection modal */}
       <AnimatePresence>
         {showInterestPrompt && user && (
           <motion.div
@@ -566,7 +531,6 @@ export default function HomePage() {
               transition={{ type: 'spring', stiffness: 280, damping: 26 }}
               className="w-full max-w-sm rounded-3xl glass-card overflow-hidden"
             >
-              {/* Header */}
               <div className="px-6 pt-7 pb-5 text-center space-y-2">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl gradient-primary shadow-glow">
                   <Sparkles className="h-5 w-5 text-primary-foreground" />
@@ -577,7 +541,6 @@ export default function HomePage() {
                 </p>
               </div>
 
-              {/* Interest grid — 3 columns */}
               <div className="px-5 pb-2 grid grid-cols-3 gap-2.5">
                 {ALL_INTERESTS.map((interest) => {
                   const meta: Record<string, { emoji: string }> = {
@@ -618,7 +581,6 @@ export default function HomePage() {
                 })}
               </div>
 
-              {/* Actions */}
               <div className="px-5 pt-4 pb-6 flex gap-3">
                 <button
                   type="button"

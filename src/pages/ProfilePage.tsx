@@ -172,6 +172,7 @@ export default function ProfilePage() {
               id: String(data.id),
               email: String(data.email || ""),
               name: String(data.full_name || data.name || ""),
+              username: String(data.username),
               bio: String(data.bio || ""),
               avatar: data.avatar_url,
               interests: Array.isArray(data.interests) ? data.interests : [],
@@ -336,7 +337,6 @@ export default function ProfilePage() {
       const url = await uploadProfilePhotoToStorage(user.id, file);
       setPreviewAvatarUrl(url);
       setPreviewAvatarKind('photo');
-      setToast({ show: true, message: 'Photo staged for preview.', type: 'success' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Photo upload failed.';
       setToast({ show: true, message: storageRefusalMessage(message) || message, type: 'error' });
@@ -515,7 +515,7 @@ export default function ProfilePage() {
           {editing && (
             <div className="w-full space-y-5 pt-3 border-t border-border/40 mt-2 px-4">
               {/* Combined Avatars & Icons Carousel with Upload Button as the SECOND item */}
-              <CarouselSection title="Avatar & Icons">
+              <CarouselSection title="Profile Picture">
                 {/* 1. First Avatar */}
                 <button
                   type="button"

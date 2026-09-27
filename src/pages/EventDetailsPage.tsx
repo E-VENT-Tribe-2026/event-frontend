@@ -47,7 +47,7 @@ export default function EventDetailsPage() {
   const [attendeeCount, setAttendeeCount] = useState<number | null>(null);
   const [myParticipationStatus, setMyParticipationStatus] = useState<ParticipationStatus | null>(null);
   const [participationKnown, setParticipationKnown] = useState(false);
-  const [organizerNameOverride, setOrganizerNameOverride] = useState<string>('');
+  const [organizerProfile, setOrganizerProfile] = useState<{ full_name?: string; username?: string; avatar_url?: string } | null>(null);
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
   const [backendAuthUserId, setBackendAuthUserId] = useState<string | null>(null);
@@ -76,7 +76,6 @@ export default function EventDetailsPage() {
     return null;
   };
 
-  // Hoisted so both handleJoinOrRequest and handleVenuePaymentConfirm can use it
   const tryJoinViaApi = async (): Promise<boolean> => {
     if (!event) return false;
     const token = await getApiToken();
@@ -113,28 +112,22 @@ export default function EventDetailsPage() {
       return;
     }
 
-    let participantsList: Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }> = [];
+    const token = await getApiToken();
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    let participantsList: Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string; username?: string } }> = [];
     try {
-      const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), {
-        headers: { Accept: 'application/json' },
-      });
+      const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), { headers });
       if (pRes.ok) {
         const list = await pRes.json().catch(() => []);
         participantsList = Array.isArray(list) ? list : [];
         setAttendeeCount(participantsList.length);
-        if (apiEvent?.organizerId) {
-          const ownerRow = participantsList.find((p) => sameAuthUserId(p.user_id, apiEvent.organizerId));
-          const ownerName = String(ownerRow?.profiles?.full_name || '').trim();
-          setOrganizerNameOverride(ownerName);
-        } else {
-          setOrganizerNameOverride('');
-        }
       }
     } catch {
       // Keep previous attendee count if backend temporarily fails.
     }
 
-    const token = await getApiToken();
     let authUserId: string | null = backendAuthUserId;
     if (token && !authUserId) {
       const me = await fetchAuthUserFromToken(token);
@@ -204,6 +197,7 @@ export default function EventDetailsPage() {
     return () => { cancelled = true; };
   }, [id, user?.id]);
 
+  // Fetch event details and organizer profile referenced by created_by GUID with proper auth headers
   useEffect(() => {
     if (!id) {
       setLoadingApi(false);
@@ -212,24 +206,52 @@ export default function EventDetailsPage() {
     }
     let cancelled = false;
     setLoadingApi(true);
-    fetch(getApiUrl(`/api/events/${id}`))
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled) {
-          setApiEvent(mapApiEventToItem(data));
-          setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
-          setParticipationKnown(false); // reset so skeleton shows while sync runs
+
+    (async () => {
+      const token = await getApiToken();
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        if (cancelled) return;
+
+        const mapped = mapApiEventToItem(data);
+        setApiEvent(mapped);
+        setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+        setParticipationKnown(false);
+
+        const creatorId = data.created_by || data.organizer_id || mapped.organizerId;
+        if (creatorId) {
+          try {
+            const profRes = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
+            if (profRes.ok) {
+              const profData = await profRes.json().catch(() => null);
+              const prof = profData?.data || profData?.profile || profData;
+              if (prof && !cancelled) {
+                setOrganizerProfile({
+                  full_name: prof.full_name || prof.name || prof.username,
+                  username: prof.username,
+                  avatar_url: prof.avatar_url,
+                });
+              }
+            }
+          } catch {
+            // ignore profile fetch failure
+          }
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
           setApiEvent(null);
           setApiEventStatus(null);
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoadingApi(false);
-      });
+      }
+    })();
+
     return () => { cancelled = true; };
   }, [id]);
 
@@ -302,7 +324,7 @@ export default function EventDetailsPage() {
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
         if (!u) return null;
-        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
+        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email, username: u.username };
       })
       .filter(Boolean)
       .slice(0, 6) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
@@ -327,7 +349,7 @@ export default function EventDetailsPage() {
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
         if (!u) return null;
-        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
+        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email, username: u.username };
       })
       .filter(Boolean) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
@@ -340,7 +362,7 @@ export default function EventDetailsPage() {
       return;
     }
     document.title = formatPageTitle(ev.title);
-  }, [loadingApi, localEvent, routeEvent, apiEvent, apiEvent?.id, apiEvent?.title, localEvent?.id, localEvent?.title, routeEvent?.id, routeEvent?.title]);
+  }, [loadingApi, localEvent, routeEvent, apiEvent]);
 
   if (loadingApi && !localEvent) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
@@ -351,7 +373,7 @@ export default function EventDetailsPage() {
 
   const isPastEvent = !isEventUpcoming(event);
   const isChatExpired = isPastEvent && (() => {
-    const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
+    const normalized = /[Zz]$\vert{}[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
     const ts = new Date(normalized).getTime();
     return !Number.isNaN(ts) && Date.now() - ts > 48 * 60 * 60 * 1000;
   })();
@@ -476,7 +498,6 @@ export default function EventDetailsPage() {
       if (existingRequest) {
         if (existingRequest.status === 'approved') {
           if (event.budget > 0) {
-            // Show venue payment modal instead of navigating
             setIsUpdatingParticipation(false);
             setShowVenuePaymentModal(true);
             return;
@@ -507,7 +528,6 @@ export default function EventDetailsPage() {
       setIsUpdatingParticipation(false);
     } else {
       if (event.budget > 0) {
-        // Show venue payment modal instead of navigating
         setIsUpdatingParticipation(false);
         setShowVenuePaymentModal(true);
         return;
@@ -527,7 +547,7 @@ export default function EventDetailsPage() {
 
   const handleRemoveAttendee = async (participantId: string) => {
     if (!isEventOwner || !user || String(participantId) === String(user.id)) return;
-    if (isPastEvent) return; // Cannot remove participants from past events
+    if (isPastEvent) return;
     if (!window.confirm('Remove this person from the event? They will lose access.')) return;
 
     if (useApiParticipation) {
@@ -600,9 +620,9 @@ export default function EventDetailsPage() {
   const isFreeEvent = !(Number(event.budget) > 0);
   const isAtCapacity = Boolean(
     event.participantsLimit > 0 &&
-    attendeeDisplayCount >= event.participantsLimit &&
-    !hasJoined &&
-    !isEventOwner,
+      attendeeDisplayCount >= event.participantsLimit &&
+      !hasJoined &&
+      !isEventOwner,
   );
 
   const getJoinButtonText = () => {
@@ -619,11 +639,19 @@ export default function EventDetailsPage() {
       if (existingRequest?.status === 'rejected') return 'Request Rejected';
       return 'Request to Join';
     }
-    return !isFreeEvent ? `Join — Pay €${event.budget} at Venue` : 'Join Event';
+    return !isFreeEvent ? `Join — Pay €{event.budget} at Venue` : 'Join Event';
   };
 
   const showSplitJoinLeave =
     !event.requiresApproval && isFreeEvent && !isEventOwner && !isOrganizer && !isPastEvent;
+
+  // Resolved organizer identity combining profile lookup and event data
+  const resolvedOrganizerName = formatUserIdentity({
+    username: organizerProfile?.username || event.organizerUsername,
+    fullName: organizerProfile?.full_name || (event.organizer !== 'Organizer' ? event.organizer : '') || event.organizerFullName || 'Organizer',
+  });
+
+  const resolvedOrganizerAvatar = organizerProfile?.avatar_url || event.organizerAvatar;
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -653,17 +681,20 @@ export default function EventDetailsPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <img src={event.organizerAvatar} alt="" className="h-10 w-10 rounded-full bg-secondary ring-2 ring-primary/30" />
+            <UserAvatar
+              src={resolvedOrganizerAvatar}
+              seed={event.organizerId || event.id}
+              name={resolvedOrganizerName}
+              size="md"
+              className="h-10 w-10 ring-2 ring-primary/30"
+            />
             <div>
               <p className="text-sm font-medium text-foreground" data-testid="organizer-full-name">
-                {formatUserIdentity({
-                  username: event.organizerUsername,
-                  fullName: event.organizerFullName || organizerNameOverride || event.organizer || 'Organizer',
-                })}
+                {organizerProfile?.full_name || event.organizerFullName || (event.organizer !== 'Organizer' ? event.organizer : '') || 'Organizer'}
               </p>
-              {event.organizerUsername ? (
+              {(organizerProfile?.username || event.organizerUsername) ? (
                 <p className="text-xs text-muted-foreground" data-testid="organizer-username">
-                  {event.organizerUsername}
+                  @{(organizerProfile?.username || event.organizerUsername || '').replace(/^@/, '')}
                 </p>
               ) : null}
               <p className="text-xs text-muted-foreground">Organizer</p>
@@ -805,19 +836,6 @@ export default function EventDetailsPage() {
           <h2 className="text-base font-semibold text-foreground">
             {isEventOwner ? 'Your event' : 'Join or leave'}
           </h2>
-          {isEventOwner ? (
-            <p className="text-xs text-muted-foreground">
-              As the host you can edit or delete here. Join and Leave are only for guests — you can't join your own event.
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {isPastEvent
-                ? 'This event already happened. You can still view all event details.'
-                : showSplitJoinLeave
-                ? 'Use Join to attend or Leave to cancel your spot.'
-                : 'One action below handles join, pay, approval, or leave depending on this event.'}
-            </p>
-          )}
         </div>
 
         {/* Event Chat Access */}
@@ -967,7 +985,6 @@ export default function EventDetailsPage() {
             </motion.div>
           </motion.div>
         )}
-
       </AnimatePresence>
 
       <BottomNav />
