@@ -40,6 +40,11 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
   const organizerAvatar =
     pickImageUrl(organizerPhoto) ?? getGeneratedAvatarUrl(avatarSeed);
 
+  const rawStatus = typeof api.status === 'string' ? api.status : undefined;
+  const isCancelled = rawStatus
+    ? rawStatus.toLowerCase() === 'cancelled' || rawStatus.toLowerCase() === 'canceled'
+    : Boolean(api.isCancelled);
+
   return {
     id: (api.id as string) ?? '',
     title: (api.title as string) ?? '',
@@ -59,6 +64,8 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizerAvatar,
     organizerUsername: organizerUsername || undefined,
     organizerFullName: organizerFullName || undefined,
+    status: rawStatus,
+    isCancelled,
     isPrivate: false,
     isDraft: false,
     requiresApproval: false,

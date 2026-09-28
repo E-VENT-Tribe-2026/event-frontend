@@ -247,7 +247,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(screen.getByText('Chats')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /Canceled Event/i }));
-    await waitFor(() => expect(screen.getByPlaceholderText(/Chat unavailable for this event/i)).toBeDisabled());
+    await waitFor(() => expect(screen.getByPlaceholderText(/Chat is read-only for cancelled events/i)).toBeDisabled());
   });
 
   it('renders system-generated join/leave messages in chat', async () => {
