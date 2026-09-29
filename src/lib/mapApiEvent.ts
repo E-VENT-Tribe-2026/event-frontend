@@ -58,6 +58,7 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizerId: createdBy,
     organizerAvatar,
     organizerUsername: organizerUsername || undefined,
+    status: typeof api.status === 'string' ? api.status : undefined,
     organizerFullName: organizerFullName || undefined,
     isPrivate: false,
     isDraft: false,

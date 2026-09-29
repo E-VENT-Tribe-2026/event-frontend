@@ -63,6 +63,8 @@ export interface EventItem {
   organizerId: string;
   organizerAvatar: string;
   organizerUsername?: string;
+  /** Raw backend status (e.g. 'active', 'cancelled'). Used to hide cancelled events (#244). */
+  status?: string;
   organizerFullName?: string;
   isPrivate: boolean;
   isDraft: boolean;
