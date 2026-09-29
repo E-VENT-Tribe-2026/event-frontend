@@ -12,8 +12,8 @@ import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Pale
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
-import { isEventUpcoming } from '@/lib/eventTime';
-import { useMaxPrice, useFavorites, useEvents, useRecommendations, invalidateProfile } from '@/lib/queries';
+import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
+import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents, invalidateProfile } from '@/lib/queries';
 import { queryClient } from '@/lib/queryClient';
 import { invalidatePrefix } from '@/lib/queryCache';
 
@@ -33,7 +33,9 @@ export default function HomePage() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleInterests, setVisibleInterests] = useState(3);
   const [visibleAll, setVisibleAll] = useState(6);
+  const [visibleUpcoming, setVisibleUpcoming] = useState(3);
   const PAGE = 6;
+  const UPCOMING_PAGE = 3;
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -58,6 +60,9 @@ export default function HomePage() {
     user?.id,
     Boolean(user?.interests?.length),
   );
+  // #244 — user's own upcoming events, organized or joined; both already cached client-side (11.1)
+  const { data: myEventsData } = useMyEvents(user?.id);
+  const { data: joinedEventsData } = useJoinedEvents(user?.id);
 
   // ── Derive values from query data ─────────────────────────────────────────
   const maxPrice = maxPriceData?.max_price ?? 500;
@@ -206,6 +211,18 @@ export default function HomePage() {
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
+  // ── #244: user's own upcoming events (organized + joined), no cancelled ───
+  const upcomingForYou = useMemo(() => {
+    const combined = [...(myEventsData ?? []), ...(joinedEventsData ?? [])];
+    // An organizer is also a participant of their own event, so the same
+    // event can appear in both lists — dedupe by id.
+    const byId = new Map<string, EventItem>();
+    combined.forEach((e) => byId.set(e.id, e));
+    return Array.from(byId.values())
+      .filter((e) => isEventUpcoming(e) && String(e.status || '').toLowerCase() !== 'cancelled')
+      .sort((a, b) => eventStartMs(a) - eventStartMs(b));
+  }, [myEventsData, joinedEventsData]);
+
   const applyFilters = (list: EventItem[]) =>
     list.filter((e) => {
       if (!isEventUpcoming(e)) return false;
@@ -282,6 +299,37 @@ export default function HomePage() {
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
       <TopBar search={search} onSearchChange={setSearch} />
+
+      {/* Upcoming For You — the user's own events, organized or joined (#244) */}
+      {user && (
+        <div className="mx-auto max-w-3xl px-4">
+          <SectionHeader icon={Calendar} title="Upcoming For You" sectionKey="upcoming" />
+          {!collapsed['upcoming'] && (
+            upcomingForYou.length === 0 ? (
+              <div className="rounded-2xl glass-card px-4 py-5 text-xs text-muted-foreground text-center">
+                You have no upcoming events yet.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {upcomingForYou.slice(0, visibleUpcoming).map((event) => (
+                    <EventCard key={event.id} event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+                  ))}
+                </div>
+                {visibleUpcoming < upcomingForYou.length && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleUpcoming((v) => v + UPCOMING_PAGE)}
+                    className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                  >
+                    View more · {upcomingForYou.length - visibleUpcoming} remaining
+                  </button>
+                )}
+              </>
+            )
+          )}
+        </div>
+      )}
 
       {/* Category Filter Wrapping Grid */}
       <div className="mx-auto max-w-3xl px-4 pt-3 pb-4">
