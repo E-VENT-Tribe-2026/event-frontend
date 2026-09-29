@@ -11,7 +11,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, Star, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import { LogOut, Edit2, Check, X, Star, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -20,9 +20,9 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
-import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
+import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
-import { invalidatePrefix, invalidate } from '@/lib/queryCache';
+import { invalidatePrefix, invalidate, cachedFetch, TTL } from '@/lib/queryCache';
 import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } from '@/lib/username';
 import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
 import { storageRefusalMessage } from '@/lib/profilePhoto';
@@ -79,8 +79,7 @@ export default function ProfilePage() {
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [activeTab, setActiveTab] = useState<'events' | 'favorites'>('events');
-  const [eventSubFilter, setEventSubFilter] = useState<'upcoming' | 'past' | 'cancelled'>('upcoming');
+  const [activeTab, setActiveTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites'>('upcoming');
   const [visibleEvents, setVisibleEvents] = useState(4);
   const [visibleFavorites, setVisibleFavorites] = useState(4);
 
@@ -96,52 +95,70 @@ export default function ProfilePage() {
   
   // Data State
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
-  const [remoteCreatedUpcoming, setRemoteCreatedUpcoming] = useState<EventItem[]>([]);
-  const [remoteCreatedPast, setRemoteCreatedPast] = useState<EventItem[]>([]);
+  const [remoteOrganizedEvents, setRemoteOrganizedEvents] = useState<EventItem[]>([]);
   const [favorites, setFavorites] = useState<EventItem[]>([]);
   const [localEventsEpoch, setLocalEventsEpoch] = useState(0);
   const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
 
   // Memoized Data Calculations
   const events = useMemo(() => getEvents(), [localEventsEpoch]);
-  const joinedEvents = useMemo(() => user ? events.filter(e => e.participants.includes(user.id)) : [], [events, user]);
   
-  const allJoinedEvents = useMemo(() => {
+  const allOrganizedEvents = useMemo(() => {
+    if (!user) return [];
     const byId = new Map<string, EventItem>();
-    [...joinedEvents, ...remoteJoinedEvents].forEach((e) => byId.set(e.id, e));
+    remoteOrganizedEvents.forEach((e) => byId.set(e.id, e));
+    events
+      .filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id))
+      .forEach((e) => byId.set(e.id, e));
     return Array.from(byId.values());
-  }, [joinedEvents, remoteJoinedEvents]);
+  }, [remoteOrganizedEvents, events, user]);
 
-  const displayCreatedUpcoming = useMemo(() => {
+  const allJoinedEvents = useMemo(() => {
     if (!user) return [];
-    const m = new Map<string, EventItem>();
-    remoteCreatedUpcoming.forEach((e) => m.set(e.id, e));
-    events.filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && isEventUpcoming(e) && !e.isCancelled).forEach((e) => m.set(e.id, e));
-    return Array.from(m.values()).sort((a, b) => eventStartMs(a) - eventStartMs(b));
-  }, [remoteCreatedUpcoming, events, user]);
+    const byId = new Map<string, EventItem>();
+    remoteJoinedEvents.forEach((e) => byId.set(e.id, e));
+    events
+      .filter((e) => (e.participants || []).some((p) => sameUserId(p, user.id)))
+      .forEach((e) => byId.set(e.id, e));
+    return Array.from(byId.values());
+  }, [remoteJoinedEvents, events, user]);
 
-  const displayCreatedPast = useMemo(() => {
+  const unifiedAllEvents = useMemo(() => {
     if (!user) return [];
-    const m = new Map<string, EventItem>();
-    remoteCreatedPast.forEach((e) => m.set(e.id, e));
-    events.filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && !isEventUpcoming(e) && !e.isCancelled).forEach((e) => m.set(e.id, e));
-    return Array.from(m.values()).sort((a, b) => eventStartMs(b) - eventStartMs(a));
-  }, [remoteCreatedPast, events, user]);
+    const byId = new Map<string, { e: EventItem; isCreated: boolean }>();
 
-  const displayCancelled = useMemo(() => {
-    if (!user) return [];
-    return events.filter((e) => (sameUserId(e.organizerId, user.id) || e.participants.includes(user.id)) && e.isCancelled);
-  }, [events, user]);
+    // Organized events first (user is organizer/creator)
+    allOrganizedEvents.forEach((e) => {
+      byId.set(e.id, { e, isCreated: true });
+    });
 
-  const createdIds = useMemo(() => new Set([...displayCreatedUpcoming, ...displayCreatedPast].map(e => e.id)), [displayCreatedUpcoming, displayCreatedPast]);
-  const joinedEventsOnly = useMemo(() => allJoinedEvents.filter(e => !createdIds.has(e.id) && !e.isCancelled), [allJoinedEvents, createdIds]);
+    // Joined events next (if not already organized by this user)
+    allJoinedEvents.forEach((e) => {
+      if (!byId.has(e.id)) {
+        byId.set(e.id, { e, isCreated: false });
+      }
+    });
 
-  const displayJoinedUpcoming = useMemo(() => joinedEventsOnly.filter(isEventUpcoming).sort((a, b) => eventStartMs(a) - eventStartMs(b)), [joinedEventsOnly]);
-  const displayJoinedPast = useMemo(() => joinedEventsOnly.filter(e => !isEventUpcoming(e)).sort((a, b) => eventStartMs(b) - eventStartMs(a)), [joinedEventsOnly]);
+    return Array.from(byId.values());
+  }, [allOrganizedEvents, allJoinedEvents, user]);
 
-  const unifiedUpcoming = useMemo(() => [...displayCreatedUpcoming.map(e => ({ e, isCreated: true })), ...displayJoinedUpcoming.map(e => ({ e, isCreated: false }))], [displayCreatedUpcoming, displayJoinedUpcoming]);
-  const unifiedPast = useMemo(() => [...displayCreatedPast, ...displayJoinedPast].map(e => ({ e, isCreated: createdIds.has(e.id) })), [displayCreatedPast, displayJoinedPast, createdIds]);
-  const unifiedCancelled = useMemo(() => displayCancelled.map(e => ({ e, isCreated: sameUserId(e.organizerId, user?.id || '') })), [displayCancelled, user?.id]);
+  const unifiedCancelled = useMemo(() => {
+    return unifiedAllEvents
+      .filter(({ e }) => isEventCancelled(e))
+      .sort((a, b) => eventStartMs(b.e) - eventStartMs(a.e));
+  }, [unifiedAllEvents]);
+
+  const unifiedUpcoming = useMemo(() => {
+    return unifiedAllEvents
+      .filter(({ e }) => !isEventCancelled(e) && isEventUpcoming(e))
+      .sort((a, b) => eventStartMs(a.e) - eventStartMs(b.e));
+  }, [unifiedAllEvents]);
+
+  const unifiedPast = useMemo(() => {
+    return unifiedAllEvents
+      .filter(({ e }) => !isEventCancelled(e) && !isEventUpcoming(e))
+      .sort((a, b) => eventStartMs(b.e) - eventStartMs(a.e));
+  }, [unifiedAllEvents]);
 
   const approvedRequests = useMemo(() => {
     if (!user) return [];
@@ -151,7 +168,7 @@ export default function ProfilePage() {
     }).filter(Boolean);
   }, [user, events]);
 
-  // Initial Load
+  // Initial Load with client-side caching
   useEffect(() => {
     const token = getAuthToken();
     if (!token) { setProfileLoading(false); return; }
@@ -159,14 +176,39 @@ export default function ProfilePage() {
     let cancelled = false;
     (async () => {
       try {
-        const [resProf, resFavs] = await Promise.all([
-          fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }),
-          fetch(getApiUrl('/api/favorites/all'), { headers: { Authorization: `Bearer ${token}` } })
+        const [rawProf, favData] = await Promise.all([
+          cachedFetch(
+            `/api/profile/me:${user?.id ?? ''}`,
+            async () => {
+              const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+              });
+              if (!res.ok) throw new Error('Failed to fetch profile');
+              return res.json();
+            },
+            TTL.LONG,
+          ).catch((err) => {
+            console.error('Error fetching profile:', err);
+            return null;
+          }),
+          cachedFetch(
+            `/api/favorites/all:${user?.id ?? ''}`,
+            async () => {
+              const res = await fetch(getApiUrl('/api/favorites/all'), {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return [];
+              return res.json();
+            },
+            TTL.MEDIUM,
+          ).catch((err) => {
+            console.error('Error fetching favorites:', err);
+            return [];
+          }),
         ]);
-        
-        if (resProf.ok && !cancelled) {
-          const raw = await resProf.json();
-          const data = raw.data || raw.user || raw;
+
+        if (rawProf && !cancelled) {
+          const data = rawProf.data || rawProf.user || rawProf;
           if (data.id) {
             setCurrentUserFromOAuth({
               id: String(data.id),
@@ -202,43 +244,65 @@ export default function ProfilePage() {
           }
         }
 
-        if (resFavs.ok && !cancelled) {
-          const favData = await resFavs.json();
-          setFavorites((favData || []).map(mapApiEventToItem));
+        if (Array.isArray(favData) && !cancelled) {
+          setFavorites(favData.map(mapApiEventToItem));
         }
       } catch (err) { console.error(err); } finally { if (!cancelled) setProfileLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [user?.id]);
 
-  // Event Data Load
+  // Event Data Load with client-side caching
   useEffect(() => {
     if (!user) return;
     const token = getAuthToken();
     if (!token) return;
 
+    let cancelled = false;
     (async () => {
       try {
-        const [resJoined, resCreated] = await Promise.all([
-          fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/my-events`), { headers: { Authorization: `Bearer ${token}` } })
+        const [joinedBody, createdBody] = await Promise.all([
+          cachedFetch(
+            `/api/participants/my/events:${user.id}`,
+            async () => {
+              const res = await fetch(getApiUrl('/api/participants/my/events'), {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return [];
+              return res.json();
+            },
+            TTL.SESSION,
+          ).catch(() => []),
+          cachedFetch(
+            `/api/events/my-events:${user.id}`,
+            async () => {
+              const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/my-events`), {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return { data: [] };
+              return res.json();
+            },
+            TTL.SESSION,
+          ).catch(() => ({ data: [] })),
         ]);
 
-        if (resJoined.ok) {
-          const joinedBody = await resJoined.json();
-          setRemoteJoinedEvents((joinedBody || []).map((row: any) => mapApiEventToItem(row.events)).filter(Boolean));
-        }
+        if (cancelled) return;
 
-        if (resCreated.ok) {
-          const createdBody = await resCreated.json();
-          const rows = createdBody.data || [];
-          setRemoteCreatedUpcoming(rows.map(mapApiEventToItem).filter(isEventUpcoming));
-          setRemoteCreatedPast(rows.map(mapApiEventToItem).filter((e: any) => !isEventUpcoming(e)));
-          rows.forEach((evt: any) => upsertEvent(mapApiEventToItem(evt)));
-        }
-        setLocalEventsEpoch(n => n + 1);
-      } catch (err) { console.error(err); }
+        const joinedRows = Array.isArray(joinedBody?.data) ? joinedBody.data : Array.isArray(joinedBody) ? joinedBody : [];
+        const mappedJoined = joinedRows.map((row: any) => mapApiEventToItem(row.events || row)).filter(Boolean);
+        setRemoteJoinedEvents(mappedJoined);
+
+        const createdRows = Array.isArray(createdBody?.data) ? createdBody.data : Array.isArray(createdBody) ? createdBody : [];
+        const mappedCreated = createdRows.map(mapApiEventToItem).filter(Boolean);
+        setRemoteOrganizedEvents(mappedCreated);
+        mappedCreated.forEach((evt: EventItem) => upsertEvent(evt));
+
+        setLocalEventsEpoch((n) => n + 1);
+      } catch (err) {
+        console.error(err);
+      }
     })();
+    return () => { cancelled = true; };
   }, [user?.id]);
 
   const handleStartEditing = () => {
@@ -390,6 +454,9 @@ export default function ProfilePage() {
 
         updateUser({ name: nextName, bio, interests, avatar: previewAvatarUrl });
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+        invalidate(`/api/profile/me:${user?.id ?? ''}`);
+        invalidate('/api/profile/me');
+        invalidatePrefix('/api/profile');
         setEditing(false);
         setToast({ show: true, message: 'Profile updated successfully!', type: 'success' });
       } catch (err) { console.error(err); }
@@ -412,8 +479,9 @@ export default function ProfilePage() {
     setRemoteJoinedEvents(prev => prev.filter(e => e.id !== eventId));
     setLeavingEventId(null);
     setToast({ show: true, message: 'Left event', type: 'success' });
-    invalidatePrefix('/api/events?');
-    invalidatePrefix(`/api/participants/${eventId}`);
+    invalidate(`/api/participants/my/events:${user?.id ?? ''}`);
+    invalidatePrefix('/api/participants');
+    invalidatePrefix('/api/events');
   };
 
   const handleRemoveFavorite = async (eventId: string) => {
@@ -425,6 +493,8 @@ export default function ProfilePage() {
         setFavorites(prev => prev.filter(e => e.id !== eventId));
         setToast({ show: true, message: 'Removed from favorites', type: 'success' });
         invalidate(`/api/favorites/all:${user?.id ?? ''}`);
+        invalidate('/api/favorites/all');
+        invalidatePrefix('/api/favorites');
       }
     } catch (err) { console.error(err); }
   };
@@ -467,7 +537,14 @@ export default function ProfilePage() {
     Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
   };
 
-  const currentEventList = eventSubFilter === 'upcoming' ? unifiedUpcoming : eventSubFilter === 'past' ? unifiedPast : unifiedCancelled;
+  const currentEventList =
+    activeTab === 'upcoming'
+      ? unifiedUpcoming
+      : activeTab === 'past'
+      ? unifiedPast
+      : activeTab === 'cancelled'
+      ? unifiedCancelled
+      : [];
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -706,95 +783,121 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Main Tabs (Events vs Favorites) */}
-        <div className="flex rounded-xl glass-card p-1">
-          {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }].map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex-1 flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-all ${activeTab === tab.id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'}`}><tab.icon className="h-3.5 w-3.5" />{tab.label}</button>
-          ))}
+        {/* Main Tabs (Single row of four tabs: Upcoming, Past, Cancelled, Favourites) */}
+        <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
+          {[
+            { id: 'upcoming' as const, label: 'Upcoming', count: unifiedUpcoming.length, icon: Calendar },
+            { id: 'past' as const, label: 'Past', count: unifiedPast.length, icon: Clock },
+            { id: 'cancelled' as const, label: 'Cancelled', count: unifiedCancelled.length, icon: Ban },
+            { id: 'favourites' as const, label: 'Favourites', count: favorites.length, icon: Heart },
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={isActive}
+                data-testid={`tab-${tab.id}`}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setVisibleEvents(4);
+                }}
+                className={`flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
+                  isActive
+                    ? tab.id === 'cancelled'
+                      ? 'bg-destructive text-destructive-foreground shadow-sm'
+                      : 'gradient-primary text-primary-foreground shadow-glow'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                <div className="flex items-center gap-1">
+                  <tab.icon className="h-3.5 w-3.5" />
+                  <span>{tab.label}</span>
+                </div>
+                <span className={`text-[10px] font-normal ${isActive ? 'opacity-90' : 'opacity-60'}`}>
+                  ({tab.count})
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Content Section */}
         <div className="space-y-4 min-h-[300px]">
-          {activeTab === 'events' && (
-            <div className="space-y-4">
-              {/* Compact Sub-filter Pills */}
-              <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
-                <button
-                  type="button"
-                  onClick={() => setEventSubFilter('upcoming')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${eventSubFilter === 'upcoming' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  Upcoming ({unifiedUpcoming.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEventSubFilter('past')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${eventSubFilter === 'past' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  Past ({unifiedPast.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEventSubFilter('cancelled')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${eventSubFilter === 'cancelled' ? 'bg-destructive text-destructive-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  Cancelled ({unifiedCancelled.length})
-                </button>
-              </div>
-
-              {/* Compact Event List */}
-              <div className="space-y-2.5">
-                {currentEventList.length === 0 ? (
-                  <p className="text-center py-8 text-xs text-muted-foreground">No {eventSubFilter} events found.</p>
-                ) : (
-                  currentEventList.slice(0, visibleEvents).map(({ e, isCreated }) => {
-                    const isCancelled = eventSubFilter === 'cancelled';
-                    const isPast = eventSubFilter === 'past';
-                    return (
-                      <div key={e.id} className={`flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40 ${isCancelled ? 'opacity-60 bg-destructive/5' : isPast ? 'opacity-70' : ''}`}>
-                        <img src={e.image} alt="" className="h-12 w-12 rounded-xl object-cover flex-shrink-0" />
-                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                          <p className="text-xs font-bold line-clamp-1 text-foreground">{e.title}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                              isCancelled ? 'bg-destructive/10 text-destructive' :
-                              isCreated ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'
-                            }`}>
-                              {isCancelled ? 'Cancelled' : isCreated ? 'Created' : 'Joined'}
-                            </span>
-                            <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                          </div>
+          {activeTab !== 'favourites' ? (
+            <div className="space-y-2.5">
+              {currentEventList.length === 0 ? (
+                <p className="text-center py-8 text-xs text-muted-foreground">
+                  No {activeTab} events found.
+                </p>
+              ) : (
+                currentEventList.slice(0, visibleEvents).map(({ e, isCreated }) => {
+                  const isCancelled = activeTab === 'cancelled' || isEventCancelled(e);
+                  const isPast = activeTab === 'past';
+                  return (
+                    <div
+                      key={e.id}
+                      className={`flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40 ${
+                        isCancelled ? 'opacity-60 bg-destructive/5' : isPast ? 'opacity-70' : ''
+                      }`}
+                    >
+                      <img src={e.image} alt="" className="h-12 w-12 rounded-xl object-cover flex-shrink-0" />
+                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                        <p className="text-xs font-bold line-clamp-1 text-foreground">{e.title}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span
+                            className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                              isCancelled
+                                ? 'bg-destructive/10 text-destructive'
+                                : isCreated
+                                ? 'bg-primary/10 text-primary'
+                                : 'bg-accent/10 text-accent'
+                            }`}
+                          >
+                            {isCancelled ? 'Cancelled' : isCreated ? 'Created' : 'Joined'}
+                          </span>
+                          <p className="text-[10px] text-muted-foreground">{e.date}</p>
                         </div>
-
-                        {!isCancelled && !isPast && !isCreated && (
-                          <button onClick={() => handleLeaveFromProfile(e.id)} disabled={leavingEventId === e.id} className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-lg transition-colors">
-                            {leavingEventId === e.id ? '...' : 'Leave'}
-                          </button>
-                        )}
                       </div>
-                    );
-                  })
-                )}
 
-                {currentEventList.length > 4 && (
-                  <div className="flex gap-2 pt-2">
-                    {visibleEvents < currentEventList.length && (
-                      <button type="button" onClick={() => setVisibleEvents(v => v + 4)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
-                        View more · {currentEventList.length - visibleEvents} remaining
-                      </button>
-                    )}
-                    {visibleEvents > 4 && (
-                      <button type="button" onClick={() => setVisibleEvents(4)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                        Show less
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                      {!isCancelled && !isPast && !isCreated && (
+                        <button
+                          onClick={() => handleLeaveFromProfile(e.id)}
+                          disabled={leavingEventId === e.id}
+                          className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-lg transition-colors"
+                        >
+                          {leavingEventId === e.id ? '...' : 'Leave'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+
+              {currentEventList.length > 4 && (
+                <div className="flex gap-2 pt-2">
+                  {visibleEvents < currentEventList.length && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleEvents((v) => v + 4)}
+                      className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors"
+                    >
+                      View more · {currentEventList.length - visibleEvents} remaining
+                    </button>
+                  )}
+                  {visibleEvents > 4 && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleEvents(4)}
+                      className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Show less
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-          )}
-
-          {activeTab === 'favorites' && (
+          ) : (
             <div className="space-y-3">
               <h3 className="text-sm font-semibold px-1">Saved Events</h3>
               {favorites.length === 0 ? (
@@ -802,29 +905,55 @@ export default function ProfilePage() {
               ) : (
                 <>
                   <div className="space-y-2.5">
-                    {favorites.slice(0, visibleFavorites).map(e => (
-                      <div key={e.id} className="flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40">
-                        <img src={e.image} alt="" className="h-12 w-12 rounded-xl object-cover flex-shrink-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)} />
+                    {favorites.slice(0, visibleFavorites).map((e) => (
+                      <div
+                        key={e.id}
+                        className="flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40"
+                      >
+                        <img
+                          src={e.image}
+                          alt=""
+                          className="h-12 w-12 rounded-xl object-cover flex-shrink-0 cursor-pointer"
+                          onClick={() => navigate(`/event/${e.id}`)}
+                        />
                         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
                           <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{e.date} · {e.location}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {e.date} · {e.location}
+                          </p>
                         </div>
-                        <button onClick={() => handleRemoveFavorite(e.id)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
+                        <button
+                          onClick={() => handleRemoveFavorite(e.id)}
+                          className="p-2 text-muted-foreground hover:text-destructive transition-colors"
+                          aria-label="Remove favorite"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
                     ))}
                   </div>
-                  <div className="flex gap-2 pt-2">
-                    {visibleFavorites < favorites.length && (
-                      <button type="button" onClick={() => setVisibleFavorites(v => v + 4)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
-                        View more · {favorites.length - visibleFavorites} remaining
-                      </button>
-                    )}
-                    {visibleFavorites > 4 && (
-                      <button type="button" onClick={() => setVisibleFavorites(4)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                        Show less
-                      </button>
-                    )}
-                  </div>
+                  {favorites.length > 4 && (
+                    <div className="flex gap-2 pt-2">
+                      {visibleFavorites < favorites.length && (
+                        <button
+                          type="button"
+                          onClick={() => setVisibleFavorites((v) => v + 4)}
+                          className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors"
+                        >
+                          View more · {favorites.length - visibleFavorites} remaining
+                        </button>
+                      )}
+                      {visibleFavorites > 4 && (
+                        <button
+                          type="button"
+                          onClick={() => setVisibleFavorites(4)}
+                          className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          Show less
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </div>

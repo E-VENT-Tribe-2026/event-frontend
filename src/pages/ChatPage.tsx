@@ -21,6 +21,7 @@ type ChatEvent = {
   time: string;
   unread: number;
   isPast: boolean;
+  isCancelled?: boolean;
   eventDate: string;
   organizerId: string;
 };
@@ -224,9 +225,11 @@ export default function ChatPage() {
 
       const byId = new Map<string, ChatEvent>();
       allEvents
-        .filter((evt) => Boolean(evt) && String((evt as Record<string, unknown>).status || '').toLowerCase() !== 'cancelled')
-        .map((evt) => mapApiEventToItem(evt as Record<string, unknown>))
-        .forEach((evt) => {
+        .filter(Boolean)
+        .forEach((rawEvt) => {
+          const evt = mapApiEventToItem(rawEvt as Record<string, unknown>);
+          const rawStatus = String((rawEvt as Record<string, unknown>).status || evt.status || '').toLowerCase();
+          const isCancelled = evt.isCancelled || rawStatus === 'cancelled' || rawStatus === 'canceled';
           byId.set(evt.id, {
             id: evt.id,
             name: evt.title,
@@ -235,6 +238,7 @@ export default function ChatPage() {
             time: evt.time || '',
             unread: 0,
             isPast: !isEventUpcoming(evt),
+            isCancelled,
             eventDate: evt.date || '',
             organizerId: evt.organizerId || '',
           });
@@ -284,8 +288,37 @@ export default function ChatPage() {
         if (withLastMsg.some((entry) => entry.id === selectedEventFromUrl)) {
           setActiveChat(selectedEventFromUrl);
         } else {
-          setToast({ show: true, message: 'You no longer have access to this event chat.', type: 'error' });
-          navigate('/chat', { replace: true });
+          try {
+            const singleRes = await fetch(getApiUrl(`/api/events/${selectedEventFromUrl}`), {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (singleRes.ok) {
+              const singleData = await singleRes.json();
+              const singleItem = mapApiEventToItem(singleData);
+              const rawSt = String(singleData.status || singleItem.status || '').toLowerCase();
+              const isCanc = singleItem.isCancelled || rawSt === 'cancelled' || rawSt === 'canceled';
+              const newChat: ChatEvent = {
+                id: singleItem.id,
+                name: singleItem.title,
+                avatar: singleItem.image,
+                lastMsg: 'Open conversation',
+                time: singleItem.time || '',
+                unread: 0,
+                isPast: !isEventUpcoming(singleItem),
+                isCancelled: isCanc,
+                eventDate: singleItem.date || '',
+                organizerId: singleItem.organizerId || '',
+              };
+              setChats((prev) => [newChat, ...prev.filter((c) => c.id !== newChat.id)]);
+              setActiveChat(selectedEventFromUrl);
+            } else {
+              setToast({ show: true, message: 'You no longer have access to this event chat.', type: 'error' });
+              navigate('/chat', { replace: true });
+            }
+          } catch {
+            setToast({ show: true, message: 'You no longer have access to this event chat.', type: 'error' });
+            navigate('/chat', { replace: true });
+          }
         }
         setHandledSelectedParam(true);
       }
@@ -310,7 +343,8 @@ export default function ChatPage() {
       const res = await fetch(getApiUrl(`/api/events/${eventId}`));
       if (!res.ok) return 'unknown';
       const evt = await res.json();
-      return String(evt?.status || '').toLowerCase() === 'cancelled' ? 'cancelled' : 'active';
+      const statusStr = String(evt?.status || '').toLowerCase();
+      return statusStr === 'cancelled' || statusStr === 'canceled' ? 'cancelled' : 'active';
     } catch { return 'unknown'; }
   }, []);
 
@@ -329,10 +363,10 @@ export default function ChatPage() {
       try {
         const availability = await checkEventAvailability(eventId);
         if (availability === 'cancelled') {
-          setChatUnavailable(true);
-          setMessages([]);
-          setToast({ show: true, message: 'This event was canceled. Chat is no longer available.', type: 'error' });
-          return;
+          // Cancelled event: Chat is read-only, but messages remain accessible to organizer and participants
+          setChats((prev) =>
+            prev.map((c) => (c.id === eventId ? { ...c, isCancelled: true } : c)),
+          );
         }
         const primaryUrl = `${getApiUrl(chatMessagesPath(eventId))}?limit=100&page=1`;
         let res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
@@ -388,10 +422,9 @@ export default function ChatPage() {
     if (!content || !activeChat || !token || sending || chatUnavailable) return;
     if (!explicitContent && !plainInput) return;
     const availability = await checkEventAvailability(activeChat);
-    if (availability === 'cancelled') {
-      setChatUnavailable(true);
-      setMessages([]);
-      setToast({ show: true, message: 'Event chat is unavailable because the event is canceled.', type: 'error' });
+    if (availability === 'cancelled' || activeChatObj?.isCancelled) {
+      setChats((prev) => prev.map((c) => (c.id === activeChat ? { ...c, isCancelled: true } : c)));
+      setToast({ show: true, message: 'Event chat is read-only because the event is canceled.', type: 'error' });
       return;
     }
     setSending(true);
@@ -451,6 +484,7 @@ export default function ChatPage() {
   if (activeChat) {
     const chat = activeChatObj;
     if (!chat) return null;
+    const isReadOnly = Boolean(chat.isPast || chat.isCancelled);
     return (
       <div className="flex min-h-screen flex-col bg-background pb-20">
         <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
@@ -469,13 +503,13 @@ export default function ChatPage() {
 
             <div className="relative shrink-0">
               <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="sm" className="ring-2 ring-primary/30" />
-              <div className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-background ${chat.isPast || chatUnavailable ? 'bg-muted-foreground' : 'bg-green-500'}`} />
+              <div className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-background ${isReadOnly || chatUnavailable ? 'bg-muted-foreground' : 'bg-green-500'}`} />
             </div>
 
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-sm font-bold text-foreground">{chat.name}</h1>
-              <p className={`text-[10px] ${chatUnavailable ? 'text-destructive' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
-                {chatUnavailable ? 'Chat unavailable' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
+              <p className={`text-[10px] ${chatUnavailable ? 'text-destructive' : chat.isCancelled ? 'text-amber-500 font-medium' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
+                {chatUnavailable ? 'Chat unavailable' : chat.isCancelled ? 'Cancelled event · read-only' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
               </p>
             </div>
           </div>
@@ -485,7 +519,15 @@ export default function ChatPage() {
         {chatUnavailable && (
           <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>This event was canceled or you can no longer use this chat.</p>
+            <p>You can no longer use this chat.</p>
+          </div>
+        )}
+
+        {/* Cancelled banner */}
+        {chat.isCancelled && !chatUnavailable && (
+          <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>This event was cancelled. The chat is read-only.</p>
           </div>
         )}
 
@@ -585,7 +627,7 @@ export default function ChatPage() {
         {/* Input bar */}
         <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3">
           <AnimatePresence>
-            {showEmoji && !chatUnavailable && !chat.isPast && (
+            {showEmoji && !chatUnavailable && !isReadOnly && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -605,7 +647,7 @@ export default function ChatPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={chatUnavailable || chat.isPast}
+              disabled={chatUnavailable || isReadOnly}
               onClick={() => setShowEmoji(!showEmoji)}
               className={`shrink-0 rounded-full p-2 transition-all disabled:opacity-40 ${showEmoji ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:bg-secondary/80 hover:text-foreground'}`}
               aria-label="Emoji"
@@ -614,11 +656,12 @@ export default function ChatPage() {
             </button>
             <input
               value={input}
-              disabled={chatUnavailable || chat.isPast}
+              disabled={chatUnavailable || isReadOnly}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
               placeholder={
-                chat.isPast ? 'Chat is read-only for past events'
+                chat.isCancelled ? 'Chat is read-only for cancelled events'
+                  : chat.isPast ? 'Chat is read-only for past events'
                   : chatUnavailable ? 'Chat unavailable for this event'
                   : 'Type a message…'
               }
@@ -626,7 +669,7 @@ export default function ChatPage() {
             />
             <button
               type="button"
-              disabled={chatUnavailable || sending || !input.trim() || chat.isPast}
+              disabled={chatUnavailable || sending || !input.trim() || isReadOnly}
               onClick={() => void sendMessage()}
               className="shrink-0 rounded-full gradient-primary p-2.5 shadow-glow disabled:opacity-40 active:scale-90 transition-transform"
               aria-label="Send message"
@@ -653,7 +696,7 @@ export default function ChatPage() {
           </div>
           {chats.length > 0 && (
             <span className="rounded-full gradient-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground shadow-glow">
-              {chats.filter(c => !c.isPast).length} active
+              {chats.filter((c) => !c.isPast && !c.isCancelled).length} active
             </span>
           )}
         </div>
@@ -687,8 +730,9 @@ export default function ChatPage() {
         )}
 
         {!chatListLoading && chats.length > 0 && (() => {
-          const activeChats = chats.filter((c) => !c.isPast);
-          const pastChats = chats.filter((c) => c.isPast && !isExpiredOver48h(c.eventDate));
+          const activeChats = chats.filter((c) => !c.isPast && !c.isCancelled);
+          const pastChats = chats.filter((c) => c.isPast && !c.isCancelled && !isExpiredOver48h(c.eventDate));
+          const cancelledChats = chats.filter((c) => c.isCancelled);
 
           const renderChatItem = (chat: ChatEvent) => (
             <motion.button
@@ -697,16 +741,16 @@ export default function ChatPage() {
               onClick={() => setActiveChat(chat.id)}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`flex w-full items-center gap-3 rounded-2xl glass-card px-4 py-3.5 text-left transition-all hover:border-primary/30 active:scale-[0.98] ${chat.isPast ? 'opacity-60' : ''}`}
+              className={`flex w-full items-center gap-3 rounded-2xl glass-card px-4 py-3.5 text-left transition-all hover:border-primary/30 active:scale-[0.98] ${chat.isPast || chat.isCancelled ? 'opacity-60' : ''}`}
             >
               <div className="relative shrink-0">
                 <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="lg" className="ring-2 ring-border" />
-                <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-background ${chat.isPast ? 'bg-muted-foreground' : 'bg-green-500'}`} />
+                <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-background ${chat.isCancelled ? 'bg-amber-500' : chat.isPast ? 'bg-muted-foreground' : 'bg-green-500'}`} />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-foreground">{chat.name}</p>
                 <p className="line-clamp-1 text-xs text-muted-foreground mt-0.5">
-                  {chat.isPast ? `Ended · ${chat.eventDate}` : chat.lastMsg}
+                  {chat.isCancelled ? 'Cancelled · Read-only' : chat.isPast ? `Ended · ${chat.eventDate}` : chat.lastMsg}
                 </p>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -732,6 +776,12 @@ export default function ChatPage() {
                 <div className="space-y-2 pt-2">
                   <p className="px-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Past</p>
                   {pastChats.map(renderChatItem)}
+                </div>
+              )}
+              {cancelledChats.length > 0 && (
+                <div className="space-y-2 pt-2">
+                  <p className="px-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-amber-500">Cancelled</p>
+                  {cancelledChats.map(renderChatItem)}
                 </div>
               )}
             </>

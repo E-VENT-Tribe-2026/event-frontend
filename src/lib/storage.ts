@@ -64,6 +64,8 @@ export interface EventItem {
   organizerAvatar: string;
   organizerUsername?: string;
   organizerFullName?: string;
+  status?: string;
+  isCancelled?: boolean;
   isPrivate: boolean;
   isDraft: boolean;
   requiresApproval: boolean;
@@ -340,6 +342,11 @@ export function updateEvent(id: string, updates: Partial<EventItem>) {
 
 export function deleteEvent(id: string) {
   const events = getEvents().filter(e => e.id !== id);
+  saveEvents(events);
+}
+
+export function cancelEvent(id: string) {
+  const events = getEvents().map(e => e.id === id ? { ...e, status: 'cancelled', isCancelled: true } : e);
   saveEvents(events);
 }
 
