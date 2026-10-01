@@ -13,8 +13,7 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
-import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents, invalidateProfile } from '@/lib/queries';
-import { queryClient } from '@/lib/queryClient';
+import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidatePrefix } from '@/lib/queryCache';
 
 export default function HomePage() {
@@ -34,11 +33,9 @@ export default function HomePage() {
   const [visibleInterests, setVisibleInterests] = useState(3);
   const [visibleAll, setVisibleAll] = useState(6);
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const categoryScrollRef = useRef<HTMLDivElement>(null);
 
   const [visibleUpcoming, setVisibleUpcoming] = useState(3);
   const PAGE = 6;
-  const UPCOMING_PAGE = 3;
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -63,7 +60,6 @@ export default function HomePage() {
     user?.id,
     Boolean(user?.interests?.length),
   );
-  // #244 — user's own upcoming events, organized or joined; both already cached client-side (11.1)
   const { data: myEventsData } = useMyEvents(user?.id);
   const { data: joinedEventsData } = useJoinedEvents(user?.id);
 
@@ -214,11 +210,8 @@ export default function HomePage() {
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
-  // ── #244: user's own upcoming events (organized + joined), no cancelled ───
   const upcomingForYou = useMemo(() => {
     const combined = [...(myEventsData ?? []), ...(joinedEventsData ?? [])];
-    // An organizer is also a participant of their own event, so the same
-    // event can appear in both lists — dedupe by id.
     const byId = new Map<string, EventItem>();
     combined.forEach((e) => byId.set(e.id, e));
     return Array.from(byId.values())
@@ -282,20 +275,20 @@ export default function HomePage() {
   );
 
   const cats = [
-    { id: 'All',       icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
-    { id: 'Music',     icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
-    { id: 'Tech',      icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
-    { id: 'Food',      icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
-    { id: 'Fitness',   icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
-    { id: 'Art',       icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
-    { id: 'Gaming',    icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
-    { id: 'Sports',    icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
-    { id: 'Movies',    icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
-    { id: 'Study',     icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
-    { id: 'Travel',    icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
-    { id: 'Coffee',    icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
-    { id: 'Networking',icon: Network,    iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
-    { id: 'Wellness',  icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
+    { id: 'All',     icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
+    { id: 'Music',    icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
+    { id: 'Tech',     icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
+    { id: 'Food',     icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
+    { id: 'Fitness',  icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
+    { id: 'Art',      icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
+    { id: 'Gaming',   icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
+    { id: 'Sports',   icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
+    { id: 'Movies',   icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
+    { id: 'Study',    icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
+    { id: 'Travel',   icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
+    { id: 'Coffee',   icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
+    { id: 'Networking',icon: Network,   iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
+    { id: 'Wellness', icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
   ] as const;
 
   const activeFiltersCount = (filterDate ? 1 : 0) + (selectedCity ? 1 : 0) + (budgetMin > 0 || budgetMax < maxPrice ? 1 : 0);
@@ -307,7 +300,6 @@ export default function HomePage() {
       {/* Top Navigation Bar with Embedded Categories & Filter Toggle */}
       <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/40">
         <TopBar search={search} onSearchChange={setSearch} />
-        
 
         <div className="mx-auto max-w-3xl px-4 pt-2 pb-3">
           <div className="flex items-center gap-2">
@@ -346,7 +338,24 @@ export default function HomePage() {
             </button>
           </div>
         </div>
+      </header>
 
+      <main className="mx-auto max-w-3xl px-4 space-y-2">
+        {/* Upcoming Events Section */}
+        {upcomingForYou.length > 0 && (
+          <div className="space-y-2">
+            <SectionHeader icon={Calendar} title="Upcoming For You" badge={String(upcomingForYou.length)} sectionKey="upcoming" />
+            {!collapsed['upcoming'] && (
+              <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {upcomingForYou.slice(0, visibleUpcoming).map((event, i) => (
+                  <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
+                    <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
+          </div>
+        )}
         {/* Friend Activity Section */}
         {friendActivity.length > 0 && (
           <div className="space-y-1">
@@ -488,7 +497,8 @@ export default function HomePage() {
             )
           )}
         </div>
-      </div>
+      </main>
+
       <BottomNav />
 
       {/* Filter Popup Modal */}
@@ -640,7 +650,7 @@ export default function HomePage() {
                     Gaming:     { emoji: '🎮' },
                     Movies:     { emoji: '🎬' },
                     Study:      { emoji: '📚' },
-                    Travel:     { emoji: '✈️️' },
+                    Travel:     { emoji: '✈' },
                     Tech:       { emoji: '💻' },
                     Art:        { emoji: '🎨' },
                     Fitness:    { emoji: '💪' },
