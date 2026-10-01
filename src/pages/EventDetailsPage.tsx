@@ -322,8 +322,13 @@ export default function EventDetailsPage() {
           avatar: p.profiles?.avatar_url,
           name: p.profiles?.full_name || 'Participant',
           username: p.profiles?.username,
-        }));
+        
+        }
+      ));
     }
+
+    console.log(apiParticipants) 
+
     return event.participants
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
@@ -341,12 +346,12 @@ export default function EventDetailsPage() {
     if (useApiParticipation && apiParticipants.length > 0) {
       return apiParticipants
         .filter((p) => p?.user_id)
-        .map((p) => ({
+        .map((p: any) => ({
           id: p.user_id,
-          profilePhoto: p.profiles?.avatar_url,
-          avatar: p.profiles?.avatar_url,
-          name: p.profiles?.full_name || 'Participant',
-          username: p.profiles?.username,
+          profilePhoto: p.profiles?.avatar_url || p.user?.avatar_url,
+          avatar: p.profiles?.avatar_url || p.user?.avatar_url,
+          name: p.profiles?.full_name || p.user?.full_name || 'Participant',
+          username: p.user?.username || p.profiles?.username || p.user?.display_name,
         }));
     }
     return event.participants
@@ -822,7 +827,8 @@ export default function EventDetailsPage() {
                         className="shrink-0 border border-border/50"
                       />
                       <span className="truncate text-sm font-medium text-foreground">
-                        {formatUserIdentity({ username: row.username, fullName: row.name })}
+                        {formatUserIdentity({ fullName: row.name })}
+                        <p className="text-sm text-muted-foreground" data-testid="profile-username">@{row.username}</p>
                       </span>
                     </div>
                     {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && !isCancelledEvent && (
