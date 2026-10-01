@@ -4,10 +4,11 @@ import { MemoryRouter } from 'react-router-dom';
 import ProfilePage from '@/pages/ProfilePage';
 import { clearAuthToken, setAuthToken } from '@/lib/auth';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
+import { invalidatePrefix } from '@/lib/queryCache';
 
 vi.mock('@/components/BottomNav', () => ({ default: () => null }));
 
-describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites)', () => {
+describe('ProfilePage: Events / Friends tabs and event sub-tabs', () => {
   const currentUser = {
     id: 'user-me',
     email: 'me@test.com',
@@ -18,6 +19,7 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    invalidatePrefix('/api');
     setAuthToken('mock-token');
     setCurrentUserFromOAuth(currentUser);
   });
@@ -28,7 +30,6 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
   });
 
   const setupMockData = () => {
-    // 1. Organized upcoming event (active)
     const orgUpcoming = {
       id: 'org-up-1',
       title: 'Organized Upcoming Party',
@@ -40,8 +41,6 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
       status: 'active',
       cost: 0,
     };
-
-    // 2. Organized past event (active)
     const orgPast = {
       id: 'org-past-1',
       title: 'Organized Past Meetup',
@@ -53,8 +52,6 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
       status: 'active',
       cost: 0,
     };
-
-    // 3. Organized cancelled event
     const orgCancelled = {
       id: 'org-canc-1',
       title: 'Organized Cancelled Trip',
@@ -66,8 +63,6 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
       status: 'cancelled',
       cost: 0,
     };
-
-    // 4. Joined upcoming event (active)
     const joinedUpcoming = {
       events: {
         id: 'join-up-1',
@@ -81,8 +76,6 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
         cost: 0,
       },
     };
-
-    // 5. Joined past event (active)
     const joinedPast = {
       events: {
         id: 'join-past-1',
@@ -96,8 +89,6 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
         cost: 0,
       },
     };
-
-    // 6. Joined cancelled event
     const joinedCancelled = {
       events: {
         id: 'join-canc-1',
@@ -111,8 +102,6 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
         cost: 0,
       },
     };
-
-    // 7. Favorite / Saved event
     const favEvent = {
       id: 'fav-1',
       title: 'Saved Dream Vacation',
@@ -126,157 +115,150 @@ describe('ProfilePage ticket #239: 4 Tabs (Upcoming, Past, Cancelled, Favourites
       location_name: 'Hawaii',
     };
 
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/profile/me')) {
-        return new Response(
-          JSON.stringify({
-            id: 'user-me',
-            email: 'me@test.com',
-            username: 'my_username',
-            full_name: 'My Name',
-            avatar_url: '',
-            avatar_kind: 'icon',
-            icon_id: 'alex',
-            banner_url: null,
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
-      }
-      if (url.includes('/api/favorites/all')) {
-        return new Response(JSON.stringify([favEvent]), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
+        return json({
+          id: 'user-me',
+          email: 'me@test.com',
+          username: 'my_username',
+          full_name: 'My Name',
+          avatar_url: '',
+          avatar_kind: 'icon',
+          icon_id: 'alex',
+          banner_url: null,
         });
       }
+      if (url.includes('/api/favorites/all')) return json([favEvent]);
       if (url.includes('/api/events/my-events')) {
-        return new Response(
-          JSON.stringify({ data: [orgUpcoming, orgPast, orgCancelled] }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
+        return json({ data: [orgUpcoming, orgPast, orgCancelled] });
       }
       if (url.includes('/api/participants/my/events')) {
-        return new Response(
-          JSON.stringify([joinedUpcoming, joinedPast, joinedCancelled]),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
+        return json([joinedUpcoming, joinedPast, joinedCancelled]);
       }
-      return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+      return json([]);
     });
 
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
   };
 
-  it('renders a single row of four tabs: Upcoming, Past, Cancelled and Favourites, without a separate Events tab', async () => {
+  const renderPage = async () => {
     setupMockData();
-
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ProfilePage />
       </MemoryRouter>,
     );
+    await waitFor(() =>
+      expect(screen.getByTestId('profile-full-name')).toHaveTextContent('My Name'),
+    );
+  };
 
-    await waitFor(() => expect(screen.getByTestId('profile-full-name')).toHaveTextContent('My Name'));
+  const openSubTab = (id: 'upcoming' | 'past' | 'cancelled' | 'favourites') =>
+    fireEvent.click(screen.getByTestId(`tab-${id}`));
 
-    // Check tabs exist
-    const upcomingTab = screen.getByRole('tab', { name: /upcoming/i });
-    const pastTab = screen.getByRole('tab', { name: /past/i });
-    const cancelledTab = screen.getByRole('tab', { name: /cancelled/i });
-    const favouritesTab = screen.getByRole('tab', { name: /favourites/i });
+  it('renders the Events and Friends main tabs, with Events selected by default', async () => {
+    await renderPage();
 
-    expect(upcomingTab).toBeInTheDocument();
-    expect(pastTab).toBeInTheDocument();
-    expect(cancelledTab).toBeInTheDocument();
-    expect(favouritesTab).toBeInTheDocument();
+    const eventsTab = screen.getByTestId('main-tab-events');
+    const friendsTab = screen.getByTestId('main-tab-friends');
 
-    // Verify there is NO separate "Events" tab
-    expect(screen.queryByRole('tab', { name: /^events$/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^events$/i })).not.toBeInTheDocument();
+    expect(eventsTab).toHaveAttribute('role', 'tab');
+    expect(friendsTab).toHaveAttribute('role', 'tab');
+    expect(eventsTab).toHaveAttribute('aria-selected', 'true');
+    expect(friendsTab).toHaveAttribute('aria-selected', 'false');
   });
 
-  it('Upcoming tab covers both organized and joined upcoming events, and does not show cancelled events', async () => {
-    setupMockData();
+  it('renders the four event sub-tabs with counts', async () => {
+    await renderPage();
 
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <ProfilePage />
-      </MemoryRouter>,
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId('tab-upcoming')).toHaveTextContent('Upcoming (2)');
+      expect(screen.getByTestId('tab-past')).toHaveTextContent('Past (2)');
+      expect(screen.getByTestId('tab-cancelled')).toHaveTextContent('Cancelled (2)');
+      expect(screen.getByTestId('tab-favourites')).toHaveTextContent('Favourites (1)');
+    });
+  });
 
-    // Default tab is Upcoming
+  it('Upcoming tab (default) shows organized and joined upcoming events only', async () => {
+    await renderPage();
+
     expect(await screen.findByText('Organized Upcoming Party')).toBeInTheDocument();
     expect(screen.getByText('Joined Upcoming Concert')).toBeInTheDocument();
 
-    // Cancelled and Past events should NOT be visible in Upcoming tab
     expect(screen.queryByText('Organized Cancelled Trip')).not.toBeInTheDocument();
     expect(screen.queryByText('Joined Cancelled Workshop')).not.toBeInTheDocument();
     expect(screen.queryByText('Organized Past Meetup')).not.toBeInTheDocument();
     expect(screen.queryByText('Joined Past Hackathon')).not.toBeInTheDocument();
   });
 
-  it('Past tab covers both organized and joined past events, and does not show cancelled events', async () => {
-    setupMockData();
+  it('labels organized events "Created" and joined events "Joined"', async () => {
+    await renderPage();
 
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <ProfilePage />
-      </MemoryRouter>,
-    );
+    await screen.findByText('Organized Upcoming Party');
+    expect(screen.getByText('Created')).toBeInTheDocument();
+    expect(screen.getByText('Joined')).toBeInTheDocument();
+  });
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: /past/i })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: /past/i }));
+  it('Past tab shows organized and joined past events only', async () => {
+    await renderPage();
+    await screen.findByText('Organized Upcoming Party');
 
-    // Past tab shows organized and joined past events
+    openSubTab('past');
+
     expect(await screen.findByText('Organized Past Meetup')).toBeInTheDocument();
     expect(screen.getByText('Joined Past Hackathon')).toBeInTheDocument();
 
-    // Upcoming and Cancelled events should NOT be visible in Past tab
     expect(screen.queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
     expect(screen.queryByText('Joined Upcoming Concert')).not.toBeInTheDocument();
     expect(screen.queryByText('Organized Cancelled Trip')).not.toBeInTheDocument();
     expect(screen.queryByText('Joined Cancelled Workshop')).not.toBeInTheDocument();
   });
 
-  it('Cancelled tab covers both organized and joined cancelled events, and shows in no other tab', async () => {
-    setupMockData();
+  it('Cancelled tab shows organized and joined cancelled events only', async () => {
+    await renderPage();
+    await screen.findByText('Organized Upcoming Party');
 
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <ProfilePage />
-      </MemoryRouter>,
-    );
+    openSubTab('cancelled');
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: /cancelled/i })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: /cancelled/i }));
-
-    // Cancelled tab shows both organized and joined cancelled events
     expect(await screen.findByText('Organized Cancelled Trip')).toBeInTheDocument();
     expect(screen.getByText('Joined Cancelled Workshop')).toBeInTheDocument();
 
-    // Active upcoming and past events should NOT be in Cancelled tab
     expect(screen.queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
     expect(screen.queryByText('Joined Upcoming Concert')).not.toBeInTheDocument();
     expect(screen.queryByText('Organized Past Meetup')).not.toBeInTheDocument();
     expect(screen.queryByText('Joined Past Hackathon')).not.toBeInTheDocument();
   });
 
-  it('Favourites tab shows saved events', async () => {
-    setupMockData();
+  it('Favourites tab shows saved events only', async () => {
+    await renderPage();
+    await screen.findByText('Organized Upcoming Party');
 
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <ProfilePage />
-      </MemoryRouter>,
-    );
+    openSubTab('favourites');
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: /favourites/i })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: /favourites/i }));
-
-    // Favourites tab shows saved events
-    expect(await screen.findByText('Saved Dream Vacation')).toBeInTheDocument();
-
-    // Non-favorite events should NOT be here
+    expect(await screen.findByText('Saved Events')).toBeInTheDocument();
+    expect(screen.getByText('Saved Dream Vacation')).toBeInTheDocument();
     expect(screen.queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
+  });
+
+  it('Friends tab shows empty states for accepted friends and requests', async () => {
+    await renderPage();
+
+    fireEvent.click(screen.getByTestId('main-tab-friends'));
+    expect(screen.getByTestId('main-tab-friends')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('No friends connected yet.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /requests/i }));
+    expect(screen.getByText('No pending friend requests.')).toBeInTheDocument();
+
+    // Event sub-tabs are not rendered while on Friends
+    expect(screen.queryByTestId('tab-upcoming')).not.toBeInTheDocument();
   });
 });

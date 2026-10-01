@@ -11,7 +11,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, Star, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban } from 'lucide-react';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -66,7 +66,7 @@ export default function ProfilePage() {
   const [iconId, setIconId] = useState('');
   const [bannerUrl, setBannerUrl] = useState('');
   
-  // Staged preview state (for before "Save" is clicked)
+  // Staged preview state
   const [previewAvatarUrl, setPreviewAvatarUrl] = useState(user?.avatar || '');
   const [previewBannerUrl, setPreviewBannerUrl] = useState('');
   const [previewAvatarKind, setPreviewAvatarKind] = useState<'photo' | 'icon'>('icon');
@@ -79,7 +79,14 @@ export default function ProfilePage() {
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [activeTab, setActiveTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites'>('upcoming');
+  
+  // Navigation Tabs: Main parent tabs ('events' | 'friends')
+  const [mainTab, setMainTab] = useState<'events' | 'friends'>('events');
+  // Events Sub-Tabs ('upcoming' | 'past' | 'cancelled' | 'favourites')
+  const [eventSubTab, setEventSubTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites'>('upcoming');
+  // Friends Sub-Tabs ('accepted' | 'requests')
+  const [friendSubTab, setFriendSubTab] = useState<'accepted' | 'requests'>('accepted');
+
   const [visibleEvents, setVisibleEvents] = useState(4);
   const [visibleFavorites, setVisibleFavorites] = useState(4);
 
@@ -127,12 +134,10 @@ export default function ProfilePage() {
     if (!user) return [];
     const byId = new Map<string, { e: EventItem; isCreated: boolean }>();
 
-    // Organized events first (user is organizer/creator)
     allOrganizedEvents.forEach((e) => {
       byId.set(e.id, { e, isCreated: true });
     });
 
-    // Joined events next (if not already organized by this user)
     allJoinedEvents.forEach((e) => {
       if (!byId.has(e.id)) {
         byId.set(e.id, { e, isCreated: false });
@@ -252,7 +257,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [user?.id]);
 
-  // Event Data Load with client-side caching
+  // Event Data Load
   useEffect(() => {
     if (!user) return;
     const token = getAuthToken();
@@ -323,7 +328,7 @@ export default function ProfilePage() {
     setEditing(false);
   };
 
-  // Carousel Component Helper with Smart Scroll Tracking (Disables Left Arrow at Start)
+  // Carousel Component Helper
   const CarouselSection = ({ title, children }: { title: string; children: React.ReactNode }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -360,7 +365,6 @@ export default function ProfilePage() {
       <div className="space-y-2">
         {title && <p className="text-xs font-semibold text-center">{title}</p>}
         <div className="relative flex items-center">
-          {/* Left Arrow - hidden when at the start */}
           {canScrollLeft && (
             <button 
               type="button" 
@@ -378,7 +382,6 @@ export default function ProfilePage() {
             {children}
           </div>
 
-          {/* Right Arrow - hidden when at the end */}
           {canScrollRight && (
             <button 
               type="button" 
@@ -538,11 +541,11 @@ export default function ProfilePage() {
   };
 
   const currentEventList =
-    activeTab === 'upcoming'
+    eventSubTab === 'upcoming'
       ? unifiedUpcoming
-      : activeTab === 'past'
+      : eventSubTab === 'past'
       ? unifiedPast
-      : activeTab === 'cancelled'
+      : eventSubTab === 'cancelled'
       ? unifiedCancelled
       : [];
 
@@ -560,7 +563,7 @@ export default function ProfilePage() {
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-14 relative z-10 space-y-5">
         <div className="flex flex-col items-center gap-2">
-          <span data-testid="profile-picture" data-avatar-kind={editing ? previewAvatarKind : avatarKind}>
+          <span data-testid="profile-picture" data-avatar-kind={editing ? previewAvatarKind : avatarKind} data-icon-id={previewAvatarKind === 'photo' ? '' : iconId}>
             <UserAvatar
               src={resolveAvatarDisplayUrl({ photoUrl: currentDisplayAvatar, altUrl: user.avatar, seed: iconId || user.id })}
               seed={iconId || user.id}
@@ -574,26 +577,41 @@ export default function ProfilePage() {
             {editing ? (
               <div className="space-y-1">
                 <input value={name} onChange={e => { setName(e.target.value); setNameError(''); }} aria-label="Full name" className="w-full rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" />
-                <p className="text-[11px] text-muted-foreground text-center">{FULL_NAME_RULES_HINT}</p>
+                <p className="text-[11px] text-muted-foreground text-center">{FULL_NAME_RULES_HINT} · Username cannot be changed</p>
                 {nameError && <p className="text-xs text-destructive text-center">{nameError}</p>}
               </div>
             ) : (
-              <h2 className="text-xl font-bold flex items-center gap-2" data-testid="profile-full-name">
-                {name}
-                <button onClick={handleStartEditing} className="p-1 rounded-full text-muted-foreground hover:text-foreground transition-colors" title="Edit Profile">
-                  <Edit2 className="h-4 w-4" />
-                </button>
-              </h2>
+              <div className="text-center space-y-0.5">
+                <h2 className="text-xl font-bold flex items-center justify-center gap-2" data-testid="profile-full-name">
+                  {name}
+                  <button onClick={handleStartEditing} className="p-1 rounded-full text-muted-foreground hover:text-foreground transition-colors" title="Edit Profile">
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                </h2>
+                <p className="text-sm text-muted-foreground" data-testid="profile-username">@{username}</p>
+              </div>
             )}
           </div>
 
-          <p className="text-sm text-muted-foreground" data-testid="profile-username">@{username}</p>
+          {!editing && (
+            <p className="text-sm text-muted-foreground hidden" data-testid="profile-username">@{username}</p>
+          )}
 
           {editing && (
             <div className="w-full space-y-5 pt-3 border-t border-border/40 mt-2 px-4">
-              {/* Combined Avatars & Icons Carousel with Upload Button FIRST */}
-            <CarouselSection title="Profile Picture">
-              {/* 1. First item: Upload Button Circle with Tooltip */}
+              <CarouselSection title="Profile Picture">
+              {/* 1. First Avatar item displayed before upload */}
+              {PROFILE_AVATARS.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setPreviewAvatarUrl(PROFILE_AVATARS[0].url); setPreviewAvatarKind('icon'); }}
+                  className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === PROFILE_AVATARS[0].url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                >
+                  <img src={PROFILE_AVATARS[0].url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
+                </button>
+              )}
+
+              {/* 2. Upload Button Circle placed second in line with Tooltip */}
               <div className="relative group flex-shrink-0">
                 <button
                   type="button"
@@ -611,8 +629,8 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* 2. Followed by all Avatars */}
-              {PROFILE_AVATARS.map((avatar) => (
+              {/* 3. Followed by the rest of the Avatars (skipping the first one since it's already rendered) */}
+              {PROFILE_AVATARS.slice(1).map((avatar) => (
                 <button
                   key={avatar.id}
                   type="button"
@@ -623,7 +641,7 @@ export default function ProfilePage() {
                 </button>
               ))}
 
-              {/* 3. Followed by Icons */}
+              {/* 4. Followed by Icons */}
               {PROFILE_ICONS.map((icon) => (
                 <button
                   key={icon.id}
@@ -708,7 +726,7 @@ export default function ProfilePage() {
               Cancel
             </button>
             <button onClick={handleSave} className="flex items-center gap-1.5 rounded-full gradient-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-glow">
-              <Check className="h-3.5 w-3.5" /> Save Changes
+              <Check className="h-3.5 w-3.5" /> Save
             </button>
           </div>
         )}
@@ -783,170 +801,135 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Main Tabs (Single row of four tabs: Upcoming, Past, Cancelled, Favourites) */}
+        {/* Main Parent Tabs: Events vs Friends */}
         <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
           {[
-            { id: 'upcoming' as const, label: 'Upcoming', count: unifiedUpcoming.length, icon: Calendar },
-            { id: 'past' as const, label: 'Past', count: unifiedPast.length, icon: Clock },
-            { id: 'cancelled' as const, label: 'Cancelled', count: unifiedCancelled.length, icon: Ban },
-            { id: 'favourites' as const, label: 'Favourites', count: favorites.length, icon: Heart },
+            { id: 'events' as const, label: 'Events', icon: Calendar },
+            { id: 'friends' as const, label: 'Friends', icon: Users },
           ].map((tab) => {
-            const isActive = activeTab === tab.id;
+            const isActive = mainTab === tab.id;
             return (
               <button
                 key={tab.id}
                 role="tab"
                 aria-selected={isActive}
-                data-testid={`tab-${tab.id}`}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  setVisibleEvents(4);
-                }}
-                className={`flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
+                data-testid={`main-tab-${tab.id}`}
+                onClick={() => setMainTab(tab.id)}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-semibold transition-all ${
                   isActive
-                    ? tab.id === 'cancelled'
-                      ? 'bg-destructive text-destructive-foreground shadow-sm'
-                      : 'gradient-primary text-primary-foreground shadow-glow'
+                    ? 'gradient-primary text-primary-foreground shadow-glow'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
               >
-                <div className="flex items-center gap-1">
-                  <tab.icon className="h-3.5 w-3.5" />
-                  <span>{tab.label}</span>
-                </div>
-                <span className={`text-[10px] font-normal ${isActive ? 'opacity-90' : 'opacity-60'}`}>
-                  ({tab.count})
-                </span>
+                <tab.icon className="h-4 w-4" />
+                <span>{tab.label}</span>
               </button>
             );
           })}
         </div>
 
-        {/* Content Section */}
+        {/* Main Section Content */}
         <div className="space-y-4 min-h-[300px]">
-          {activeTab !== 'favourites' ? (
-            <div className="space-y-2.5">
-              {currentEventList.length === 0 ? (
-                <p className="text-center py-8 text-xs text-muted-foreground">
-                  No {activeTab} events found.
-                </p>
-              ) : (
-                currentEventList.slice(0, visibleEvents).map(({ e, isCreated }) => {
-                  const isCancelled = activeTab === 'cancelled' || isEventCancelled(e);
-                  const isPast = activeTab === 'past';
+          {mainTab === 'events' ? (
+            <div className="space-y-3">
+              {/* Events Sub-Tabs with Icons */}
+              <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
+                {[
+                  { id: 'upcoming' as const, label: 'Upcoming', count: unifiedUpcoming.length, icon: Calendar },
+                  { id: 'past' as const, label: 'Past', count: unifiedPast.length, icon: Clock },
+                  { id: 'cancelled' as const, label: 'Cancelled', count: unifiedCancelled.length, icon: Ban },
+                  { id: 'favourites' as const, label: 'Favourites', count: favorites.length, icon: Heart },
+                ].map((sub) => {
+                  const isSubActive = eventSubTab === sub.id;
                   return (
-                    <div
-                      key={e.id}
-                      className={`flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40 ${
-                        isCancelled ? 'opacity-60 bg-destructive/5' : isPast ? 'opacity-70' : ''
+                    <button
+                      key={sub.id}
+                      data-testid={`tab-${sub.id}`}
+                      onClick={() => {
+                        setEventSubTab(sub.id);
+                        setVisibleEvents(4);
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        isSubActive
+                          ? sub.id === 'cancelled'
+                            ? 'bg-destructive text-destructive-foreground shadow-sm'
+                            : 'bg-primary text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      <img src={e.image} alt="" className="h-12 w-12 rounded-xl object-cover flex-shrink-0" />
-                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                        <p className="text-xs font-bold line-clamp-1 text-foreground">{e.title}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span
-                            className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                              isCancelled
-                                ? 'bg-destructive/10 text-destructive'
-                                : isCreated
-                                ? 'bg-primary/10 text-primary'
-                                : 'bg-accent/10 text-accent'
-                            }`}
-                          >
-                            {isCancelled ? 'Cancelled' : isCreated ? 'Created' : 'Joined'}
-                          </span>
-                          <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                        </div>
-                      </div>
-
-                      {!isCancelled && !isPast && !isCreated && (
-                        <button
-                          onClick={() => handleLeaveFromProfile(e.id)}
-                          disabled={leavingEventId === e.id}
-                          className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-lg transition-colors"
-                        >
-                          {leavingEventId === e.id ? '...' : 'Leave'}
-                        </button>
-                      )}
-                    </div>
+                      <sub.icon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{sub.label} ({sub.count})</span>
+                    </button>
                   );
-                })
-              )}
+                })}
+              </div>
 
-              {currentEventList.length > 4 && (
-                <div className="flex gap-2 pt-2">
-                  {visibleEvents < currentEventList.length && (
-                    <button
-                      type="button"
-                      onClick={() => setVisibleEvents((v) => v + 4)}
-                      className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors"
-                    >
-                      View more · {currentEventList.length - visibleEvents} remaining
-                    </button>
-                  )}
-                  {visibleEvents > 4 && (
-                    <button
-                      type="button"
-                      onClick={() => setVisibleEvents(4)}
-                      className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      Show less
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold px-1">Saved Events</h3>
-              {favorites.length === 0 ? (
-                <p className="text-center py-8 text-xs text-muted-foreground">You haven't saved any events yet.</p>
-              ) : (
-                <>
-                  <div className="space-y-2.5">
-                    {favorites.slice(0, visibleFavorites).map((e) => (
-                      <div
-                        key={e.id}
-                        className="flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40"
-                      >
-                        <img
-                          src={e.image}
-                          alt=""
-                          className="h-12 w-12 rounded-xl object-cover flex-shrink-0 cursor-pointer"
-                          onClick={() => navigate(`/event/${e.id}`)}
-                        />
-                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                          <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">
-                            {e.date} · {e.location}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleRemoveFavorite(e.id)}
-                          className="p-2 text-muted-foreground hover:text-destructive transition-colors"
-                          aria-label="Remove favorite"
+              {/* Events Sub-Content */}
+              {eventSubTab !== 'favourites' ? (
+                <div className="space-y-2.5">
+                  {currentEventList.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">
+                      No {eventSubTab} events found.
+                    </p>
+                  ) : (
+                    currentEventList.slice(0, visibleEvents).map(({ e, isCreated }) => {
+                      const isCancelled = eventSubTab === 'cancelled' || isEventCancelled(e);
+                      const isPast = eventSubTab === 'past';
+                      return (
+                        <div
+                          key={e.id}
+                          className={`flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40 ${
+                            isCancelled ? 'opacity-60 bg-destructive/5' : isPast ? 'opacity-70' : ''
+                          }`}
                         >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  {favorites.length > 4 && (
+                          <img src={e.image} alt="" className="h-12 w-12 rounded-xl object-cover flex-shrink-0" />
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                            <p className="text-xs font-bold line-clamp-1 text-foreground">{e.title}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span
+                                className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                  isCancelled
+                                    ? 'bg-destructive/10 text-destructive'
+                                    : isCreated
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'bg-accent/10 text-accent'
+                                }`}
+                              >
+                                {isCancelled ? 'Cancelled' : isCreated ? 'Created' : 'Joined'}
+                              </span>
+                              <p className="text-[10px] text-muted-foreground">{e.date}</p>
+                            </div>
+                          </div>
+
+                          {!isCancelled && !isPast && !isCreated && (
+                            <button
+                              onClick={() => handleLeaveFromProfile(e.id)}
+                              disabled={leavingEventId === e.id}
+                              className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-lg transition-colors"
+                            >
+                              {leavingEventId === e.id ? '...' : 'Leave'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {currentEventList.length > 4 && (
                     <div className="flex gap-2 pt-2">
-                      {visibleFavorites < favorites.length && (
+                      {visibleEvents < currentEventList.length && (
                         <button
                           type="button"
-                          onClick={() => setVisibleFavorites((v) => v + 4)}
+                          onClick={() => setVisibleEvents((v) => v + 4)}
                           className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors"
                         >
-                          View more · {favorites.length - visibleFavorites} remaining
+                          View more · {currentEventList.length - visibleEvents} remaining
                         </button>
                       )}
-                      {visibleFavorites > 4 && (
+                      {visibleEvents > 4 && (
                         <button
                           type="button"
-                          onClick={() => setVisibleFavorites(4)}
+                          onClick={() => setVisibleEvents(4)}
                           className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                         >
                           Show less
@@ -954,7 +937,104 @@ export default function ProfilePage() {
                       )}
                     </div>
                   )}
-                </>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold px-1">Saved Events</h3>
+                  {favorites.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">You haven't saved any events yet.</p>
+                  ) : (
+                    <>
+                      <div className="space-y-2.5">
+                        {favorites.slice(0, visibleFavorites).map((e) => (
+                          <div
+                            key={e.id}
+                            className="flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40"
+                          >
+                            <img
+                              src={e.image}
+                              alt=""
+                              className="h-12 w-12 rounded-xl object-cover flex-shrink-0 cursor-pointer"
+                              onClick={() => navigate(`/event/${e.id}`)}
+                            />
+                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                              <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
+                                {e.date} · {e.location}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveFavorite(e.id)}
+                              className="p-2 text-muted-foreground hover:text-destructive transition-colors"
+                              aria-label="Remove favorite"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      {favorites.length > 4 && (
+                        <div className="flex gap-2 pt-2">
+                          {visibleFavorites < favorites.length && (
+                            <button
+                              type="button"
+                              onClick={() => setVisibleFavorites((v) => v + 4)}
+                              className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors"
+                            >
+                              View more · {favorites.length - visibleFavorites} remaining
+                            </button>
+                          )}
+                          {visibleFavorites > 4 && (
+                            <button
+                              type="button"
+                              onClick={() => setVisibleFavorites(4)}
+                              className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              Show less
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Friends Sub-Tabs with Icons */}
+              <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
+                {[
+                  { id: 'accepted' as const, label: 'Accepted', icon: UserCheck },
+                  { id: 'requests' as const, label: 'Requests', icon: UserPlus },
+                ].map((fSub) => {
+                  const isFSubActive = friendSubTab === fSub.id;
+                  return (
+                    <button
+                      key={fSub.id}
+                      onClick={() => setFriendSubTab(fSub.id)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        isFSubActive
+                          ? 'bg-primary text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <fSub.icon className="h-3.5 w-3.5 shrink-0" />
+                      <span>{fSub.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Friends Sub-Content */}
+              {friendSubTab === 'accepted' ? (
+                <div className="space-y-2.5">
+                  <p className="text-center py-8 text-xs text-muted-foreground">No friends connected yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-center py-8 text-xs text-muted-foreground">No pending friend requests.</p>
+                </div>
               )}
             </div>
           )}

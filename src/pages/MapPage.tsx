@@ -10,6 +10,7 @@ import { getAuthToken } from '@/lib/auth';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
+import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -117,7 +118,7 @@ export default function MapPage() {
       const combinedEvents = Array.from(byId.values());
       setRawEvents(combinedEvents);
 
-      // Fetch organizer profiles for events that have creator GUIDs
+      // Fetch organizer profiles using /api/profile/${creatorId}
       const profileMap: Record<string, { full_name?: string; username?: string; avatar_url?: string }> = {};
       await Promise.all(
         rows.map(async (row: any) => {
@@ -175,6 +176,8 @@ export default function MapPage() {
 
   const filteredEvents = useMemo(() => {
     return rawEvents.filter((e) => {
+      // Exclude past or cancelled events on the map view
+      if (isEventCancelled(e) || !isEventUpcoming(e)) return false;
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedFilterDate && e.date !== debouncedFilterDate) return false;
       const city = extractCityFromLocation(e.location || '');

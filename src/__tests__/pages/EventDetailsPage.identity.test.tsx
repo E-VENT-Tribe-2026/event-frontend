@@ -109,15 +109,36 @@ describe('EventDetailsPage organizer/attendee identity display (#215)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows the organizer as "username (Full Name)"', async () => {
+  it('shows the organizer full name above their @username', async () => {
     renderPage();
-    await waitFor(() => expect(screen.getByText('owner_1 (Owner Name)')).toBeInTheDocument());
+
+    const fullName = await screen.findByTestId('organizer-full-name');
+    const username = screen.getByTestId('organizer-username');
+
+    expect(fullName).toHaveTextContent('Owner Name');
+    expect(username).toHaveTextContent('@owner_1');
+    expect(
+      fullName.compareDocumentPosition(username) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // The old combined "username (Full Name)" format is gone
+    expect(screen.queryByText('owner_1 (Owner Name)')).not.toBeInTheDocument();
   });
 
-  it('shows an attendee with a username as "username (Full Name)" and one without as full name alone', async () => {
+  it('lists attendees: one with a username shows both identities, one without shows the full name alone', async () => {
     renderPage();
-    await waitFor(() => expect(screen.getByText('Jane Doe')).toBeInTheDocument());
-    // Owner appears in the attendee list too, formatted the same way.
-    expect(screen.getAllByText('owner_1 (Owner Name)').length).toBeGreaterThan(0);
+
+    // Attendee without a username: full name only, no "@" handle
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
+    expect(screen.queryByText(/@jane/i)).not.toBeInTheDocument();
+
+    // Owner is both the organizer and an attendee, so their identity appears more than once
+    await waitFor(() => {
+      expect(screen.getAllByText(/Owner Name/).length).toBeGreaterThan(1);
+      expect(screen.getAllByText(/owner_1/).length).toBeGreaterThan(1);
+    });
+
+    // Combined legacy format must not appear anywhere
+    expect(screen.queryByText('owner_1 (Owner Name)')).not.toBeInTheDocument();
   });
 });
