@@ -300,36 +300,6 @@ export default function HomePage() {
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
       <TopBar search={search} onSearchChange={setSearch} />
 
-      {/* Upcoming For You — the user's own events, organized or joined (#244) */}
-      {user && (
-        <div className="mx-auto max-w-3xl px-4">
-          <SectionHeader icon={Calendar} title="Upcoming For You" sectionKey="upcoming" />
-          {!collapsed['upcoming'] && (
-            upcomingForYou.length === 0 ? (
-              <div className="rounded-2xl glass-card px-4 py-5 text-xs text-muted-foreground text-center">
-                You have no upcoming events yet.
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {upcomingForYou.slice(0, visibleUpcoming).map((event) => (
-                    <EventCard key={event.id} event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
-                  ))}
-                </div>
-                {visibleUpcoming < upcomingForYou.length && (
-                  <button
-                    type="button"
-                    onClick={() => setVisibleUpcoming((v) => v + UPCOMING_PAGE)}
-                    className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
-                  >
-                    View more · {upcomingForYou.length - visibleUpcoming} remaining
-                  </button>
-                )}
-              </>
-            )
-          )}
-        </div>
-      )}
 
       {/* Category Filter Wrapping Grid */}
       <div className="mx-auto max-w-3xl px-4 pt-3 pb-4">
@@ -419,6 +389,82 @@ export default function HomePage() {
           </div>
         </div>
 
+
+
+ {/* Upcoming For You — the user's own events, organized or joined (#244) */}
+
+{user && (
+<div className="space-y-2">
+<SectionHeader icon={Calendar} title="Upcoming For You" sectionKey="upcoming" />
+
+    {!collapsed['upcoming'] && (
+
+      upcomingForYou.length === 0 ? (
+<div className="rounded-2xl glass-card px-4 py-5 text-xs text-muted-foreground text-center">
+
+          You have no upcoming events yet.
+</div>
+
+      ) : (
+<>
+<motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+
+            {upcomingForYou.slice(0, visibleUpcoming).map((event, i) => (
+<motion.div
+
+                key={event.id}
+
+                initial={{ opacity: 0, y: 20 }}
+
+                animate={{ opacity: 1, y: 0 }}
+
+                transition={{ delay: i * 0.02 }}
+>
+<EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+</motion.div>
+
+            ))}
+</motion.div>
+
+          {visibleUpcoming < upcomingForYou.length && (
+<button
+
+              type="button"
+
+              onClick={() => setVisibleUpcoming((v) => v + UPCOMING_PAGE)}
+
+              className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+>
+
+              View more · {upcomingForYou.length - visibleUpcoming} remaining
+</button>
+
+          )}
+
+          {visibleUpcoming > UPCOMING_PAGE && (
+<button
+
+              type="button"
+
+              onClick={() => setVisibleUpcoming(UPCOMING_PAGE)}
+
+              className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+>
+
+              Show less
+</button>
+
+          )}
+</>
+
+      )
+
+    )}
+</div>
+
+)}
+ 
+      
         {/* Friend Activity Section */}
         {friendActivity.length > 0 && (
           <div className="space-y-1">
