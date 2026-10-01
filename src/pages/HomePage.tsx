@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { getCurrentUser, getUsers, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -8,6 +8,7 @@ import EventCard from '@/components/EventCard';
 import AppToast from '@/components/AppToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import type { LucideIcon } from 'lucide-react';
 import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2, Film, BookOpen, Plane, Coffee, Network, Leaf, LayoutGrid, SlidersHorizontal, X } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
@@ -15,6 +16,27 @@ import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidatePrefix } from '@/lib/queryCache';
+
+// Stable fallbacks so memo dependencies don't change on every render
+const EMPTY_EVENTS: EventItem[] = [];
+const EMPTY_SET = new Set<string>();
+
+// Defined outside HomePage so it keeps a stable identity between renders
+// (a component declared inside another is re-mounted on every render).
+function SectionHeader({
+  icon: Icon, title, badge, collapsed, onToggle,
+}: { icon: LucideIcon; title: string; badge?: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" onClick={onToggle} className="flex w-full items-center gap-2 pt-6 pb-2 group">
+      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 group-hover:bg-primary/25 transition-colors shrink-0">
+        <Icon className="h-3.5 w-3.5 text-primary" />
+      </div>
+      <h2 className="text-base font-bold text-foreground">{title}</h2>
+      {badge && <span className="ml-1 rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">{badge}</span>}
+      <motion.span className="ml-auto text-muted-foreground text-sm" animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>▾</motion.span>
+    </button>
+  );
+}
 
 export default function HomePage() {
   const INTEREST_PROMPT_DISMISSED_KEY = 'event_interest_prompt_dismissed';
@@ -28,7 +50,6 @@ export default function HomePage() {
   const [debouncedDate, setDebouncedDate] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleInterests, setVisibleInterests] = useState(3);
   const [visibleAll, setVisibleAll] = useState(6);
@@ -60,16 +81,17 @@ export default function HomePage() {
     user?.id,
     Boolean(user?.interests?.length),
   );
-  const { data: myEventsData } = useMyEvents(user?.id);
-  const { data: joinedEventsData } = useJoinedEvents(user?.id);
+  const { data: myEventsData, isLoading: myEventsLoading } = useMyEvents(user?.id);
+  const { data: joinedEventsData, isLoading: joinedEventsLoading } = useJoinedEvents(user?.id);
+  const upcomingLoading = myEventsLoading || joinedEventsLoading;
 
   // ── Derive values from query data ─────────────────────────────────────────
   const maxPrice = maxPriceData?.max_price ?? 500;
-  const favoriteIds = favoriteIdsData ?? new Set<string>();
+  const favoriteIds = favoriteIdsData ?? EMPTY_SET;
   const loading = eventsLoading;
-  const apiEvents = eventsData ?? [];
+  const apiEvents = eventsData ?? EMPTY_EVENTS;
   const interestRecommendationsLoading = recsLoading;
-  const interestRecommendations = recommendationsData ?? [];
+  const interestRecommendations = recommendationsData ?? EMPTY_EVENTS;
   const allUsers = getUsers();
 
   // Sync budget slider max when maxPrice loads from the API
@@ -199,14 +221,9 @@ export default function HomePage() {
   const events = useMemo(() => {
     const local = getLocalEvents().filter((e) => !e.isDraft);
     const byId = new Map<string, EventItem>();
-     [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
-    if (apiEvents.length === 0 && local.length > 0 && !eventsLoading) {
-      setUsingLocalFallback(true);
-    } else if (apiEvents.length > 0) {
-      setUsingLocalFallback(false);
-    }
+    [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
     return Array.from(byId.values());
-  }, [apiEvents, eventsLoading]);
+  }, [apiEvents]);
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
@@ -262,17 +279,6 @@ export default function HomePage() {
     const selectedEvent = events.find((event) => event.id === id) ?? null;
     navigate(`/event/${id}`, { state: selectedEvent ? { event: selectedEvent } : undefined });
   };
-
-  const SectionHeader = ({ icon: Icon, title, badge, sectionKey }: { icon: any; title: string; badge?: string; sectionKey: string }) => (
-    <button type="button" onClick={() => toggleSection(sectionKey)} className="flex w-full items-center gap-2 pt-6 pb-2 group">
-      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 group-hover:bg-primary/25 transition-colors shrink-0">
-        <Icon className="h-3.5 w-3.5 text-primary" />
-      </div>
-      <h2 className="text-base font-bold text-foreground">{title}</h2>
-      {badge && <span className="ml-1 rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">{badge}</span>}
-      <motion.span className="ml-auto text-muted-foreground text-sm" animate={{ rotate: collapsed[sectionKey] ? -90 : 0 }} transition={{ duration: 0.2 }}>▾</motion.span>
-    </button>
-  );
 
   const cats = [
     { id: 'All',     icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
@@ -341,25 +347,57 @@ export default function HomePage() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 space-y-2">
-        {/* Upcoming Events Section */}
-        {upcomingForYou.length > 0 && (
+        {/* Upcoming For You (always shown to signed-in users, with an empty state) */}
+        {user && (
           <div className="space-y-2">
-            <SectionHeader icon={Calendar} title="Upcoming For You" badge={String(upcomingForYou.length)} sectionKey="upcoming" />
+            <SectionHeader
+              icon={Calendar}
+              title="Upcoming For You"
+              badge={upcomingForYou.length > 0 ? String(upcomingForYou.length) : undefined}
+              collapsed={!!collapsed['upcoming']} onToggle={() => toggleSection('upcoming')}
+            />
             {!collapsed['upcoming'] && (
-              <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {upcomingForYou.slice(0, visibleUpcoming).map((event, i) => (
-                  <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
-                    <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+              upcomingForYou.length > 0 ? (
+                <>
+                  <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {upcomingForYou.slice(0, visibleUpcoming).map((event, i) => (
+                      <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
+                        <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+                      </motion.div>
+                    ))}
                   </motion.div>
-                ))}
-              </motion.div>
+                  {visibleUpcoming < upcomingForYou.length && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleUpcoming((v) => v + PAGE)}
+                      className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                    >
+                      View more · {upcomingForYou.length - visibleUpcoming} remaining
+                    </button>
+                  )}
+                  {visibleUpcoming > 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleUpcoming(3)}
+                      className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                    >
+                      Show less
+                    </button>
+                  )}
+                </>
+              ) : upcomingLoading ? null : (
+                <div className="rounded-2xl glass-card px-4 py-5 text-xs text-muted-foreground text-center">
+                  You have no upcoming events yet.
+                </div>
+              )
             )}
           </div>
         )}
+
         {/* Friend Activity Section */}
         {friendActivity.length > 0 && (
           <div className="space-y-1">
-            <SectionHeader icon={Users} title="Friend Activity" sectionKey="friends" />
+            <SectionHeader icon={Users} title="Friend Activity" collapsed={!!collapsed['friends']} onToggle={() => toggleSection('friends')} />
             {!collapsed['friends'] && (
               <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="space-y-3 rounded-2xl glass-card p-4">
                 {friendActivity.map((item: any, i: number) => (
@@ -376,7 +414,7 @@ export default function HomePage() {
         {/* Interest-Based Discovery */}
         {user && (
           <div className="space-y-2">
-            <SectionHeader icon={Sparkles} title="Based On Your Interests" sectionKey="interests" />
+            <SectionHeader icon={Sparkles} title="Based On Your Interests" collapsed={!!collapsed['interests']} onToggle={() => toggleSection('interests')} />
             {!collapsed['interests'] && (
               user.interests?.length ? (
                 interestRecommendationsLoading ? (
@@ -429,7 +467,7 @@ export default function HomePage() {
 
         {/* All Events Section */}
         <div className="space-y-2">
-          <SectionHeader icon={Sparkles} title="All Events" sectionKey="events" />
+          <SectionHeader icon={Sparkles} title="All Events" collapsed={!!collapsed['events']} onToggle={() => toggleSection('events')} />
           {!collapsed['events'] && (
             loading ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 pt-2">
@@ -522,6 +560,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => setShowFilterModal(false)}
+                  aria-label="Close filters"
                   className="rounded-full p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                 >
                   <X className="h-4 w-4" />
@@ -650,7 +689,7 @@ export default function HomePage() {
                     Gaming:     { emoji: '🎮' },
                     Movies:     { emoji: '🎬' },
                     Study:      { emoji: '📚' },
-                    Travel:     { emoji: '✈' },
+                    Travel:     { emoji: '✈️' },
                     Tech:       { emoji: '💻' },
                     Art:        { emoji: '🎨' },
                     Fitness:    { emoji: '💪' },
