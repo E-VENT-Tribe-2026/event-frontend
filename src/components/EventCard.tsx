@@ -15,6 +15,21 @@ interface EventCardProps {
   isFavorite?: boolean; 
 }
 
+// Helper to format ISO start_datetime with fallback to legacy date/time strings
+const formatEventDateTime = (startStr?: string, fallbackDate?: string, fallbackTime?: string) => {
+  if (!startStr) return `${fallbackDate || ''} · ${fallbackTime || ''}`;
+  try {
+    const dateObj = new Date(startStr);
+    if (isNaN(dateObj.getTime())) return `${fallbackDate || ''} · ${fallbackTime || ''}`;
+    
+    const dateFormatted = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeFormatted = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    return `${dateFormatted} · ${timeFormatted}`;
+  } catch {
+    return `${fallbackDate || ''} · ${fallbackTime || ''}`;
+  }
+};
+
 export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: initialIsFavorite = false }: EventCardProps) {
   const navigate = useNavigate();
   const user = getCurrentUser();
@@ -136,6 +151,9 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
   const formattedUsername = organizerUsername ? `@${organizerUsername.replace(/^@/, '')}` : null;
   const organizerAvatar = organizerProfile?.avatar_url || event.organizerAvatar;
 
+  // Extract start_datetime from the event object safely
+  const startDatetime = (event as any).start_datetime || (event as any).startDatetime;
+
   return (
     <Link
       to={`/event/${event.id}`}
@@ -184,7 +202,10 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
           </div>
         )}
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{event.date} · {event.time}</span>
+          <span className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {formatEventDateTime(startDatetime, event.date, event.time)}
+          </span>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1 truncate"><MapPin className="h-3 w-3 shrink-0" />{event.location}</span>

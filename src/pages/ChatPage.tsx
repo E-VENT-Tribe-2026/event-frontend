@@ -45,7 +45,7 @@ type ChatMessage = {
 
 function isExpiredOver48h(eventDate: string): boolean {
   if (!eventDate) return false;
-  const normalized = /[Zz]$\vert{}[+-]\d{2}:\d{2}$/.test(eventDate) ? eventDate : `${eventDate}T00:00:00Z`;
+  const normalized = /[Zz]|[+-]\d{2}:\d{2}$/.test(eventDate) ? eventDate : `${eventDate}T00:00:00Z`;
   const ts = new Date(normalized).getTime();
   if (Number.isNaN(ts)) return false;
   return Date.now() - ts > 48 * 60 * 60 * 1000;
@@ -65,10 +65,6 @@ function formatDateSeparator(dateKey: string): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-type EventAvailabilityStatus = 'active' | 'cancelled' | 'unknown';
-
-const EMOJIS = ['😀', '😂', '❤️', '🔥', '🎉', '👏', '🙌', '💯', '✨', '🎶', '🤩', '😎', '🥳', '💜', '🎵', '⚡'];
-
 type EncodedChatPayload = {
   v: 1;
   type: 'text' | 'file' | 'voice';
@@ -81,18 +77,6 @@ type EncodedChatPayload = {
 function chatMessagesPath(eventId: string) {
   return `/api/chats/${eventId}/messages`;
 }
-
-const LEGACY_MESSAGE_GET_PATHS = (eventId: string) => [
-  `/api/events/${eventId}/chat/messages`,
-  `/api/events/${eventId}/messages`,
-  `/api/chat/events/${eventId}/messages`,
-];
-
-const LEGACY_MESSAGE_POST_PATHS = (eventId: string) => [
-  `/api/events/${eventId}/chat/messages`,
-  `/api/events/${eventId}/messages`,
-  `/api/chat/events/${eventId}/messages`,
-];
 
 export default function ChatPage() {
   const navigate = useNavigate();
@@ -244,38 +228,9 @@ export default function ChatPage() {
         });
 
       const mapped = Array.from(byId.values());
+      setChats(mapped);
 
-      const withLastMsg = await Promise.all(
-        mapped.map(async (chat) => {
-          try {
-            const res = await fetch(
-              `${getApiUrl(chatMessagesPath(chat.id))}?limit=50&page=1`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
-            if (!res.ok) return chat;
-            const body = await res.json().catch(() => ({}));
-            const rows: Record<string, unknown>[] = Array.isArray(body.data)
-              ? body.data : Array.isArray(body) ? body : [];
-            const last = rows[rows.length - 1];
-            if (!last) return chat;
-            const rawContent = String(last.content || last.message || last.text || '').trim();
-            let displayText = rawContent;
-            try {
-              const p = JSON.parse(rawContent) as { v?: number; type?: string; text?: string; fileName?: string };
-              if (p?.v === 1) displayText = p.text || (p.type === 'voice' ? '🎤 Voice message' : p.fileName || 'Attachment');
-            } catch { /* plain text */ }
-            const sentAt = last.created_at || last.sent_at || last.timestamp;
-            const timeStr = sentAt
-              ? new Date(String(sentAt)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : chat.time;
-            return { ...chat, lastMsg: displayText || chat.lastMsg, time: timeStr };
-          } catch { return chat; }
-        }),
-      );
-
-      setChats(withLastMsg);
-
-      if (activeChat && !withLastMsg.some((entry) => entry.id === activeChat)) {
+      if (activeChat && !mapped.some((entry) => entry.id === activeChat)) {
         setActiveChat(null);
         setChatUnavailable(true);
         setMessages([]);
@@ -283,7 +238,7 @@ export default function ChatPage() {
       }
 
       if (selectedEventFromUrl && !handledSelectedParam) {
-        if (withLastMsg.some((entry) => entry.id === selectedEventFromUrl)) {
+        if (mapped.some((entry) => entry.id === selectedEventFromUrl)) {
           setActiveChat(selectedEventFromUrl);
         } else {
           try {
@@ -329,23 +284,6 @@ export default function ChatPage() {
 
   useEffect(() => { void loadChatList(); }, [loadChatList]);
 
-  useEffect(() => {
-    if (!token) return;
-    const onFocus = () => { void loadChatList(true); };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [token, loadChatList]);
-
-  const checkEventAvailability = useCallback(async (eventId: string): Promise<EventAvailabilityStatus> => {
-    try {
-      const res = await fetch(getApiUrl(`/api/events/${eventId}`));
-      if (!res.ok) return 'unknown';
-      const evt = await res.json();
-      const statusStr = String(evt?.status || '').toLowerCase();
-      return statusStr === 'cancelled' || statusStr === 'canceled' ? 'cancelled' : 'active';
-    } catch { return 'unknown'; }
-  }, []);
-
   const normalizeMessageList = (body: unknown): Record<string, unknown>[] => {
     if (!body || typeof body !== 'object') return [];
     const b = body as Record<string, unknown>;
@@ -357,14 +295,11 @@ export default function ChatPage() {
   const loadMessages = useCallback(
     async (eventId: string, silent = false) => {
       if (!token) return;
-      if (!silent) setMessagesLoading(true);
+      if (!silent) {
+        setMessagesLoading(true);
+        setMessages([]); // Clears old messages immediately to prevent bleed-over
+      }
       try {
-        const availability = await checkEventAvailability(eventId);
-        if (availability === 'cancelled') {
-          setChats((prev) =>
-            prev.map((c) => (c.id === eventId ? { ...c, isCancelled: true } : c)),
-          );
-        }
         const primaryUrl = `${getApiUrl(chatMessagesPath(eventId))}?limit=100&page=1`;
         let res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
         let rows: Record<string, unknown>[] = [];
@@ -378,15 +313,6 @@ export default function ChatPage() {
           setMessages([]);
           setToast({ show: true, message: 'You can no longer access this chat.', type: 'error' });
           return;
-        } else {
-          for (const path of LEGACY_MESSAGE_GET_PATHS(eventId)) {
-            res = await fetch(getApiUrl(path), { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-            if (!res.ok) { if (res.status !== 404 && res.status !== 405) anyEndpointSupported = true; continue; }
-            anyEndpointSupported = true;
-            const body = await res.json().catch(() => ({}));
-            rows = normalizeMessageList(body);
-            break;
-          }
         }
         setMessages(rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[]);
         setChatUnavailable(false);
@@ -397,7 +323,7 @@ export default function ChatPage() {
         if (!silent) setMessagesLoading(false);
       }
     },
-    [token, checkEventAvailability],
+    [token],
   );
 
   useEffect(() => {
@@ -405,72 +331,31 @@ export default function ChatPage() {
     void loadMessages(activeChat);
   }, [activeChat, loadMessages]);
 
-  useEffect(() => {
-    if (!activeChat || chatUnavailable) return;
-    const timer = window.setInterval(() => {
-      void loadMessages(activeChat, true);
-    }, 8000);
-    return () => window.clearInterval(timer);
-  }, [activeChat, chatUnavailable, loadMessages]);
-
   const sendMessage = async (explicitContent?: string) => {
+    const chat = activeChatObj;
+    if (chat?.isCancelled || chat?.isPast) return; // Prevent sending on cancelled/past chats
+
     const content = explicitContent ?? encodePayload({ v: 1, type: 'text', text: input.trim() });
     const plainInput = input.trim();
     if (!content || !activeChat || !token || sending || chatUnavailable) return;
     if (!explicitContent && !plainInput) return;
-    const availability = await checkEventAvailability(activeChat);
-    if (availability === 'cancelled' || activeChatObj?.isCancelled) {
-      setChats((prev) => prev.map((c) => (c.id === activeChat ? { ...c, isCancelled: true } : c)));
-      setToast({ show: true, message: 'Event chat is read-only because the event is canceled.', type: 'error' });
-      return;
-    }
+    
     setSending(true);
     try {
       const primary = getApiUrl(chatMessagesPath(activeChat));
-      let res = await fetch(primary, {
+      const res = await fetch(primary, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ content }),
       });
-      let sendOk = res.ok;
-      let onlyMissingEndpoints = res.status === 404 || res.status === 405;
-      if (!sendOk && onlyMissingEndpoints) {
-        for (const path of LEGACY_MESSAGE_POST_PATHS(activeChat)) {
-          res = await fetch(getApiUrl(path), {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: content, content, text: content }),
-          });
-          if (res.ok) { sendOk = true; break; }
-          if (res.status !== 404 && res.status !== 405) onlyMissingEndpoints = false;
-        }
-      }
-      if (res.status === 403) {
-        setChatUnavailable(true);
-        setMessages([]);
-        setToast({ show: true, message: 'This event was canceled or you no longer have access to this chat.', type: 'error' });
-        return;
-      }
-      if (!sendOk) {
-        if (onlyMissingEndpoints) {
-          const parsedContent = parsePayload(content);
-          setMessages((prev) => [...prev, {
-            id: crypto.randomUUID(), from: 'me',
-            text: parsedContent?.text || plainInput,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            dateKey: new Date().toISOString().slice(0, 10),
-            messageType: parsedContent?.type || 'text',
-          }]);
-          setInput(''); setShowEmoji(false); setChatApiMissing(true);
-          setToast({ show: true, message: 'Chat API not available yet. Message shown locally only.', type: 'error' });
-          return;
-        }
+      
+      if (!res.ok) {
         const errText = await res.text().catch(() => '');
         setToast({ show: true, message: errText ? `Could not send: ${errText.slice(0, 120)}` : 'Unable to send message right now.', type: 'error' });
         return;
       }
       setInput(''); setShowEmoji(false); setChatApiMissing(false);
-      await loadMessages(activeChat);
+      await loadMessages(activeChat, true);
     } catch {
       setToast({ show: true, message: 'Unable to send message right now.', type: 'error' });
     } finally {
@@ -511,13 +396,6 @@ export default function ChatPage() {
           </div>
         </header>
 
-        {chatUnavailable && (
-          <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>You can no longer use this chat.</p>
-          </div>
-        )}
-
         {chat.isCancelled && !chatUnavailable && (
           <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -543,7 +421,7 @@ export default function ChatPage() {
                   <Send className="h-6 w-6 text-primary" />
                 </div>
                 <p className="text-sm font-medium text-foreground">No messages yet</p>
-                <p className="text-xs text-muted-foreground">Be the first to say hello 👋</p>
+                <p className="text-xs text-muted-foreground">History is empty for this chat</p>
               </div>
             )}
             {messages.map((m, i) => {
@@ -577,15 +455,6 @@ export default function ChatPage() {
                             <span className="text-[11px] font-semibold text-foreground">
                               {formatUserIdentity({ username: m.senderUsername, fullName: m.senderName || 'Unknown' })}
                             </span>
-                            {m.senderId && (
-                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                                m.senderId === chat.organizerId
-                                  ? 'gradient-primary text-primary-foreground'
-                                  : 'bg-secondary text-muted-foreground'
-                              }`}>
-                                {m.senderId === chat.organizerId ? 'Host' : 'Guest'}
-                              </span>
-                            )}
                           </div>
                         )}
                         <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
@@ -610,19 +479,6 @@ export default function ChatPage() {
         </div>
 
         <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-          <AnimatePresence>
-            {showEmoji && !chatUnavailable && !isReadOnly && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-3 overflow-hidden">
-                <div className="flex flex-wrap gap-2 rounded-2xl glass-card px-3 py-2.5">
-                  {EMOJIS.map((emoji) => (
-                    <button key={emoji} type="button" onClick={() => setInput((prev) => prev + emoji)} className="text-xl transition-transform hover:scale-125 active:scale-95">
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -639,9 +495,10 @@ export default function ChatPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
               placeholder={
-                chat.isCancelled ? 'Chat is read-only for cancelled events'
-                  : chat.isPast ? 'Chat is read-only for past events'
-                  : chatUnavailable ? 'Chat unavailable for this event'
+                chat.isCancelled 
+                  ? 'Cancelled event chat is read-only' 
+                  : chat.isPast 
+                  ? 'Past event chat is read-only' 
                   : 'Type a message…'
               }
               className="flex-1 rounded-full border border-border/50 bg-secondary px-4 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -684,16 +541,11 @@ export default function ChatPage() {
             <h1 className="text-xl font-bold text-gradient">Chats</h1>
             <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
           </div>
-          {chats.length > 0 && (
-            <span className="rounded-full gradient-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground shadow-glow">
-              {activeChats.length} active
-            </span>
-          )}
         </div>
       </header>
 
       <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
-        {/* Chat Tabs with Icons */}
+        {/* Chat Tabs with Circular Badge Counters */}
         <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
           {[
             { id: 'active' as const, label: 'Active', count: activeChats.length, icon: Calendar },
@@ -716,7 +568,14 @@ export default function ChatPage() {
                 }`}
               >
                 <tab.icon className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{tab.label} ({tab.count})</span>
+                <span className="truncate">{tab.label}</span>
+                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
+                  isActive 
+                    ? 'bg-background/25 text-inherit' 
+                    : 'bg-secondary text-muted-foreground'
+                }`}>
+                  {tab.count}
+                </span>
               </button>
             );
           })}
@@ -754,7 +613,10 @@ export default function ChatPage() {
               <motion.button
                 key={chat.id}
                 type="button"
-                onClick={() => setActiveChat(chat.id)}
+                onClick={() => {
+                  setMessages([]); // Clears immediately on click
+                  setActiveChat(chat.id);
+                }}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 className={`flex w-full items-center gap-3 rounded-2xl glass-card px-4 py-3.5 text-left transition-all hover:border-primary/30 active:scale-[0.98] ${chat.isPast || chat.isCancelled ? 'opacity-65' : ''}`}
@@ -768,14 +630,6 @@ export default function ChatPage() {
                   <p className="line-clamp-1 text-xs text-muted-foreground mt-0.5">
                     {chat.isCancelled ? 'Cancelled · Read-only' : chat.isPast ? `Ended · ${chat.eventDate}` : chat.lastMsg}
                   </p>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <span className="text-[10px] text-muted-foreground">{chat.time}</span>
-                  {chat.unread > 0 && (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full gradient-primary text-[10px] font-bold text-primary-foreground shadow-glow">
-                      {chat.unread}
-                    </span>
-                  )}
                 </div>
               </motion.button>
             ))}

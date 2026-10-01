@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { User } from '@/lib/storage';
+import type { EventItem, User } from '@/lib/storage';
 import HomePage from '@/pages/HomePage';
 
 const { getCurrentUserMock, getUsersMock, getEventsMock, getAuthTokenMock } = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn<[], User | null>(),
   getUsersMock: vi.fn<[], User[]>(),
-  getEventsMock: vi.fn<[], []>(),
+  getEventsMock: vi.fn<[], EventItem[]>(),
   getAuthTokenMock: vi.fn<[], string | null>(),
 }));
 
@@ -78,6 +78,8 @@ function jsonOk(data: unknown) {
   return new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
+const EMPTY_MESSAGE = 'You have no upcoming events yet.';
+
 describe('HomePage — Upcoming For You section (#244)', () => {
   const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
 
@@ -109,17 +111,26 @@ describe('HomePage — Upcoming For You section (#244)', () => {
     );
   }
 
+  /**
+   * Route order matters: '/api/events/my-events' also contains '/api/events',
+   * so the specific routes are checked before the generic events route.
+   */
   function mockFetch({
     myEvents = [],
     joinedEvents = [],
+    myEventsResponse,
   }: {
     myEvents?: unknown[];
     joinedEvents?: unknown[];
+    /** Overrides the my-events response, e.g. to keep it pending. */
+    myEventsResponse?: () => Promise<Response>;
   }) {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
-      if (url.includes('/api/events/my-events')) return Promise.resolve(jsonOk({ data: myEvents }));
+      if (url.includes('/api/events/my-events')) {
+        return myEventsResponse ? myEventsResponse() : Promise.resolve(jsonOk({ data: myEvents }));
+      }
       if (url.includes('/api/participants/my/events')) {
         return Promise.resolve(jsonOk(joinedEvents.map((events) => ({ events }))));
       }
@@ -153,12 +164,20 @@ describe('HomePage — Upcoming For You section (#244)', () => {
 
     renderHome();
 
-    await waitFor(() => expect(screen.getAllByText('Own Event I Also Joined').length).toBeGreaterThan(0));
-    // Only one card in the Upcoming For You section — not two.
-    const upcomingSection = screen.getByText('Upcoming For You').closest('div');
-    const cardsInSection = upcomingSection?.parentElement?.querySelectorAll('h3');
-    const matching = Array.from(cardsInSection ?? []).filter((el) => el.textContent === 'Own Event I Also Joined');
-    expect(matching.length).toBe(1);
+    // Make sure both lists have been requested before counting cards
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('/api/events/my-events'))).toBe(true);
+      expect(urls.some((u) => u.includes('/api/participants/my/events'))).toBe(true);
+    });
+
+    // Re-query on every poll so the test never holds a stale node. The Upcoming
+    // section is the wrapper shared by its header button and its cards.
+    await waitFor(() => {
+      const heading = screen.getByRole('heading', { name: 'Upcoming For You' });
+      const section = heading.closest('button')!.parentElement as HTMLElement;
+      expect(within(section).getAllByRole('heading', { name: 'Own Event I Also Joined' })).toHaveLength(1);
+    });
   });
 
   it('shows an empty-state message when the user has no upcoming events', async () => {
@@ -166,6 +185,22 @@ describe('HomePage — Upcoming For You section (#244)', () => {
 
     renderHome();
 
-    await waitFor(() => expect(screen.getByText('You have no upcoming events yet.')).toBeInTheDocument());
+    expect(await screen.findByText(EMPTY_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('does not flash the empty state while upcoming events are still loading', async () => {
+    let resolveMine!: (r: Response) => void;
+    const pending = new Promise<Response>((res) => {
+      resolveMine = res;
+    });
+    mockFetch({ myEventsResponse: () => pending });
+
+    renderHome();
+
+    await screen.findByText('Upcoming For You');
+    expect(screen.queryByText(EMPTY_MESSAGE)).not.toBeInTheDocument();
+
+    resolveMine(jsonOk({ data: [] }));
+    expect(await screen.findByText(EMPTY_MESSAGE)).toBeInTheDocument();
   });
 });

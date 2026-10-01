@@ -89,10 +89,27 @@ export default function CreateEventPage() {
     setPickedLng(prev => prev ?? null);
   };
 
-  const onMapLocationChange = (lat: number, lng: number) => {
+  // Reverse geocode coordinates when clicked on map to fill address edit box
+  const onMapLocationChange = async (lat: number, lng: number) => {
     setPickedLat(lat);
     setPickedLng(lng);
     setErrors(prev => { const n = { ...prev }; delete n.mapLocation; return n; });
+
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {
+        headers: { 'Accept-Language': 'en' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.display_name) {
+          update('location', data.display_name);
+        } else {
+          update('location', `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        }
+      }
+    } catch {
+      update('location', `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+    }
   };
 
   const todayIso = new Date().toISOString().split('T')[0];

@@ -8,14 +8,35 @@ import EventCard from '@/components/EventCard';
 import AppToast from '@/components/AppToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2, Film, BookOpen, Plane, Coffee, Network, Leaf, LayoutGrid } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2, Film, BookOpen, Plane, Coffee, Network, Leaf, LayoutGrid, SlidersHorizontal, X } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
-import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents, invalidateProfile } from '@/lib/queries';
-import { queryClient } from '@/lib/queryClient';
+import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidatePrefix } from '@/lib/queryCache';
+
+// Stable fallbacks so memo dependencies don't change on every render
+const EMPTY_EVENTS: EventItem[] = [];
+const EMPTY_SET = new Set<string>();
+
+// Defined outside HomePage so it keeps a stable identity between renders
+// (a component declared inside another is re-mounted on every render).
+function SectionHeader({
+  icon: Icon, title, badge, collapsed, onToggle,
+}: { icon: LucideIcon; title: string; badge?: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" onClick={onToggle} className="flex w-full items-center gap-2 pt-6 pb-2 group">
+      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 group-hover:bg-primary/25 transition-colors shrink-0">
+        <Icon className="h-3.5 w-3.5 text-primary" />
+      </div>
+      <h2 className="text-base font-bold text-foreground">{title}</h2>
+      {badge && <span className="ml-1 rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">{badge}</span>}
+      <motion.span className="ml-auto text-muted-foreground text-sm" animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>▾</motion.span>
+    </button>
+  );
+}
 
 export default function HomePage() {
   const INTEREST_PROMPT_DISMISSED_KEY = 'event_interest_prompt_dismissed';
@@ -29,13 +50,13 @@ export default function HomePage() {
   const [debouncedDate, setDebouncedDate] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [usingLocalFallback, setUsingLocalFallback] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleInterests, setVisibleInterests] = useState(3);
   const [visibleAll, setVisibleAll] = useState(6);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+
   const [visibleUpcoming, setVisibleUpcoming] = useState(3);
   const PAGE = 6;
-  const UPCOMING_PAGE = 3;
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -60,17 +81,17 @@ export default function HomePage() {
     user?.id,
     Boolean(user?.interests?.length),
   );
-  // #244 — user's own upcoming events, organized or joined; both already cached client-side (11.1)
-  const { data: myEventsData } = useMyEvents(user?.id);
-  const { data: joinedEventsData } = useJoinedEvents(user?.id);
+  const { data: myEventsData, isLoading: myEventsLoading } = useMyEvents(user?.id);
+  const { data: joinedEventsData, isLoading: joinedEventsLoading } = useJoinedEvents(user?.id);
+  const upcomingLoading = myEventsLoading || joinedEventsLoading;
 
   // ── Derive values from query data ─────────────────────────────────────────
   const maxPrice = maxPriceData?.max_price ?? 500;
-  const favoriteIds = favoriteIdsData ?? new Set<string>();
+  const favoriteIds = favoriteIdsData ?? EMPTY_SET;
   const loading = eventsLoading;
-  const apiEvents = eventsData ?? [];
+  const apiEvents = eventsData ?? EMPTY_EVENTS;
   const interestRecommendationsLoading = recsLoading;
-  const interestRecommendations = recommendationsData ?? [];
+  const interestRecommendations = recommendationsData ?? EMPTY_EVENTS;
   const allUsers = getUsers();
 
   // Sync budget slider max when maxPrice loads from the API
@@ -201,21 +222,13 @@ export default function HomePage() {
     const local = getLocalEvents().filter((e) => !e.isDraft);
     const byId = new Map<string, EventItem>();
     [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
-    if (apiEvents.length === 0 && local.length > 0 && !eventsLoading) {
-      setUsingLocalFallback(true);
-    } else if (apiEvents.length > 0) {
-      setUsingLocalFallback(false);
-    }
     return Array.from(byId.values());
-  }, [apiEvents, eventsLoading]);
+  }, [apiEvents]);
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
-  // ── #244: user's own upcoming events (organized + joined), no cancelled ───
   const upcomingForYou = useMemo(() => {
     const combined = [...(myEventsData ?? []), ...(joinedEventsData ?? [])];
-    // An organizer is also a participant of their own event, so the same
-    // event can appear in both lists — dedupe by id.
     const byId = new Map<string, EventItem>();
     combined.forEach((e) => byId.set(e.id, e));
     return Array.from(byId.values())
@@ -267,208 +280,124 @@ export default function HomePage() {
     navigate(`/event/${id}`, { state: selectedEvent ? { event: selectedEvent } : undefined });
   };
 
-  const SectionHeader = ({ icon: Icon, title, badge, sectionKey }: { icon: any; title: string; badge?: string; sectionKey: string }) => (
-    <button type="button" onClick={() => toggleSection(sectionKey)} className="flex w-full items-center gap-2 pt-6 pb-2 group">
-      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 group-hover:bg-primary/25 transition-colors shrink-0">
-        <Icon className="h-3.5 w-3.5 text-primary" />
-      </div>
-      <h2 className="text-base font-bold text-foreground">{title}</h2>
-      {badge && <span className="ml-1 rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">{badge}</span>}
-      <motion.span className="ml-auto text-muted-foreground text-sm" animate={{ rotate: collapsed[sectionKey] ? -90 : 0 }} transition={{ duration: 0.2 }}>▾</motion.span>
-    </button>
-  );
-
   const cats = [
-    { id: 'All',        icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
-    { id: 'Music',      icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
-    { id: 'Tech',       icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
-    { id: 'Food',       icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
-    { id: 'Fitness',    icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
-    { id: 'Art',        icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
-    { id: 'Gaming',     icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
-    { id: 'Sports',     icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
-    { id: 'Movies',     icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
-    { id: 'Study',      icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
-    { id: 'Travel',     icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
-    { id: 'Coffee',     icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
-    { id: 'Networking', icon: Network,    iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
-    { id: 'Wellness',   icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
+    { id: 'All',     icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
+    { id: 'Music',    icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
+    { id: 'Tech',     icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
+    { id: 'Food',     icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
+    { id: 'Fitness',  icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
+    { id: 'Art',      icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
+    { id: 'Gaming',   icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
+    { id: 'Sports',   icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
+    { id: 'Movies',   icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
+    { id: 'Study',    icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
+    { id: 'Travel',   icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
+    { id: 'Coffee',   icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
+    { id: 'Networking',icon: Network,   iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
+    { id: 'Wellness', icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
   ] as const;
+
+  const activeFiltersCount = (filterDate ? 1 : 0) + (selectedCity ? 1 : 0) + (budgetMin > 0 || budgetMax < maxPrice ? 1 : 0);
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
-      <TopBar search={search} onSearchChange={setSearch} />
-
-
-      {/* Category Filter Wrapping Grid */}
-      <div className="mx-auto max-w-3xl px-4 pt-3 pb-4">
-        <div className="flex flex-wrap justify-center gap-1.5">
-          {cats.map(({ id, icon: Icon, iconColor, activeBg, activeBorderColor }) => {
-            const active = category === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setCategory(id)}
-                style={active ? { background: activeBg, borderColor: activeBorderColor, color: iconColor } : { background: activeBg.replace('0.15', '0.08'), borderColor: activeBorderColor.replace('0.5', '0.25') }}
-                className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all active:scale-95 ${
-                  active ? 'border-transparent shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: iconColor }} />
-                {id}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-3xl space-y-3 px-4">
-
-        {/* Search/Location Filters */}
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 rounded-2xl glass-card p-2.5">
-            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground"><Calendar className="h-3 w-3" /> Event date</span>
-            <input
-              type="date"
-              value={filterDate}
-              min={minDate}
-              onChange={(e) => setFilterDate(e.target.value)}
-              className="rounded-lg bg-secondary/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-            />
-          </label>
-          <label className="flex flex-col gap-1 rounded-2xl glass-card p-2.5">
-            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
-              <MapPin className="h-3 w-3" /> Location
-            </span>
-            <select
-              id="home-city-filter"
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
-              className="rounded-lg bg-secondary/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              aria-label="Filter events by location"
-            >
-              <option value="">All locations</option>
-              {availableCities.map((city) => (
-                <option key={city} value={city}>{city}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {/* Budget Range */}
-        <div className="rounded-2xl glass-card p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase text-muted-foreground">Budget range</span>
-            <span className="text-xs font-medium text-foreground">€{budgetMin} — €{budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
-          </div>
-          <div className="relative h-5 flex items-center">
-            <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />
-            <div
-              className="absolute h-1.5 rounded-full bg-primary pointer-events-none"
-              style={{
-                left: `${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}%`,
-                right: `${maxPrice > 0 ? 100 - (budgetMax / maxPrice) * 100 : 0}%`,
-              }}
-            />
-            <input type="range" min={0} max={maxPrice} value={budgetMin}
-              onChange={(e) => { const v = Math.min(Number(e.target.value), budgetMax - 1); setBudgetMin(v); }}
-              className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              style={{ zIndex: budgetMin > maxPrice * 0.9 ? 5 : 3 }}
-            />
-            <input type="range" min={0} max={maxPrice} value={budgetMax}
-              onChange={(e) => { const v = Math.max(Number(e.target.value), budgetMin + 1); setBudgetMax(v); }}
-              className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              style={{ zIndex: 4 }}
-            />
-            <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-              style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 7px)` }} />
-            <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-              style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 7px)` }} />
-          </div>
-        </div>
-
-
-
- {/* Upcoming For You — the user's own events, organized or joined (#244) */}
-
-{user && (
-<div className="space-y-2">
-<SectionHeader icon={Calendar} title="Upcoming For You" sectionKey="upcoming" />
-
-    {!collapsed['upcoming'] && (
-
-      upcomingForYou.length === 0 ? (
-<div className="rounded-2xl glass-card px-4 py-5 text-xs text-muted-foreground text-center">
-
-          You have no upcoming events yet.
-</div>
-
-      ) : (
-<>
-<motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-
-            {upcomingForYou.slice(0, visibleUpcoming).map((event, i) => (
-<motion.div
-
-                key={event.id}
-
-                initial={{ opacity: 0, y: 20 }}
-
-                animate={{ opacity: 1, y: 0 }}
-
-                transition={{ delay: i * 0.02 }}
->
-<EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
-</motion.div>
-
-            ))}
-</motion.div>
-
-          {visibleUpcoming < upcomingForYou.length && (
-<button
-
-              type="button"
-
-              onClick={() => setVisibleUpcoming((v) => v + UPCOMING_PAGE)}
-
-              className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
->
-
-              View more · {upcomingForYou.length - visibleUpcoming} remaining
-</button>
-
-          )}
-
-          {visibleUpcoming > UPCOMING_PAGE && (
-<button
-
-              type="button"
-
-              onClick={() => setVisibleUpcoming(UPCOMING_PAGE)}
-
-              className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
->
-
-              Show less
-</button>
-
-          )}
-</>
-
-      )
-
-    )}
-</div>
-
-)}
- 
       
+      {/* Top Navigation Bar with Embedded Categories & Filter Toggle */}
+      <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/40">
+        <TopBar search={search} onSearchChange={setSearch} />
+
+        <div className="mx-auto max-w-3xl px-4 pt-2 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="flex flex-wrap flex-1 gap-1.5">
+              {cats.map(({ id, icon: Icon, iconColor, activeBg, activeBorderColor }) => {
+                const active = category === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setCategory(id)}
+                    style={active ? { background: activeBg, borderColor: activeBorderColor, color: iconColor } : { background: activeBg.replace('0.15', '0.08'), borderColor: activeBorderColor.replace('0.5', '0.25') }}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all active:scale-95 ${
+                      active ? 'border-transparent shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: iconColor }} />
+                    {id}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowFilterModal(true)}
+              className="relative shrink-0 flex items-center justify-center h-9 w-9 rounded-full glass-card hover:bg-secondary transition-colors self-start"
+              aria-label="Open Filters"
+            >
+              <SlidersHorizontal className="h-4 w-4 text-foreground" />
+              {activeFiltersCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full gradient-primary text-[9px] font-bold text-primary-foreground shadow-glow">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-4 space-y-2">
+        {/* Upcoming For You (always shown to signed-in users, with an empty state) */}
+        {user && (
+          <div className="space-y-2">
+            <SectionHeader
+              icon={Calendar}
+              title="Upcoming For You"
+              badge={upcomingForYou.length > 0 ? String(upcomingForYou.length) : undefined}
+              collapsed={!!collapsed['upcoming']} onToggle={() => toggleSection('upcoming')}
+            />
+            {!collapsed['upcoming'] && (
+              upcomingForYou.length > 0 ? (
+                <>
+                  <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {upcomingForYou.slice(0, visibleUpcoming).map((event, i) => (
+                      <motion.div key={event.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
+                        <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                  {visibleUpcoming < upcomingForYou.length && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleUpcoming((v) => v + PAGE)}
+                      className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                    >
+                      View more · {upcomingForYou.length - visibleUpcoming} remaining
+                    </button>
+                  )}
+                  {visibleUpcoming > 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleUpcoming(3)}
+                      className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium text-primary hover:bg-secondary/50 transition-colors"
+                    >
+                      Show less
+                    </button>
+                  )}
+                </>
+              ) : upcomingLoading ? null : (
+                <div className="rounded-2xl glass-card px-4 py-5 text-xs text-muted-foreground text-center">
+                  You have no upcoming events yet.
+                </div>
+              )
+            )}
+          </div>
+        )}
+
         {/* Friend Activity Section */}
         {friendActivity.length > 0 && (
           <div className="space-y-1">
-            <SectionHeader icon={Users} title="Friend Activity" sectionKey="friends" />
+            <SectionHeader icon={Users} title="Friend Activity" collapsed={!!collapsed['friends']} onToggle={() => toggleSection('friends')} />
             {!collapsed['friends'] && (
               <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="space-y-3 rounded-2xl glass-card p-4">
                 {friendActivity.map((item: any, i: number) => (
@@ -485,7 +414,7 @@ export default function HomePage() {
         {/* Interest-Based Discovery */}
         {user && (
           <div className="space-y-2">
-            <SectionHeader icon={Sparkles} title="Based On Your Interests" sectionKey="interests" />
+            <SectionHeader icon={Sparkles} title="Based On Your Interests" collapsed={!!collapsed['interests']} onToggle={() => toggleSection('interests')} />
             {!collapsed['interests'] && (
               user.interests?.length ? (
                 interestRecommendationsLoading ? (
@@ -538,7 +467,7 @@ export default function HomePage() {
 
         {/* All Events Section */}
         <div className="space-y-2">
-          <SectionHeader icon={Sparkles} title="All Events" sectionKey="events" />
+          <SectionHeader icon={Sparkles} title="All Events" collapsed={!!collapsed['events']} onToggle={() => toggleSection('events')} />
           {!collapsed['events'] && (
             loading ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 pt-2">
@@ -606,8 +535,125 @@ export default function HomePage() {
             )
           )}
         </div>
-      </div>
+      </main>
+
       <BottomNav />
+
+      {/* Filter Popup Modal */}
+      <AnimatePresence>
+        {showFilterModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-background/80 backdrop-blur-sm px-4 pb-4 sm:pb-0"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 48 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 48 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+              className="w-full max-w-sm rounded-3xl glass-card overflow-hidden bg-background border border-border shadow-xl"
+            >
+              <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-border/40">
+                <h3 className="text-base font-bold text-foreground">Filters</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowFilterModal(false)}
+                  aria-label="Close filters"
+                  className="rounded-full p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {/* Event Date Filter */}
+                <label className="flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
+                    <Calendar className="h-3.5 w-3.5 text-primary" /> Event date
+                  </span>
+                  <input
+                    type="date"
+                    value={filterDate}
+                    min={minDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    className="rounded-xl bg-secondary px-3.5 py-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40 border border-border/50"
+                  />
+                </label>
+
+                {/* Location Filter */}
+                <label className="flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
+                    <MapPin className="h-3.5 w-3.5 text-accent" /> Location
+                  </span>
+                  <select
+                    id="home-city-filter"
+                    value={selectedCity}
+                    onChange={(e) => setSelectedCity(e.target.value)}
+                    className="rounded-xl bg-secondary px-3.5 py-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40 border border-border/50"
+                    aria-label="Filter events by location"
+                  >
+                    <option value="">All locations</option>
+                    {availableCities.map((city) => (
+                      <option key={city} value={city}>{city}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Budget Range */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase text-muted-foreground">Budget range</span>
+                    <span className="text-xs font-medium text-foreground">€{budgetMin} — €{budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
+                  </div>
+                  <div className="relative h-6 flex items-center px-1">
+                    <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />
+                    <div
+                      className="absolute h-1.5 rounded-full bg-primary pointer-events-none"
+                      style={{
+                        left: `${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}%`,
+                        right: `${maxPrice > 0 ? 100 - (budgetMax / maxPrice) * 100 : 0}%`,
+                      }}
+                    />
+                    <input type="range" min={0} max={maxPrice} value={budgetMin}
+                      onChange={(e) => { const v = Math.min(Number(e.target.value), budgetMax - 1); setBudgetMin(v); }}
+                      className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      style={{ zIndex: budgetMin > maxPrice * 0.9 ? 5 : 3 }}
+                    />
+                    <input type="range" min={0} max={maxPrice} value={budgetMax}
+                      onChange={(e) => { const v = Math.max(Number(e.target.value), budgetMin + 1); setBudgetMax(v); }}
+                      className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      style={{ zIndex: 4 }}
+                    />
+                    <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+                      style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 7px)` }} />
+                    <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+                      style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 7px)` }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-6 pb-6 pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setFilterDate(''); setSelectedCity(''); setBudgetMin(0); setBudgetMax(maxPrice); }}
+                  className="flex-1 rounded-2xl border border-border bg-secondary py-3 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors"
+                >
+                  Clear all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFilterModal(false)}
+                  className="flex-1 rounded-2xl gradient-primary py-3 text-xs font-bold text-primary-foreground shadow-glow active:scale-[0.98] transition-transform"
+                >
+                  Apply Filters
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Interest selection modal */}
       <AnimatePresence>

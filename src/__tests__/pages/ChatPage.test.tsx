@@ -53,14 +53,79 @@ const chatUser = {
   createdAt: '',
 } satisfies User;
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+const urlOf = (input: RequestInfo | URL) =>
+  typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+
+const jsonResponse = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+/** A row as returned by GET /api/participants/my/events */
+const joinedEvent = (
+  id: string,
+  title: string,
+  opts: { status?: string; start?: string; end?: string } = {},
+) => ({
+  events: {
+    id,
+    title,
+    description: 'desc',
+    category: 'Music',
+    start_datetime: opts.start ?? '2030-05-01T12:00:00.000Z',
+    end_datetime: opts.end ?? '2030-06-01T12:00:00.000Z',
+    cost: 10,
+    max_capacity: 20,
+    location_name: 'Paris',
+    latitude: 0,
+    longitude: 0,
+    created_by: 'org-1',
+    status: opts.status ?? 'active',
+  },
+});
+
+/** Handles the two chat-list endpoints; returns undefined for anything else. */
+const listRoutes = (url: string, joined: ReturnType<typeof joinedEvent>[]) => {
+  if (url.includes('/api/participants/my/events')) return jsonResponse(joined);
+  if (url.includes('/api/events/my-events')) return jsonResponse({ data: [] });
+  return undefined;
+};
+
+/** Stubs global fetch. Unhandled routes (handler returns undefined) respond 500. */
+const stubFetch = (handler: (url: string, init?: RequestInit) => Response | undefined) => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+    Promise.resolve(handler(urlOf(input), init) ?? new Response('{}', { status: 500 })),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+};
+
+function renderChat() {
+  render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/chat']}>
+      <Routes>
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/login" element={<div>Login page</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+/**
+ * The "Chats" header renders while the list is still loading, so waiting for it
+ * is not enough. Always wait for the chat item itself.
+ */
+const openChat = async (name: RegExp) => {
+  fireEvent.click(await screen.findByRole('button', { name }));
+};
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
 describe('ChatPage', () => {
   beforeEach(() => {
     getCurrentUserMock.mockReturnValue(chatUser);
     getAuthTokenMock.mockReturnValue('tok-test');
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))),
-    );
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))));
   });
 
   afterEach(() => {
@@ -68,261 +133,156 @@ describe('ChatPage', () => {
     vi.unstubAllGlobals();
   });
 
-  function renderChat() {
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/chat']}>
-        <Routes>
-          <Route path="/chat" element={<ChatPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-  }
+  it('redirects to /login when there is no user', async () => {
+    getCurrentUserMock.mockReturnValue(null);
+    renderChat();
+    expect(await screen.findByText('Login page')).toBeInTheDocument();
+  });
 
-  it('opens event conversation and sends a message via primary chat API', async () => {
+  it('opens an event conversation and sends a message via the chat API', async () => {
     let chatLoads = 0;
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('/api/participants/my/events')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify([
-              {
-                events: {
-                  id: 'evt-1',
-                  title: 'DJ Luna',
-                  description: 'desc',
-                  category: 'Music',
-                  start_datetime: '2030-05-01T12:00:00.000Z',
-                  end_datetime: '2030-06-01T12:00:00.000Z',
-                  cost: 10,
-                  max_capacity: 20,
-                  location_name: 'Paris',
-                  latitude: 0,
-                  longitude: 0,
-                  created_by: 'org-1',
-                  status: 'active',
-                },
-              },
-            ]),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
-        );
-      }
-      if (url.includes('/api/events/my-events')) {
-        return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }));
-      }
-      if (url.includes('/api/chats/evt-1/messages') && init?.method === 'POST') {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              id: 2,
-              event_id: 'evt-1',
-              sender_id: 'u-chat',
-              content: 'Hello from test',
-              created_at: '2030-05-01T12:05:00.000Z',
-              message_type: 'user',
-            }),
-            { status: 201, headers: { 'content-type': 'application/json' } },
-          ),
-        );
-      }
-      if (url.includes('/api/chats/evt-1/messages') && (!init?.method || init.method === 'GET')) {
+    const welcome = {
+      id: 1,
+      sender_id: 'other-user',
+      content: 'Welcome!',
+      created_at: '2030-05-01T12:00:00.000Z',
+      message_type: 'user',
+    };
+    const mine = {
+      id: 2,
+      sender_id: 'u-chat',
+      content: 'Hello from test',
+      created_at: '2030-05-01T12:05:00.000Z',
+      message_type: 'user',
+    };
+
+    const fetchMock = stubFetch((url, init) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+
+      if (url.includes('/api/chats/evt-1/messages')) {
+        if (init?.method === 'POST') return jsonResponse({ ...mine, event_id: 'evt-1' }, 201);
         chatLoads += 1;
-        if (chatLoads === 1) {
-          return Promise.resolve(
-            new Response(
-              JSON.stringify({
-                data: [
-                  {
-                    id: 1,
-                    sender_id: 'other-user',
-                    content: 'Welcome!',
-                    created_at: '2030-05-01T12:00:00.000Z',
-                    message_type: 'user',
-                  },
-                ],
-                page: 1,
-                limit: 100,
-              }),
-              { status: 200, headers: { 'content-type': 'application/json' } },
-            ),
-          );
-        }
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              data: [
-                {
-                  id: 1,
-                  sender_id: 'other-user',
-                  content: 'Welcome!',
-                  created_at: '2030-05-01T12:00:00.000Z',
-                  message_type: 'user',
-                },
-                {
-                  id: 2,
-                  sender_id: 'u-chat',
-                  content: 'Hello from test',
-                  created_at: '2030-05-01T12:05:00.000Z',
-                  message_type: 'user',
-                },
-              ],
-              page: 1,
-              limit: 100,
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
-        );
+        // First load: just the welcome message. After sending: both messages.
+        return jsonResponse({ data: chatLoads === 1 ? [welcome] : [welcome, mine], page: 1, limit: 100 });
       }
-      if (url.includes('/api/events/evt-1')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ id: 'evt-1', status: 'active' }), { status: 200, headers: { 'content-type': 'application/json' } }),
-        );
-      }
-      return Promise.resolve(new Response('{}', { status: 500 }));
+      return undefined;
     });
-    vi.stubGlobal('fetch', fetchMock);
 
     renderChat();
+    await openChat(/DJ Luna/i);
 
-    await waitFor(() => {
-      expect(screen.getByText('Chats')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /DJ Luna/i }));
-
-    await waitFor(() => expect(screen.getByText('Welcome!')).toBeInTheDocument());
+    expect(await screen.findByText('Welcome!')).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText(/Type a message/i);
     fireEvent.change(input, { target: { value: 'Hello from test' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-    await waitFor(() => {
-      expect(screen.getByText('Hello from test')).toBeInTheDocument();
-    });
+    expect(await screen.findByText('Hello from test')).toBeInTheDocument();
+    expect(input).toHaveValue('');
+
+    // The message is sent as { content: <encoded payload> }
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(post).toBeDefined();
+    const body = JSON.parse(String(post![1]!.body));
+    expect(JSON.parse(body.content)).toMatchObject({ v: 1, type: 'text', text: 'Hello from test' });
   });
 
-  it('disables interaction when event chat becomes unavailable', async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('/api/participants/my/events')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify([
-              {
-                events: {
-                  id: 'evt-x',
-                  title: 'Canceled Event',
-                  description: 'desc',
-                  category: 'Music',
-                  start_datetime: '2030-05-01T12:00:00.000Z',
-                  end_datetime: '2030-06-01T12:00:00.000Z',
-                  cost: 10,
-                  max_capacity: 20,
-                  location_name: 'Paris',
-                  latitude: 0,
-                  longitude: 0,
-                  created_by: 'org-1',
-                  status: 'active',
-                },
-              },
-            ]),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
-        );
-      }
-      if (url.includes('/api/events/my-events')) {
-        return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }));
-      }
-      if (url.includes('/api/events/evt-x')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ id: 'evt-x', status: 'cancelled' }), { status: 200, headers: { 'content-type': 'application/json' } }),
-        );
-      }
-      return Promise.resolve(new Response('{}', { status: 500 }));
+  it('disables interaction when the chat becomes unavailable (403)', async () => {
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-x', 'Locked Event')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-x/messages')) return new Response('{}', { status: 403 });
+      return undefined;
     });
-    vi.stubGlobal('fetch', fetchMock);
 
     renderChat();
-    await waitFor(() => expect(screen.getByText('Chats')).toBeInTheDocument());
+    await openChat(/Locked Event/i);
 
-    fireEvent.click(screen.getByRole('button', { name: /Canceled Event/i }));
-    await waitFor(() => expect(screen.getByPlaceholderText(/Chat is read-only for cancelled events/i)).toBeDisabled());
+    await waitFor(() => expect(screen.getByPlaceholderText(/Type a message/i)).toBeDisabled());
+    expect(screen.getByText('Chat unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Send message/i })).toBeDisabled();
   });
 
-  it('renders system-generated join/leave messages in chat', async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('/api/participants/my/events')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify([
-              {
-                events: {
-                  id: 'evt-sys',
-                  title: 'System Event',
-                  description: 'desc',
-                  category: 'Music',
-                  start_datetime: '2030-05-01T12:00:00.000Z',
-                  end_datetime: '2030-06-01T12:00:00.000Z',
-                  cost: 10,
-                  max_capacity: 20,
-                  location_name: 'Paris',
-                  latitude: 0,
-                  longitude: 0,
-                  created_by: 'org-1',
-                  status: 'active',
-                },
-              },
-            ]),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
-        );
-      }
-      if (url.includes('/api/events/my-events')) {
-        return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }));
-      }
+  it('makes cancelled event chats read-only', async () => {
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-c', 'Canceled Event', { status: 'cancelled' })]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-c/messages')) return jsonResponse({ data: [] });
+      return undefined;
+    });
+
+    renderChat();
+
+    // Cancelled chats are not in the default "Active" tab
+    fireEvent.click(await screen.findByRole('tab', { name: /Cancelled/i }));
+    await openChat(/Canceled Event/i);
+
+    const input = await screen.findByPlaceholderText(/Cancelled event chat is read-only/i);
+    expect(input).toBeDisabled();
+    expect(screen.getByText(/This event was cancelled\. The chat is read-only\./i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Send message/i })).toBeDisabled();
+  });
+
+  it('makes past event chats read-only (within the 48h window)', async () => {
+    // Ended an hour ago: past, but not yet hidden by the 48h expiry rule
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
+
+    stubFetch((url) => {
+      const list = listRoutes(url, [
+        joinedEvent('evt-p', 'Old Gig', { start: hoursAgo(3), end: hoursAgo(1) }),
+      ]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-p/messages')) return jsonResponse({ data: [] });
+      return undefined;
+    });
+
+    renderChat();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Past/i }));
+    await openChat(/Old Gig/i);
+
+    const input = await screen.findByPlaceholderText(/Past event chat is read-only/i);
+    expect(input).toBeDisabled();
+    expect(screen.getByText(/Past event · read-only/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Send message/i })).toBeDisabled();
+  });
+
+  it('renders system-generated join/leave messages in the chat', async () => {
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-sys', 'System Event')]);
+      if (list) return list;
       if (url.includes('/api/chats/evt-sys/messages')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              data: [
-                {
-                  id: 1,
-                  sender_id: 'u-alice',
-                  content: 'Alice joined the event',
-                  message_type: 'participant_joined',
-                  created_at: '2030-05-01T12:02:00.000Z',
-                },
-                {
-                  id: 2,
-                  sender_id: 'u-bob',
-                  content: 'Bob left the event',
-                  message_type: 'participant_left',
-                  created_at: '2030-05-01T12:04:00.000Z',
-                },
-              ],
-              page: 1,
-              limit: 100,
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          ),
-        );
+        return jsonResponse({
+          data: [
+            {
+              id: 1,
+              sender_id: 'u-alice',
+              content: 'Alice joined the event',
+              message_type: 'participant_joined',
+              created_at: '2030-05-01T12:02:00.000Z',
+            },
+            {
+              id: 2,
+              sender_id: 'u-bob',
+              content: 'Bob left the event',
+              message_type: 'participant_left',
+              created_at: '2030-05-01T12:04:00.000Z',
+            },
+          ],
+          page: 1,
+          limit: 100,
+        });
       }
-      if (url.includes('/api/events/evt-sys')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ id: 'evt-sys', status: 'active' }), { status: 200, headers: { 'content-type': 'application/json' } }),
-        );
-      }
-      return Promise.resolve(new Response('{}', { status: 500 }));
+      return undefined;
     });
-    vi.stubGlobal('fetch', fetchMock);
 
     renderChat();
-    await waitFor(() => expect(screen.getByText('Chats')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /System Event/i }));
+    await openChat(/System Event/i);
 
     expect(await screen.findByText('Alice joined the event')).toBeInTheDocument();
     expect(screen.getByText('Bob left the event')).toBeInTheDocument();
+    // System messages never get a sender label or an avatar bubble
+    expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
   });
 });

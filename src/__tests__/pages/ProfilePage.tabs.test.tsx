@@ -180,10 +180,10 @@ describe('ProfilePage: Events / Friends tabs and event sub-tabs', () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId('tab-upcoming')).toHaveTextContent('Upcoming (2)');
-      expect(screen.getByTestId('tab-past')).toHaveTextContent('Past (2)');
-      expect(screen.getByTestId('tab-cancelled')).toHaveTextContent('Cancelled (2)');
-      expect(screen.getByTestId('tab-favourites')).toHaveTextContent('Favourites (1)');
+     expect(screen.getByTestId('tab-upcoming')).toHaveTextContent(/Upcoming\s*2/);
+     expect(screen.getByTestId('tab-past')).toHaveTextContent(/Past\s*2/);
+     expect(screen.getByTestId('tab-cancelled')).toHaveTextContent(/Cancelled\s*2/);
+     expect(screen.getByTestId('tab-favourites')).toHaveTextContent(/Favourites\s*1/);
     });
   });
 
