@@ -11,6 +11,8 @@ import {
   saveUsers,
 } from "@/lib/storage";
 
+import { clearCache } from "@/lib/queryCache";
+
 afterEach(() => {
   cleanup();
   clearAuthToken();
@@ -25,6 +27,7 @@ afterEach(() => {
   } catch {
     /* ignore */
   }
+  clearCache();
   vi.clearAllMocks();
 });
 
