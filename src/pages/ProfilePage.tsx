@@ -600,59 +600,54 @@ export default function ProfilePage() {
           {editing && (
             <div className="w-full space-y-5 pt-3 border-t border-border/40 mt-2 px-4">
               <CarouselSection title="Profile Picture">
-              {/* 1. First Avatar item displayed before upload */}
-              {PROFILE_AVATARS.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => { setPreviewAvatarUrl(PROFILE_AVATARS[0].url); setPreviewAvatarKind('icon'); }}
-                  className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === PROFILE_AVATARS[0].url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
-                >
-                  <img src={PROFILE_AVATARS[0].url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
-                </button>
-              )}
+                {PROFILE_AVATARS.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { setPreviewAvatarUrl(PROFILE_AVATARS[0].url); setPreviewAvatarKind('icon'); }}
+                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === PROFILE_AVATARS[0].url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  >
+                    <img src={PROFILE_AVATARS[0].url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
+                  </button>
+                )}
 
-              {/* 2. Upload Button Circle placed second in line with Tooltip */}
-              <div className="relative group flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => photoRef.current?.click()}
-                  className={`h-12 w-12 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 ring-2 transition-transform active:scale-95 ${previewAvatarKind === 'photo' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
-                  title="Upload photo"
-                >
-                  <Upload className="h-5 w-5 text-primary" />
-                </button>
-                <input ref={photoRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoUploadPreview} className="hidden" />
-                
-                {/* Tooltip */}
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-40 p-2 rounded-xl bg-popover text-popover-foreground text-[10px] text-center shadow-xl border border-border pointer-events-none z-50">
-                  Upload photo (JPEG, PNG, WebP · Max 5MB)
+                <div className="relative group flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => photoRef.current?.click()}
+                    className={`h-12 w-12 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 ring-2 transition-transform active:scale-95 ${previewAvatarKind === 'photo' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                    title="Upload photo"
+                  >
+                    <Upload className="h-5 w-5 text-primary" />
+                  </button>
+                  <input ref={photoRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoUploadPreview} className="hidden" />
+                  
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-40 p-2 rounded-xl bg-popover text-popover-foreground text-[10px] text-center shadow-xl border border-border pointer-events-none z-50">
+                    Upload photo (JPEG, PNG, WebP · Max 5MB)
+                  </div>
                 </div>
-              </div>
 
-              {/* 3. Followed by the rest of the Avatars (skipping the first one since it's already rendered) */}
-              {PROFILE_AVATARS.slice(1).map((avatar) => (
-                <button
-                  key={avatar.id}
-                  type="button"
-                  onClick={() => { setPreviewAvatarUrl(avatar.url); setPreviewAvatarKind('icon'); }}
-                  className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === avatar.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
-                >
-                  <img src={avatar.url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
-                </button>
-              ))}
+                {PROFILE_AVATARS.slice(1).map((avatar) => (
+                  <button
+                    key={avatar.id}
+                    type="button"
+                    onClick={() => { setPreviewAvatarUrl(avatar.url); setPreviewAvatarKind('icon'); }}
+                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === avatar.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  >
+                    <img src={avatar.url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
+                  </button>
+                ))}
 
-              {/* 4. Followed by Icons */}
-              {PROFILE_ICONS.map((icon) => (
-                <button
-                  key={icon.id}
-                  type="button"
-                  onClick={() => { setPreviewAvatarUrl(icon.url); setPreviewAvatarKind('icon'); setIconId(icon.id); }}
-                  className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === icon.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
-                >
-                  <img src={icon.url} alt="" className="h-12 w-12 rounded-full object-cover" />
-                </button>
-              ))}
-            </CarouselSection>
+                {PROFILE_ICONS.map((icon) => (
+                  <button
+                    key={icon.id}
+                    type="button"
+                    onClick={() => { setPreviewAvatarUrl(icon.url); setPreviewAvatarKind('icon'); setIconId(icon.id); }}
+                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === icon.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  >
+                    <img src={icon.url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                  </button>
+                ))}
+              </CarouselSection>
 
               <CarouselSection title="Banner">
                 <button
@@ -832,7 +827,7 @@ export default function ProfilePage() {
         <div className="space-y-4 min-h-[300px]">
           {mainTab === 'events' ? (
             <div className="space-y-3">
-              {/* Events Sub-Tabs with Icons */}
+              {/* Events Sub-Tabs with Colored Badge Circles */}
               <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
                 {[
                   { id: 'upcoming' as const, label: 'Upcoming', count: unifiedUpcoming.length, icon: Calendar },
@@ -849,7 +844,7 @@ export default function ProfilePage() {
                         setEventSubTab(sub.id);
                         setVisibleEvents(4);
                       }}
-                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
                         isSubActive
                           ? sub.id === 'cancelled'
                             ? 'bg-destructive text-destructive-foreground shadow-sm'
@@ -858,7 +853,16 @@ export default function ProfilePage() {
                       }`}
                     >
                       <sub.icon className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{sub.label} ({sub.count})</span>
+                      <span className="truncate">{sub.label}</span>
+                      <span
+                        className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
+                          isSubActive
+                            ? 'bg-background/25 text-inherit'
+                            : 'bg-secondary text-muted-foreground'
+                        }`}
+                      >
+                        {sub.count}
+                      </span>
                     </button>
                   );
                 })}
@@ -946,32 +950,58 @@ export default function ProfilePage() {
                   ) : (
                     <>
                       <div className="space-y-2.5">
-                        {favorites.slice(0, visibleFavorites).map((e) => (
-                          <div
-                            key={e.id}
-                            className="flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40"
-                          >
-                            <img
-                              src={e.image}
-                              alt=""
-                              className="h-12 w-12 rounded-xl object-cover flex-shrink-0 cursor-pointer"
-                              onClick={() => navigate(`/event/${e.id}`)}
-                            />
-                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                              <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">
-                                {e.date} · {e.location}
-                              </p>
-                            </div>
-                            <button
-                              onClick={() => handleRemoveFavorite(e.id)}
-                              className="p-2 text-muted-foreground hover:text-destructive transition-colors"
-                              aria-label="Remove favorite"
+                        {[...favorites].sort((a, b) => {
+                          const aUp = isEventUpcoming(a);
+                          const bUp = isEventUpcoming(b);
+                          if (aUp === bUp) return eventStartMs(b) - eventStartMs(a);
+                          return aUp ? -1 : 1;
+                        }).slice(0, visibleFavorites).map((e) => {
+                          const upcoming = isEventUpcoming(e);
+                          return (
+                            <div
+                              key={e.id}
+                              className={`flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all ${
+                                upcoming ? 'hover:border-primary/40 cursor-pointer' : 'opacity-60 cursor-not-allowed bg-muted/20'
+                              }`}
+                              onClick={() => {
+                                if (upcoming) navigate(`/event/${e.id}`);
+                              }}
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
+                              <img
+                                src={e.image}
+                                alt=""
+                                className="h-12 w-12 rounded-xl object-cover flex-shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span
+                                    className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                      upcoming
+                                        ? 'bg-primary/10 text-primary'
+                                        : 'bg-muted text-muted-foreground'
+                                    }`}
+                                  >
+                                    {upcoming ? 'Upcoming' : 'Expired'}
+                                  </span>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {e.date} · {e.location}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={(evt) => {
+                                  evt.stopPropagation();
+                                  handleRemoveFavorite(e.id);
+                                }}
+                                className="p-2 text-muted-foreground hover:text-destructive transition-colors"
+                                aria-label="Remove favorite"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                       {favorites.length > 4 && (
                         <div className="flex gap-2 pt-2">

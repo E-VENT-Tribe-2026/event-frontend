@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { getCurrentUser, getUsers, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -8,7 +8,7 @@ import EventCard from '@/components/EventCard';
 import AppToast from '@/components/AppToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2, Film, BookOpen, Plane, Coffee, Network, Leaf, LayoutGrid } from 'lucide-react';
+import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2, Film, BookOpen, Plane, Coffee, Network, Leaf, LayoutGrid, SlidersHorizontal, X } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
@@ -33,6 +33,9 @@ export default function HomePage() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleInterests, setVisibleInterests] = useState(3);
   const [visibleAll, setVisibleAll] = useState(6);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const categoryScrollRef = useRef<HTMLDivElement>(null);
+
   const PAGE = 6;
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -195,7 +198,7 @@ export default function HomePage() {
   const events = useMemo(() => {
     const local = getLocalEvents().filter((e) => !e.isDraft);
     const byId = new Map<string, EventItem>();
-    [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
+     [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
     if (apiEvents.length === 0 && local.length > 0 && !eventsLoading) {
       setUsingLocalFallback(true);
     } else if (apiEvents.length > 0) {
@@ -262,114 +265,72 @@ export default function HomePage() {
   );
 
   const cats = [
-    { id: 'All',        icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
-    { id: 'Music',      icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
-    { id: 'Tech',       icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
-    { id: 'Food',       icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
-    { id: 'Fitness',    icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
-    { id: 'Art',        icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
-    { id: 'Gaming',     icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
-    { id: 'Sports',     icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
-    { id: 'Movies',     icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
-    { id: 'Study',      icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
-    { id: 'Travel',     icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
-    { id: 'Coffee',     icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
-    { id: 'Networking', icon: Network,    iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
-    { id: 'Wellness',   icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
+    { id: 'All',       icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
+    { id: 'Music',     icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
+    { id: 'Tech',      icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
+    { id: 'Food',      icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
+    { id: 'Fitness',   icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
+    { id: 'Art',       icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
+    { id: 'Gaming',    icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
+    { id: 'Sports',    icon: Dumbbell,   iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
+    { id: 'Movies',    icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
+    { id: 'Study',     icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
+    { id: 'Travel',    icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
+    { id: 'Coffee',    icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
+    { id: 'Networking',icon: Network,    iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
+    { id: 'Wellness',  icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
   ] as const;
+
+  const activeFiltersCount = (filterDate ? 1 : 0) + (selectedCity ? 1 : 0) + (budgetMin > 0 || budgetMax < maxPrice ? 1 : 0);
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
-      <TopBar search={search} onSearchChange={setSearch} />
+      
+      {/* Top Navigation Bar with Embedded Categories & Filter Toggle */}
+      <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/40">
+        <TopBar search={search} onSearchChange={setSearch} />
+        
+        <div className="mx-auto max-w-3xl px-4 pt-2 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="flex flex-wrap flex-1 gap-1.5">
+              {cats.map(({ id, icon: Icon, iconColor, activeBg, activeBorderColor }) => {
+                const active = category === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setCategory(id)}
+                    style={active ? { background: activeBg, borderColor: activeBorderColor, color: iconColor } : { background: activeBg.replace('0.15', '0.08'), borderColor: activeBorderColor.replace('0.5', '0.25') }}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all active:scale-95 ${
+                      active ? 'border-transparent shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: iconColor }} />
+                    {id}
+                  </button>
+                );
+              })}
+            </div>
 
-      {/* Category Filter Wrapping Grid */}
-      <div className="mx-auto max-w-3xl px-4 pt-3 pb-4">
-        <div className="flex flex-wrap justify-center gap-1.5">
-          {cats.map(({ id, icon: Icon, iconColor, activeBg, activeBorderColor }) => {
-            const active = category === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setCategory(id)}
-                style={active ? { background: activeBg, borderColor: activeBorderColor, color: iconColor } : { background: activeBg.replace('0.15', '0.08'), borderColor: activeBorderColor.replace('0.5', '0.25') }}
-                className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all active:scale-95 ${
-                  active ? 'border-transparent shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: iconColor }} />
-                {id}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-3xl space-y-3 px-4">
-
-        {/* Search/Location Filters */}
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 rounded-2xl glass-card p-2.5">
-            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground"><Calendar className="h-3 w-3" /> Event date</span>
-            <input
-              type="date"
-              value={filterDate}
-              min={minDate}
-              onChange={(e) => setFilterDate(e.target.value)}
-              className="rounded-lg bg-secondary/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-            />
-          </label>
-          <label className="flex flex-col gap-1 rounded-2xl glass-card p-2.5">
-            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
-              <MapPin className="h-3 w-3" /> Location
-            </span>
-            <select
-              id="home-city-filter"
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
-              className="rounded-lg bg-secondary/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              aria-label="Filter events by location"
+            <button
+              type="button"
+              onClick={() => setShowFilterModal(true)}
+              className="relative shrink-0 flex items-center justify-center h-9 w-9 rounded-full glass-card hover:bg-secondary transition-colors self-start"
+              aria-label="Open Filters"
             >
-              <option value="">All locations</option>
-              {availableCities.map((city) => (
-                <option key={city} value={city}>{city}</option>
-              ))}
-            </select>
-          </label>
+              <SlidersHorizontal className="h-4 w-4 text-foreground" />
+              {activeFiltersCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full gradient-primary text-[9px] font-bold text-primary-foreground shadow-glow">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
+      </header>
 
-        {/* Budget Range */}
-        <div className="rounded-2xl glass-card p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase text-muted-foreground">Budget range</span>
-            <span className="text-xs font-medium text-foreground">€{budgetMin} — €{budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
-          </div>
-          <div className="relative h-5 flex items-center">
-            <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />
-            <div
-              className="absolute h-1.5 rounded-full bg-primary pointer-events-none"
-              style={{
-                left: `${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}%`,
-                right: `${maxPrice > 0 ? 100 - (budgetMax / maxPrice) * 100 : 0}%`,
-              }}
-            />
-            <input type="range" min={0} max={maxPrice} value={budgetMin}
-              onChange={(e) => { const v = Math.min(Number(e.target.value), budgetMax - 1); setBudgetMin(v); }}
-              className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              style={{ zIndex: budgetMin > maxPrice * 0.9 ? 5 : 3 }}
-            />
-            <input type="range" min={0} max={maxPrice} value={budgetMax}
-              onChange={(e) => { const v = Math.max(Number(e.target.value), budgetMin + 1); setBudgetMax(v); }}
-              className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              style={{ zIndex: 4 }}
-            />
-            <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-              style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 7px)` }} />
-            <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-              style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 7px)` }} />
-          </div>
-        </div>
+      <div className="mx-auto max-w-3xl space-y-3 px-4 pt-3">
 
         {/* Friend Activity Section */}
         {friendActivity.length > 0 && (
@@ -515,6 +476,121 @@ export default function HomePage() {
       </div>
       <BottomNav />
 
+      {/* Filter Popup Modal */}
+      <AnimatePresence>
+        {showFilterModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-background/80 backdrop-blur-sm px-4 pb-4 sm:pb-0"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 48 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 48 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+              className="w-full max-w-sm rounded-3xl glass-card overflow-hidden bg-background border border-border shadow-xl"
+            >
+              <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-border/40">
+                <h3 className="text-base font-bold text-foreground">Filters</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowFilterModal(false)}
+                  className="rounded-full p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {/* Event Date Filter */}
+                <label className="flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
+                    <Calendar className="h-3.5 w-3.5 text-primary" /> Event date
+                  </span>
+                  <input
+                    type="date"
+                    value={filterDate}
+                    min={minDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    className="rounded-xl bg-secondary px-3.5 py-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40 border border-border/50"
+                  />
+                </label>
+
+                {/* Location Filter */}
+                <label className="flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
+                    <MapPin className="h-3.5 w-3.5 text-accent" /> Location
+                  </span>
+                  <select
+                    id="home-city-filter"
+                    value={selectedCity}
+                    onChange={(e) => setSelectedCity(e.target.value)}
+                    className="rounded-xl bg-secondary px-3.5 py-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40 border border-border/50"
+                    aria-label="Filter events by location"
+                  >
+                    <option value="">All locations</option>
+                    {availableCities.map((city) => (
+                      <option key={city} value={city}>{city}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Budget Range */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase text-muted-foreground">Budget range</span>
+                    <span className="text-xs font-medium text-foreground">€{budgetMin} — €{budgetMax === maxPrice ? `${maxPrice}` : budgetMax}</span>
+                  </div>
+                  <div className="relative h-6 flex items-center px-1">
+                    <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary" />
+                    <div
+                      className="absolute h-1.5 rounded-full bg-primary pointer-events-none"
+                      style={{
+                        left: `${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}%`,
+                        right: `${maxPrice > 0 ? 100 - (budgetMax / maxPrice) * 100 : 0}%`,
+                      }}
+                    />
+                    <input type="range" min={0} max={maxPrice} value={budgetMin}
+                      onChange={(e) => { const v = Math.min(Number(e.target.value), budgetMax - 1); setBudgetMin(v); }}
+                      className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      style={{ zIndex: budgetMin > maxPrice * 0.9 ? 5 : 3 }}
+                    />
+                    <input type="range" min={0} max={maxPrice} value={budgetMax}
+                      onChange={(e) => { const v = Math.max(Number(e.target.value), budgetMin + 1); setBudgetMax(v); }}
+                      className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      style={{ zIndex: 4 }}
+                    />
+                    <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+                      style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 7px)` }} />
+                    <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
+                      style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 7px)` }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-6 pb-6 pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setFilterDate(''); setSelectedCity(''); setBudgetMin(0); setBudgetMax(maxPrice); }}
+                  className="flex-1 rounded-2xl border border-border bg-secondary py-3 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors"
+                >
+                  Clear all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFilterModal(false)}
+                  className="flex-1 rounded-2xl gradient-primary py-3 text-xs font-bold text-primary-foreground shadow-glow active:scale-[0.98] transition-transform"
+                >
+                  Apply Filters
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Interest selection modal */}
       <AnimatePresence>
         {showInterestPrompt && user && (
@@ -549,7 +625,7 @@ export default function HomePage() {
                     Gaming:     { emoji: '🎮' },
                     Movies:     { emoji: '🎬' },
                     Study:      { emoji: '📚' },
-                    Travel:     { emoji: '✈️' },
+                    Travel:     { emoji: '✈️️' },
                     Tech:       { emoji: '💻' },
                     Art:        { emoji: '🎨' },
                     Fitness:    { emoji: '💪' },

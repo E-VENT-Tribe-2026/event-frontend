@@ -93,15 +93,15 @@ export default function MapPage() {
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
-  const loadEvents = useCallback(async () => {
+  const loadEvents = useCallback(async (currentCategory: string, currentTitle: string, currentDate: string) => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 12000);
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: '1', limit: '50' });
-      if (category !== 'All') params.set('category', category);
-      if (debouncedTitle) params.set('search', debouncedTitle);
-      if (debouncedFilterDate) params.set('date', debouncedFilterDate);
+      if (currentCategory !== 'All') params.set('category', currentCategory);
+      if (currentTitle) params.set('search', currentTitle);
+      if (currentDate) params.set('date', currentDate);
       
       const token = getAuthToken();
       const headers: Record<string, string> = { Accept: 'application/json' };
@@ -118,7 +118,6 @@ export default function MapPage() {
       const combinedEvents = Array.from(byId.values());
       setRawEvents(combinedEvents);
 
-      // Fetch organizer profiles using /api/profile/${creatorId}
       const profileMap: Record<string, { full_name?: string; username?: string; avatar_url?: string }> = {};
       await Promise.all(
         rows.map(async (row: any) => {
@@ -138,7 +137,7 @@ export default function MapPage() {
                 }
               }
             } catch {
-              // ignore individual profile fetch error
+              // ignore
             }
           }
         })
@@ -156,27 +155,16 @@ export default function MapPage() {
       window.clearTimeout(timeout);
       setLoading(false);
     }
-  }, [category, debouncedTitle, debouncedFilterDate, refreshKey]);
+  }, []);
 
   const availableCities = useMemo(() => getEventCities(rawEvents), [rawEvents]);
 
   useEffect(() => {
-    loadEvents();
-  }, [loadEvents]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setRefreshKey((k) => k + 1), 25000);
-    const onFocus = () => setRefreshKey((k) => k + 1);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
+    loadEvents(category, debouncedTitle, debouncedFilterDate);
+  }, [category, debouncedTitle, debouncedFilterDate, refreshKey, loadEvents]);
 
   const filteredEvents = useMemo(() => {
     return rawEvents.filter((e) => {
-      // Exclude past or cancelled events on the map view
       if (isEventCancelled(e) || !isEventUpcoming(e)) return false;
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedFilterDate && e.date !== debouncedFilterDate) return false;
@@ -391,7 +379,7 @@ export default function MapPage() {
           <div>
             <h1 className="text-base font-bold text-foreground leading-none">Explore Map</h1>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {loading ? 'Loading…' : `${filteredEvents.length} event${filteredEvents.length !== 1 ? 's' : ''} nearby`}
+              {loading && rawEvents.length === 0 ? 'Loading…' : `${filteredEvents.length} event${filteredEvents.length !== 1 ? 's' : ''} nearby`}
             </p>
           </div>
         </div>
@@ -422,7 +410,6 @@ export default function MapPage() {
 
       {/* Filters */}
       <div className="border-b border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3 space-y-3">
-        {/* Category + Date row */}
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-semibold uppercase text-muted-foreground">Category</label>
@@ -449,7 +436,6 @@ export default function MapPage() {
           </div>
         </div>
 
-        {/* Location + Search row */}
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1">
             <label htmlFor="map-city-filter" className="text-[10px] font-semibold uppercase text-muted-foreground">Location</label>
@@ -479,9 +465,8 @@ export default function MapPage() {
           </div>
         </div>
 
-        {/* Status bar */}
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          {loading ? (
+          {loading && rawEvents.length === 0 ? (
             <><RefreshCw className="h-3 w-3 animate-spin" /> Loading events…</>
           ) : (
             <>
@@ -497,7 +482,8 @@ export default function MapPage() {
       {/* Map */}
       <div className="relative">
         <div ref={mapRef} className="h-[min(72vh,580px)] w-full z-0" />
-        {loading && (
+        {/* Only show full blocking overlay on initial cold load when rawEvents is empty */}
+        {loading && rawEvents.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm z-10 pointer-events-none">
             <div className="flex flex-col items-center gap-2 rounded-2xl glass-card px-6 py-4">
               <RefreshCw className="h-5 w-5 animate-spin text-primary" />
