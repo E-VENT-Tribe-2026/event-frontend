@@ -6,6 +6,7 @@ export interface User {
   id: string;
   role: UserRole;
   name: string;
+  username: string;
   email: string;
   password: string;
   avatar: string;
@@ -63,6 +64,8 @@ export interface EventItem {
   organizerAvatar: string;
   organizerUsername?: string;
   organizerFullName?: string;
+  status?: string;
+  isCancelled?: boolean;
   isPrivate: boolean;
   isDraft: boolean;
   requiresApproval: boolean;
@@ -178,6 +181,7 @@ export function setCurrentUserFromOAuth(data: {
   id: string; 
   email: string; 
   name?: string; 
+  username: string;
   avatar?: string;
   bio?: string;
   dob?: string;
@@ -212,6 +216,7 @@ export function setCurrentUserFromOAuth(data: {
       id: data.id,
       role: (data.role as UserRole) || 'participant',
       name,
+      username: data.username, 
       email: data.email,
       password: '',
       avatar,
@@ -249,6 +254,7 @@ export function signup(data: {
   role: UserRole;
   name: string;
   email: string;
+  username: string;
   password: string;
   profilePhoto: string;
   dob: string;
@@ -265,6 +271,7 @@ export function signup(data: {
     role: data.role,
     name: data.name,
     email: data.email,
+    username: data.username,
     password: data.password,
     avatar: `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(data.name)}`,
     profilePhoto: data.profilePhoto || '',
@@ -335,6 +342,11 @@ export function updateEvent(id: string, updates: Partial<EventItem>) {
 
 export function deleteEvent(id: string) {
   const events = getEvents().filter(e => e.id !== id);
+  saveEvents(events);
+}
+
+export function cancelEvent(id: string) {
+  const events = getEvents().map(e => e.id === id ? { ...e, status: 'cancelled', isCancelled: true } : e);
   saveEvents(events);
 }
 

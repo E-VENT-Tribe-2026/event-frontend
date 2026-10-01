@@ -36,11 +36,7 @@ export function validateProfilePhotoFile(file: File): ProfilePhotoValidationResu
   const mime = (file.type || mimeFromName(file.name) || '').toLowerCase();
   const allowed = PROFILE_PHOTO_MIME_TYPES as readonly string[];
   if (!mime || !allowed.includes(mime)) {
-    return {
-      ok: false,
-      reason: 'format',
-      message: 'Photo format not accepted. Use JPEG, PNG or WebP.',
-    };
+    return { ok: false, reason: 'format', message: 'Photo format not accepted. Use JPEG, PNG or WebP.' };
   }
   if (file.size > PROFILE_PHOTO_MAX_BYTES) {
     return {

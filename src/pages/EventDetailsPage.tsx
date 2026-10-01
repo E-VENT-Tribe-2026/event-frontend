@@ -1,6 +1,6 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { getEvents, getCurrentUser, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, deleteEvent, type EventItem } from '@/lib/storage';
-import { ArrowLeft, MapPin, Clock, Users, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Trash2 } from 'lucide-react';
+import { getEvents, getCurrentUser, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, cancelEvent, type EventItem } from '@/lib/storage';
+import { ArrowLeft, MapPin, Clock, Users, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Ban } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import AppToast from '@/components/AppToast';
@@ -15,7 +15,7 @@ import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 import EventLocationMap from '@/components/EventLocationMap';
-import { isEventUpcoming } from '@/lib/eventTime';
+import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { formatUserIdentity } from '@/lib/userIdentity';
@@ -47,9 +47,9 @@ export default function EventDetailsPage() {
   const [attendeeCount, setAttendeeCount] = useState<number | null>(null);
   const [myParticipationStatus, setMyParticipationStatus] = useState<ParticipationStatus | null>(null);
   const [participationKnown, setParticipationKnown] = useState(false);
-  const [organizerNameOverride, setOrganizerNameOverride] = useState<string>('');
+  const [organizerProfile, setOrganizerProfile] = useState<{ full_name?: string; username?: string; avatar_url?: string } | null>(null);
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
-  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+  const [isCancellingEvent, setIsCancellingEvent] = useState(false);
   const [backendAuthUserId, setBackendAuthUserId] = useState<string | null>(null);
   const user = getCurrentUser();
   const allUsers = getUsers();
@@ -76,7 +76,6 @@ export default function EventDetailsPage() {
     return null;
   };
 
-  // Hoisted so both handleJoinOrRequest and handleVenuePaymentConfirm can use it
   const tryJoinViaApi = async (): Promise<boolean> => {
     if (!event) return false;
     const token = await getApiToken();
@@ -113,28 +112,22 @@ export default function EventDetailsPage() {
       return;
     }
 
-    let participantsList: Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string } }> = [];
+    const token = await getApiToken();
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    let participantsList: Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string; username?: string } }> = [];
     try {
-      const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), {
-        headers: { Accept: 'application/json' },
-      });
+      const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), { headers });
       if (pRes.ok) {
         const list = await pRes.json().catch(() => []);
         participantsList = Array.isArray(list) ? list : [];
         setAttendeeCount(participantsList.length);
-        if (apiEvent?.organizerId) {
-          const ownerRow = participantsList.find((p) => sameAuthUserId(p.user_id, apiEvent.organizerId));
-          const ownerName = String(ownerRow?.profiles?.full_name || '').trim();
-          setOrganizerNameOverride(ownerName);
-        } else {
-          setOrganizerNameOverride('');
-        }
       }
     } catch {
       // Keep previous attendee count if backend temporarily fails.
     }
 
-    const token = await getApiToken();
     let authUserId: string | null = backendAuthUserId;
     if (token && !authUserId) {
       const me = await fetchAuthUserFromToken(token);
@@ -204,6 +197,7 @@ export default function EventDetailsPage() {
     return () => { cancelled = true; };
   }, [id, user?.id]);
 
+  // Fetch event details and organizer profile referenced by created_by GUID with proper auth headers
   useEffect(() => {
     if (!id) {
       setLoadingApi(false);
@@ -212,24 +206,52 @@ export default function EventDetailsPage() {
     }
     let cancelled = false;
     setLoadingApi(true);
-    fetch(getApiUrl(`/api/events/${id}`))
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled) {
-          setApiEvent(mapApiEventToItem(data));
-          setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
-          setParticipationKnown(false); // reset so skeleton shows while sync runs
+
+    (async () => {
+      const token = await getApiToken();
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        if (cancelled) return;
+
+        const mapped = mapApiEventToItem(data);
+        setApiEvent(mapped);
+        setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+        setParticipationKnown(false);
+
+        const creatorId = data.created_by || data.organizer_id || mapped.organizerId;
+        if (creatorId) {
+          try {
+            const profRes = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
+            if (profRes.ok) {
+              const profData = await profRes.json().catch(() => null);
+              const prof = profData?.data || profData?.profile || profData;
+              if (prof && !cancelled) {
+                setOrganizerProfile({
+                  full_name: prof.full_name || prof.name || prof.username,
+                  username: prof.username,
+                  avatar_url: prof.avatar_url,
+                });
+              }
+            }
+          } catch {
+            // ignore profile fetch failure
+          }
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
           setApiEvent(null);
           setApiEventStatus(null);
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoadingApi(false);
-      });
+      }
+    })();
+
     return () => { cancelled = true; };
   }, [id]);
 
@@ -277,8 +299,12 @@ export default function EventDetailsPage() {
   const wasRemovedFromEvent = Boolean(
     useApiParticipation && user && participationKnown && myParticipationStatus === 'removed',
   );
-  const isCancelledEvent = String(apiEventStatus || '').toLowerCase() === 'cancelled';
-  const canAccessEventChat = Boolean(user && !isCancelledEvent && (isEventOwner || hasJoined));
+  const isCancelledEvent =
+    isEventCancelled(event) ||
+    isEventCancelled(apiEvent) ||
+    String(apiEventStatus || '').toLowerCase() === 'cancelled' ||
+    String(apiEventStatus || '').toLowerCase() === 'canceled';
+  const canAccessEventChat = Boolean(user && (isEventOwner || hasJoined));
 
   const existingRequest = user && event ? getJoinRequests().find(r => r.eventId === event.id && r.userId === user.id) : null;
 
@@ -302,7 +328,7 @@ export default function EventDetailsPage() {
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
         if (!u) return null;
-        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
+        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email, username: u.username };
       })
       .filter(Boolean)
       .slice(0, 6) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
@@ -327,7 +353,7 @@ export default function EventDetailsPage() {
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
         if (!u) return null;
-        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email };
+        return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email, username: u.username };
       })
       .filter(Boolean) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
@@ -340,7 +366,7 @@ export default function EventDetailsPage() {
       return;
     }
     document.title = formatPageTitle(ev.title);
-  }, [loadingApi, localEvent, routeEvent, apiEvent, apiEvent?.id, apiEvent?.title, localEvent?.id, localEvent?.title, routeEvent?.id, routeEvent?.title]);
+  }, [loadingApi, localEvent, routeEvent, apiEvent]);
 
   if (loadingApi && !localEvent) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
@@ -349,9 +375,11 @@ export default function EventDetailsPage() {
     return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
   }
 
-  const isPastEvent = !isEventUpcoming(event);
-  const isChatExpired = isPastEvent && (() => {
-    const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
+  const isEventPassed = !isEventUpcoming(event);
+  const isPastEvent = !isCancelledEvent && isEventPassed;
+  const isUpcomingEvent = !isCancelledEvent && isEventUpcoming(event);
+  const isChatExpired = isEventPassed && (() => {
+    const normalized = /[Zz]$\vert{}[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
     const ts = new Date(normalized).getTime();
     return !Number.isNaN(ts) && Date.now() - ts > 48 * 60 * 60 * 1000;
   })();
@@ -476,7 +504,6 @@ export default function EventDetailsPage() {
       if (existingRequest) {
         if (existingRequest.status === 'approved') {
           if (event.budget > 0) {
-            // Show venue payment modal instead of navigating
             setIsUpdatingParticipation(false);
             setShowVenuePaymentModal(true);
             return;
@@ -507,7 +534,6 @@ export default function EventDetailsPage() {
       setIsUpdatingParticipation(false);
     } else {
       if (event.budget > 0) {
-        // Show venue payment modal instead of navigating
         setIsUpdatingParticipation(false);
         setShowVenuePaymentModal(true);
         return;
@@ -527,7 +553,7 @@ export default function EventDetailsPage() {
 
   const handleRemoveAttendee = async (participantId: string) => {
     if (!isEventOwner || !user || String(participantId) === String(user.id)) return;
-    if (isPastEvent) return; // Cannot remove participants from past events
+    if (isPastEvent || isCancelledEvent) return;
     if (!window.confirm('Remove this person from the event? They will lose access.')) return;
 
     if (useApiParticipation) {
@@ -564,48 +590,65 @@ export default function EventDetailsPage() {
     invalidatePrefix(`/api/participants/${event.id}`);
   };
 
-  const handleDeleteEvent = async () => {
-    if (!isEventOwner || !event) return;
-    if (!window.confirm(`Delete "${event.title}"? This cannot be undone.`)) return;
-    setIsDeletingEvent(true);
+  const handleCancelEvent = async () => {
+    if (!isEventOwner || !event || isEventPassed || isCancelledEvent) return;
+    if (!window.confirm(`Are you sure you want to cancel "${event.title}"? A cancellation cannot be undone.`)) return;
+    setIsCancellingEvent(true);
     try {
       if (useApiParticipation) {
         const token = await getApiToken();
         if (!token) {
-          setToast({ show: true, message: 'Sign in to delete this event.', type: 'error' });
+          setToast({ show: true, message: 'Sign in to cancel this event.', type: 'error' });
           return;
         }
-        const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/${event.id}`), {
-          method: 'DELETE',
+        const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/${event.id}/cancel`), {
+          method: 'PATCH',
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
         if (!res.ok) {
-          setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
-          return;
+          if (res.status === 404 || res.status === 405) {
+            const fallbackRes = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/${event.id}`), {
+              method: 'PUT',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ status: 'cancelled' }),
+            });
+            if (!fallbackRes.ok) {
+              setToast({ show: true, message: await readApiErrorMessage(fallbackRes), type: 'error' });
+              return;
+            }
+          } else {
+            setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
+            return;
+          }
         }
       }
-      deleteEvent(event.id);
+      cancelEvent(event.id);
       setEventsState(getEvents());
-      setToast({ show: true, message: 'Event deleted.', type: 'success' });
+      setApiEventStatus('cancelled');
+      setApiEvent((prev) => (prev ? { ...prev, status: 'cancelled', isCancelled: true } : null));
+      setToast({ show: true, message: 'Event has been cancelled.', type: 'success' });
       invalidatePrefix('/api/events?');
+      invalidatePrefix(`/api/events/${event.id}`);
       invalidatePrefix(`/api/participants/${event.id}`);
-      setTimeout(() => navigate('/home'), 600);
+      invalidatePrefix('/api/events/my-events');
+      invalidatePrefix('/api/participants/my/events');
     } catch {
-      setToast({ show: true, message: 'Could not delete the event.', type: 'error' });
+      setToast({ show: true, message: 'Could not cancel the event.', type: 'error' });
     } finally {
-      setIsDeletingEvent(false);
+      setIsCancellingEvent(false);
     }
   };
 
   const isFreeEvent = !(Number(event.budget) > 0);
   const isAtCapacity = Boolean(
     event.participantsLimit > 0 &&
-    attendeeDisplayCount >= event.participantsLimit &&
-    !hasJoined &&
-    !isEventOwner,
+      attendeeDisplayCount >= event.participantsLimit &&
+      !hasJoined &&
+      !isEventOwner,
   );
 
   const getJoinButtonText = () => {
+    if (isCancelledEvent) return 'Event Cancelled';
     if (isUpdatingParticipation) return 'Please wait...';
     if (participationLoading) return 'Checking attendance…';
     if (isPastEvent) return 'Event Ended';
@@ -623,7 +666,15 @@ export default function EventDetailsPage() {
   };
 
   const showSplitJoinLeave =
-    !event.requiresApproval && isFreeEvent && !isEventOwner && !isOrganizer && !isPastEvent;
+    !event.requiresApproval && isFreeEvent && !isEventOwner && !isOrganizer && !isPastEvent && !isCancelledEvent;
+
+  // Resolved organizer identity combining profile lookup and event data
+  const resolvedOrganizerName = formatUserIdentity({
+    username: organizerProfile?.username || event.organizerUsername,
+    fullName: organizerProfile?.full_name || (event.organizer !== 'Organizer' ? event.organizer : '') || event.organizerFullName || 'Organizer',
+  });
+
+  const resolvedOrganizerAvatar = organizerProfile?.avatar_url || event.organizerAvatar;
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -637,7 +688,12 @@ export default function EventDetailsPage() {
           <ArrowLeft className="h-5 w-5 text-foreground" />
         </button>
         <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
-          {event.requiresApproval && (
+          {isCancelledEvent && (
+            <div className="flex items-center gap-1 rounded-full bg-destructive/90 px-3 py-1 text-xs font-semibold text-destructive-foreground backdrop-blur-sm shadow-md">
+              <Ban className="h-3.5 w-3.5" /> Cancelled
+            </div>
+          )}
+          {event.requiresApproval && !isCancelledEvent && (
             <div className="flex items-center gap-1 rounded-full bg-accent/90 px-3 py-1 text-xs font-semibold text-accent-foreground backdrop-blur-sm">
               <ShieldCheck className="h-3 w-3" /> Approval Required
             </div>
@@ -648,22 +704,35 @@ export default function EventDetailsPage() {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-10 relative z-10 space-y-6">
         <div className="rounded-2xl glass-card p-5 space-y-4">
           <div className="flex items-start justify-between gap-2">
-            <h1 className="text-xl font-bold text-foreground">{event.title}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-bold text-foreground">{event.title}</h1>
+              {isCancelledEvent && (
+                <span
+                  data-testid="cancelled-badge"
+                  className="rounded-full bg-destructive/15 text-destructive border border-destructive/30 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide"
+                >
+                  Cancelled
+                </span>
+              )}
+            </div>
             <span className="shrink-0 rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">{event.category}</span>
           </div>
 
           <div className="flex items-center gap-3">
-            <img src={event.organizerAvatar} alt="" className="h-10 w-10 rounded-full bg-secondary ring-2 ring-primary/30" />
+            <UserAvatar
+              src={resolvedOrganizerAvatar}
+              seed={event.organizerId || event.id}
+              name={resolvedOrganizerName}
+              size="md"
+              className="h-10 w-10 ring-2 ring-primary/30"
+            />
             <div>
               <p className="text-sm font-medium text-foreground" data-testid="organizer-full-name">
-                {formatUserIdentity({
-                  username: event.organizerUsername,
-                  fullName: event.organizerFullName || organizerNameOverride || event.organizer || 'Organizer',
-                })}
+                {organizerProfile?.full_name || event.organizerFullName || (event.organizer !== 'Organizer' ? event.organizer : '') || 'Organizer'}
               </p>
-              {event.organizerUsername ? (
+              {(organizerProfile?.username || event.organizerUsername) ? (
                 <p className="text-xs text-muted-foreground" data-testid="organizer-username">
-                  {event.organizerUsername}
+                  @{(organizerProfile?.username || event.organizerUsername || '').replace(/^@/, '')}
                 </p>
               ) : null}
               <p className="text-xs text-muted-foreground">Organizer</p>
@@ -756,7 +825,7 @@ export default function EventDetailsPage() {
                         {formatUserIdentity({ username: row.username, fullName: row.name })}
                       </span>
                     </div>
-                    {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && (
+                    {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && !isCancelledEvent && (
                       <button
                         type="button"
                         disabled={removingParticipantId === row.id}
@@ -805,19 +874,6 @@ export default function EventDetailsPage() {
           <h2 className="text-base font-semibold text-foreground">
             {isEventOwner ? 'Your event' : 'Join or leave'}
           </h2>
-          {isEventOwner ? (
-            <p className="text-xs text-muted-foreground">
-              As the host you can edit or delete here. Join and Leave are only for guests — you can't join your own event.
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {isPastEvent
-                ? 'This event already happened. You can still view all event details.'
-                : showSplitJoinLeave
-                ? 'Use Join to attend or Leave to cancel your spot.'
-                : 'One action below handles join, pay, approval, or leave depending on this event.'}
-            </p>
-          )}
         </div>
 
         {/* Event Chat Access */}
@@ -825,18 +881,28 @@ export default function EventDetailsPage() {
           <h2 className="text-base font-semibold text-foreground">Event chat</h2>
           {!user ? (
             <p className="text-xs text-muted-foreground">Sign in and join this event to access the event chat.</p>
-          ) : isCancelledEvent || isChatExpired ? (
-            <p className="text-xs text-muted-foreground">
-              {isChatExpired ? 'Chat is no longer available — this event ended more than 48 hours ago.' : 'This event is canceled. Chat is no longer available.'}
-            </p>
           ) : canAccessEventChat ? (
-            <button
-              type="button"
-              onClick={() => navigate(`/chat?eventId=${event.id}`)}
-              className="w-full rounded-xl bg-secondary/80 py-3 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
-            >
-              Open Event Chat
-            </button>
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => navigate(`/chat?eventId=${event.id}`)}
+                className="w-full rounded-xl bg-secondary/80 py-3 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+              >
+                Open Event Chat
+              </button>
+              {isCancelledEvent && (
+                <p className="text-[11px] text-center text-muted-foreground">
+                  This event is cancelled. Chat is read-only.
+                </p>
+              )}
+              {isChatExpired && !isCancelledEvent && (
+                <p className="text-[11px] text-center text-muted-foreground">
+                  This event ended more than 48 hours ago. Chat is read-only.
+                </p>
+              )}
+            </div>
+          ) : isCancelledEvent ? (
+            <p className="text-xs text-muted-foreground">This event is cancelled.</p>
           ) : (
             <p className="text-xs text-muted-foreground">Join this event to access its chat.</p>
           )}
@@ -847,10 +913,10 @@ export default function EventDetailsPage() {
             <>
               <button
                 type="button"
-                disabled={isPastEvent}
-                onClick={() => !isPastEvent && navigate(`/event/${event.id}/edit`)}
+                disabled={isPastEvent || isCancelledEvent}
+                onClick={() => !isPastEvent && !isCancelledEvent && navigate(`/event/${event.id}/edit`)}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
-                  isPastEvent
+                  isPastEvent || isCancelledEvent
                     ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
                     : 'border-primary/45 bg-primary/15 text-primary hover:bg-primary/25'
                 }`}
@@ -858,43 +924,45 @@ export default function EventDetailsPage() {
                 <Pencil className="h-4 w-4 shrink-0" />
                 Edit event
               </button>
-              <button
-                type="button"
-                disabled={isDeletingEvent || isPastEvent}
-                onClick={() => void handleDeleteEvent()}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
-                  isPastEvent
-                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
-                    : 'border-destructive/45 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-60'
-                }`}
-              >
-                <Trash2 className="h-4 w-4 shrink-0" />
-                {isDeletingEvent ? 'Deleting…' : 'Delete'}
-              </button>
+              {!isEventPassed && (
+                <button
+                  type="button"
+                  disabled={isCancellingEvent || isCancelledEvent}
+                  onClick={() => void handleCancelEvent()}
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
+                    isCancelledEvent
+                      ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                      : 'border-destructive/45 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-60'
+                  }`}
+                >
+                  <Ban className="h-4 w-4 shrink-0" />
+                  {isCancellingEvent ? 'Cancelling…' : isCancelledEvent ? 'Cancelled' : 'Cancel event'}
+                </button>
+              )}
             </>
           ) : showSplitJoinLeave ? (
             <>
               <button
                 type="button"
-                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent && !isAtCapacity) void handleJoinOrRequest(); }}
-                disabled={isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
+                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent && !isCancelledEvent && !isAtCapacity) void handleJoinOrRequest(); }}
+                disabled={isPastEvent || isCancelledEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isPastEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation
+                  isPastEvent || isCancelledEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
                 <UserPlus className="h-4 w-4 shrink-0" />
-                {isPastEvent ? 'Event Ended' : isAtCapacity ? 'Event Full' : 'Join Event'}
+                {isCancelledEvent ? 'Event Cancelled' : isPastEvent ? 'Event Ended' : isAtCapacity ? 'Event Full' : 'Join Event'}
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  if (hasJoined && !isUpdatingParticipation && !participationLoading) void handleJoinOrRequest();
+                  if (hasJoined && !isUpdatingParticipation && !participationLoading && !isCancelledEvent) void handleJoinOrRequest();
                 }}
-                disabled={!hasJoined || participationLoading || isUpdatingParticipation}
+                disabled={!hasJoined || participationLoading || isUpdatingParticipation || isCancelledEvent}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl border border-border py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  !hasJoined || participationLoading || isUpdatingParticipation
+                  !hasJoined || participationLoading || isUpdatingParticipation || isCancelledEvent
                     ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
                     : 'bg-secondary text-foreground hover:bg-secondary/80'
                 }`}
@@ -907,17 +975,17 @@ export default function EventDetailsPage() {
             <>
               <button
                 type="button"
-                onClick={() => void handleJoinOrRequest()}
-                disabled={isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
+                onClick={() => { if (!isCancelledEvent) void handleJoinOrRequest(); }}
+                disabled={isCancelledEvent || isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
+                  isCancelledEvent || isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : hasJoined
                       ? 'border border-border bg-secondary text-foreground hover:bg-secondary/80'
                       : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
                 }`}
               >
-                {useApiParticipation && !event.requiresApproval && isFreeEvent ? (
+                {useApiParticipation && !event.requiresApproval && isFreeEvent && !isCancelledEvent ? (
                   hasJoined ? <LogOut className="h-4 w-4 shrink-0" /> : <UserPlus className="h-4 w-4 shrink-0" />
                 ) : null}
                 {getJoinButtonText()}
@@ -967,7 +1035,6 @@ export default function EventDetailsPage() {
             </motion.div>
           </motion.div>
         )}
-
       </AnimatePresence>
 
       <BottomNav />
