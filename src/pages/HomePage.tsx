@@ -12,8 +12,8 @@ import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Pale
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
-import { isEventUpcoming } from '@/lib/eventTime';
-import { useMaxPrice, useFavorites, useEvents, useRecommendations, invalidateProfile } from '@/lib/queries';
+import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
+import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents, invalidateProfile } from '@/lib/queries';
 import { queryClient } from '@/lib/queryClient';
 import { invalidatePrefix } from '@/lib/queryCache';
 
@@ -36,7 +36,9 @@ export default function HomePage() {
   const [showFilterModal, setShowFilterModal] = useState(false);
   const categoryScrollRef = useRef<HTMLDivElement>(null);
 
+  const [visibleUpcoming, setVisibleUpcoming] = useState(3);
   const PAGE = 6;
+  const UPCOMING_PAGE = 3;
   const today = new Date();
   const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -61,6 +63,9 @@ export default function HomePage() {
     user?.id,
     Boolean(user?.interests?.length),
   );
+  // #244 — user's own upcoming events, organized or joined; both already cached client-side (11.1)
+  const { data: myEventsData } = useMyEvents(user?.id);
+  const { data: joinedEventsData } = useJoinedEvents(user?.id);
 
   // ── Derive values from query data ─────────────────────────────────────────
   const maxPrice = maxPriceData?.max_price ?? 500;
@@ -209,6 +214,18 @@ export default function HomePage() {
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
+  // ── #244: user's own upcoming events (organized + joined), no cancelled ───
+  const upcomingForYou = useMemo(() => {
+    const combined = [...(myEventsData ?? []), ...(joinedEventsData ?? [])];
+    // An organizer is also a participant of their own event, so the same
+    // event can appear in both lists — dedupe by id.
+    const byId = new Map<string, EventItem>();
+    combined.forEach((e) => byId.set(e.id, e));
+    return Array.from(byId.values())
+      .filter((e) => isEventUpcoming(e) && String(e.status || '').toLowerCase() !== 'cancelled')
+      .sort((a, b) => eventStartMs(a) - eventStartMs(b));
+  }, [myEventsData, joinedEventsData]);
+
   const applyFilters = (list: EventItem[]) =>
     list.filter((e) => {
       if (!isEventUpcoming(e)) return false;
@@ -291,6 +308,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/40">
         <TopBar search={search} onSearchChange={setSearch} />
         
+
         <div className="mx-auto max-w-3xl px-4 pt-2 pb-3">
           <div className="flex items-center gap-2">
             <div className="flex flex-wrap flex-1 gap-1.5">
@@ -328,9 +346,6 @@ export default function HomePage() {
             </button>
           </div>
         </div>
-      </header>
-
-      <div className="mx-auto max-w-3xl space-y-3 px-4 pt-3">
 
         {/* Friend Activity Section */}
         {friendActivity.length > 0 && (
