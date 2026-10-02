@@ -60,6 +60,8 @@ const colorMap: Record<NotificationKind, string> = {
 
 function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
+  if (t === 'friend_request_received') return 'friend_request_received';
+  if (t === 'friend_request_accepted') return 'friend_request_accepted';
   if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
   if (t === 'user_left' || t.includes('left')) return 'user_left';
   if (t === 'event_created' || t.includes('creat')) return 'event_created';
