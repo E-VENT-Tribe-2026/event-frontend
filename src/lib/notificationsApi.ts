@@ -95,6 +95,20 @@ export async function fetchNotifications(token: string): Promise<ApiNotification
           : typeof row.triggered_by_name === 'string' ? row.triggered_by_name
           : typeof row.profiles?.full_name === 'string' ? row.profiles.full_name
           : null,
+        related_user_id: typeof row.related_user_id === 'string' ? row.related_user_id : null,
+        related_user:
+          row.related_user && typeof row.related_user === 'object'
+            ? {
+                id: String(row.related_user.id ?? ''),
+                username: typeof row.related_user.username === 'string' ? row.related_user.username : null,
+                full_name: typeof row.related_user.full_name === 'string' ? row.related_user.full_name : null,
+                avatar_url: typeof row.related_user.avatar_url === 'string' ? row.related_user.avatar_url : null,
+                avatar_kind: row.related_user.avatar_kind === 'photo' || row.related_user.avatar_kind === 'icon'
+                  ? row.related_user.avatar_kind
+                  : null,
+                icon_id: typeof row.related_user.icon_id === 'string' ? row.related_user.icon_id : null,
+              }
+            : null,
       })) as ApiNotification[];
     },
     TTL.SHORT, // 30s — notifications should feel fresh
