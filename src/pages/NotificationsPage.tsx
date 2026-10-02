@@ -30,6 +30,9 @@ type UINotification = {
   eventTitle: string;
   createdAt: string | null;
   read: boolean;
+  /** The user this notification is about — friend requests only (ticket #243). */
+  relatedUserId: string | null;
+  relatedUser: RelatedUser | null;
 };
 
 const iconMap: Record<NotificationKind, React.ElementType> = {
@@ -81,6 +84,8 @@ function fromApi(n: ApiNotification): UINotification {
     eventTitle: n.event_title ?? '',
     createdAt: n.created_at ?? null,
     read: Boolean(n.read),
+    relatedUserId: n.related_user_id ?? null,
+    relatedUser: n.related_user ?? null,
   };
 }
 
@@ -93,6 +98,8 @@ function fromLocal(n: Notification): UINotification {
     eventTitle: '',
     createdAt: null,
     read: n.read,
+    relatedUserId: null,
+    relatedUser: null,
   };
 }
 
