@@ -2,6 +2,15 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
 
+export type RelatedUser = {
+  id: string;
+  username?: string | null;
+  full_name?: string | null;
+  avatar_url?: string | null;
+  avatar_kind?: 'photo' | 'icon' | null;
+  icon_id?: string | null;
+};
+
 export type ApiNotification = {
   id: string;
   type: string;
