@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getNotifications, saveNotifications, type Notification } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink } from 'lucide-react';
+import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification, type RelatedUser } from '@/lib/notificationsApi';
+import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -18,6 +18,8 @@ type NotificationKind =
   | 'event_deleted'
   | 'event_cancelled'
   | 'reminder'
+  | 'friend_request_received'
+  | 'friend_request_accepted'
   | 'other';
 
 type UINotification = {
@@ -31,25 +33,29 @@ type UINotification = {
 };
 
 const iconMap: Record<NotificationKind, React.ElementType> = {
-  user_joined:     UserPlus,
-  user_left:       UserMinus,
-  event_created:   PlusCircle,
-  event_updated:   Info,
-  event_deleted:   Trash2,
-  event_cancelled: BellOff,
-  reminder:        CalendarClock,
-  other:           Info,
+  user_joined:               UserPlus,
+  user_left:                 UserMinus,
+  event_created:             PlusCircle,
+  event_updated:             Info,
+  event_deleted:             Trash2,
+  event_cancelled:           BellOff,
+  reminder:                  CalendarClock,
+  friend_request_received:   Contact,
+  friend_request_accepted:   UserCheck,
+  other:                     Info,
 };
 
 const colorMap: Record<NotificationKind, string> = {
-  user_joined:     'text-green-500 bg-green-500/15',
-  user_left:       'text-destructive bg-destructive/15',
-  event_created:   'text-green-500 bg-green-500/15',
-  event_updated:   'text-primary bg-primary/20',
-  event_deleted:   'text-destructive bg-destructive/15',
-  event_cancelled: 'text-destructive bg-destructive/15',
-  reminder:        'text-accent bg-accent/20',
-  other:           'text-primary bg-primary/20',
+  user_joined:               'text-green-500 bg-green-500/15',
+  user_left:                 'text-destructive bg-destructive/15',
+  event_created:             'text-green-500 bg-green-500/15',
+  event_updated:             'text-primary bg-primary/20',
+  event_deleted:             'text-destructive bg-destructive/15',
+  event_cancelled:           'text-destructive bg-destructive/15',
+  reminder:                  'text-accent bg-accent/20',
+  friend_request_received:   'text-accent bg-accent/20',
+  friend_request_accepted:   'text-green-500 bg-green-500/15',
+  other:                     'text-primary bg-primary/20',
 };
 
 function normalizeKind(type: string): NotificationKind {
