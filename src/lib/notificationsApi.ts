@@ -20,6 +20,9 @@ export type ApiNotification = {
   created_at?: string | null;
   read?: boolean;
   actor_name?: string | null;
+  /** Present on friend_request_received / friend_request_accepted (ticket #243). */
+  related_user_id?: string | null;
+  related_user?: RelatedUser | null;
 };
 
 function normalizeType(type: string): string {
