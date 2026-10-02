@@ -285,6 +285,7 @@ export default function NotificationsPage() {
       }
     }
     if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
+    else if (n.relatedUserId) navigate(`/profile/${n.relatedUserId}`);
   };
 
   const onDelete = async (id: string, e: React.MouseEvent) => {
