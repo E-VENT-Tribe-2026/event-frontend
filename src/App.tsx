@@ -29,6 +29,7 @@ import RouteDocumentTitle from "./components/RouteDocumentTitle";
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
+import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import { getAuthToken, clearAuthToken } from '@/lib/auth';
@@ -163,6 +164,7 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
             <Route path="/choose-username" element={<ChooseUsernamePage />} />
+            <Route path="/admin-verify" element={<AdminVerifyPage />} />
             <Route path="/home" element={<RequireUsername><HomePage /></RequireUsername>} />
             <Route path="/event/:id/edit" element={<RequireUsername><EditEventPage /></RequireUsername>} />
             <Route path="/event/:id" element={<RequireUsername><EventDetailsPage /></RequireUsername>} />
