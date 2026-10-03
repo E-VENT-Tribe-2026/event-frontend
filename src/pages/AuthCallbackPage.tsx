@@ -8,6 +8,7 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { destinationAfterSignIn } from '@/lib/username';
 import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
+import { fetchMfaStatus, needsAdminVerification, setPendingAdminVerification } from '@/lib/adminAuth';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -78,6 +79,19 @@ export default function AuthCallbackPage() {
       }
 
       setAuthToken(session.access_token);
+
+      // Ticket #247, Scenario F: Google sign-in never calls /api/auth/login,
+      // so an administrator's status is checked separately here.
+      const mfaStatus = await fetchMfaStatus(session.access_token);
+      if (mfaStatus && needsAdminVerification(mfaStatus)) {
+        setPendingAdminVerification({
+          accessToken: session.access_token,
+          hasMfaLinked: Boolean(mfaStatus.has_mfa_linked),
+          factorId: mfaStatus.factor_id,
+        });
+        navigate('/admin-verify', { replace: true });
+        return;
+      }
 
       const googleName = String(
         session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
