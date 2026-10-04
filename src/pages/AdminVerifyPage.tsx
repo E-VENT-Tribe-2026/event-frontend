@@ -19,7 +19,7 @@ import {
 } from '@/lib/adminAuth';
 
 /**
- * Ticket #247 — shown to an administrator account after sign-in, before any
+ * Shown to an administrator account after sign-in, before any
  * other screen, until a correct authenticator-app code is entered.
  */
 export default function AdminVerifyPage() {
@@ -33,7 +33,7 @@ export default function AdminVerifyPage() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
 
-  // Nothing to verify (direct navigation, refresh after sign-out, etc.) — nowhere to send them but sign-in.
+  // Nothing to verify (direct navigation).
   useEffect(() => {
     if (!pending.current) {
       navigate('/login', { replace: true });
@@ -81,9 +81,7 @@ export default function AdminVerifyPage() {
       return;
     }
 
-    // Verified — this is now an upgraded aal2 token. Continue exactly like a
-    // normal sign-in would (ticket: "reaches the screen the account reaches
-    // after signing in today" — not a special admin destination).
+    // Verified — this is now an upgraded aal2 token. Continue exactly like a normal sign-in would
     setAuthToken(result.accessToken);
     if (supabase) {
       await supabase.auth.setSession({ access_token: result.accessToken, refresh_token: '' }).catch(() => {});
@@ -112,7 +110,7 @@ export default function AdminVerifyPage() {
     }
 
     if (me?.id) {
-      setCurrentUserFromOAuth({ id: me.id, email: me.email || '', name: fullName, avatar: avatarUrl, bio, interests });
+      setCurrentUserFromOAuth({ id: me.id, email: me.email || '', name: fullName, username: username ?? '', avatar: avatarUrl, bio, interests });
     }
     navigate(destinationAfterSignIn(username), { replace: true });
   };

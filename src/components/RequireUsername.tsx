@@ -30,7 +30,7 @@ export default function RequireUsername({ children }: { children: React.ReactNod
     };
   }, [token]);
 
-  // Ticket #247: an administrator who hasn't completed sign-in verification
+  // An administrator who hasn't completed sign-in verification
   // yet cannot reach any other screen of the application — checked ahead of
   // the username check below, since this is the stricter gate.
   if (token && getPendingAdminVerification()) {

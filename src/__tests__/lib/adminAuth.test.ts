@@ -9,9 +9,7 @@ import {
   verifyMfaCode,
 } from '@/lib/adminAuth';
 
-// Built directly against "Updated Backend APIs scenario.md", posted by the
-// backend dev on ticket #247 (event-backend#150), per the team's workflow
-// policy of building against the posted example before the live endpoint.
+// Built directly against "Updated Backend APIs scenario.md"
 
 describe('needsAdminVerification', () => {
   it('Scenario A — non-admin never needs verification', () => {
@@ -40,7 +38,7 @@ describe('pending admin verification storage', () => {
 });
 
 describe('fetchMfaStatus — Scenario F (Google OAuth)', () => {
-  const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
+  const fetchMock = vi.fn<typeof fetch>();
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
@@ -72,7 +70,7 @@ describe('fetchMfaStatus — Scenario F (Google OAuth)', () => {
 });
 
 describe('enrollMfa — Scenario B, Step 2', () => {
-  const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
+  const fetchMock = vi.fn<typeof fetch>();
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
@@ -113,7 +111,7 @@ describe('enrollMfa — Scenario B, Step 2', () => {
 });
 
 describe('verifyMfaCode — Scenarios B/C/D/G', () => {
-  const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
+  const fetchMock = vi.fn<typeof fetch>();
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);

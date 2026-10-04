@@ -1,10 +1,7 @@
 import { getApiUrl } from '@/lib/api';
 
 /**
- * Admin sign-in verification (TOTP / authenticator app), per ticket #247.
- * Built against the backend dev's posted scenarios on the ticket
- * (event-backend#150) — see Scenarios A-G in "Updated Backend APIs scenario.md".
- */
+ * Admin sign-in verification (TOTP / authenticator app). */
 
 export type AdminAuthStatus = {
   role?: string;

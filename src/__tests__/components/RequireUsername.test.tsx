@@ -25,7 +25,7 @@ function renderGuarded(initialPath = '/home') {
 }
 
 describe('RequireUsername — ticket #247 admin-verification gate', () => {
-  const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
+  const fetchMock = vi.fn<typeof fetch>();
 
   beforeEach(() => {
     fetchMock.mockReset();

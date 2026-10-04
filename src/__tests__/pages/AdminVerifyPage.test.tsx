@@ -21,7 +21,7 @@ function renderPage() {
 }
 
 describe('AdminVerifyPage', () => {
-  const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
+  const fetchMock = vi.fn<typeof fetch>();
 
   beforeEach(() => {
     mockNavigate.mockReset();

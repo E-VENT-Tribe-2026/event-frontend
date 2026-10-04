@@ -80,7 +80,7 @@ export default function AuthCallbackPage() {
 
       setAuthToken(session.access_token);
 
-      // Ticket #247, Scenario F: Google sign-in never calls /api/auth/login,
+      // Scenario F: Google sign-in never calls /api/auth/login,
       // so an administrator's status is checked separately here.
       const mfaStatus = await fetchMfaStatus(session.access_token);
       if (mfaStatus && needsAdminVerification(mfaStatus)) {

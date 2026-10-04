@@ -68,7 +68,7 @@ export default function LoginPage() {
         });
       }
 
-      // Ticket #247: an administrator whose current sign-in isn't verified
+      // An administrator whose current sign-in isn't verified
       // yet goes straight to the verification step — before any profile
       // fetch or normal post-login setup.
       const authStatus = data as unknown as AdminAuthStatus;
