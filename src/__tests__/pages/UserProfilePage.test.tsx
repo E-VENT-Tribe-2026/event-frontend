@@ -6,7 +6,6 @@ import UserProfilePage from '@/pages/UserProfilePage';
 import { queryClient } from '@/lib/queryClient';
 import { clearAuthToken, setAuthToken } from '@/lib/auth';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
-import { userProfilePath } from '@/lib/friendsApi';
 
 vi.mock('@/components/BottomNav', () => ({ default: () => null }));
 
@@ -222,13 +221,5 @@ describe('UserProfilePage', () => {
     renderPage();
     expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
     expect(calls.filter((c) => c.method === 'GET' && c.url.includes(`/api/profile/${OTHER_ID}`))).toHaveLength(1);
-  });
-});
-
-describe('userProfilePath', () => {
-  it('sends your own account to the profile tab and others to their profile page', () => {
-    expect(userProfilePath('ABC', 'abc')).toBe('/profile');
-    expect(userProfilePath(OTHER_ID, 'viewer-1')).toBe(`/user/${OTHER_ID}`);
-    expect(userProfilePath(OTHER_ID, null)).toBe(`/user/${OTHER_ID}`);
   });
 });

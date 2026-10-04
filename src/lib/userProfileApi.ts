@@ -22,9 +22,9 @@ export type UserProfile = {
   id: string;
   username?: string | null;
   full_name?: string | null;
-  avatar_url?: string | null;
-  avatar_kind?: 'photo' | 'icon' | null;
-  icon_id?: string | null;
+  avatar_url: string | null;
+  avatar_kind: 'photo' | 'icon' | string | null;
+  icon_id: string | null;
   banner_url?: string | null;
   bio?: string | null;
   interests?: string[] | null;
