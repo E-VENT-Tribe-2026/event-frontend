@@ -19,6 +19,7 @@ import EditEventPage from "./pages/EditEventPage";
 import CreateEventPage from "./pages/CreateEventPage";
 import MapPage from "./pages/MapPage";
 import ProfilePage from "./pages/ProfilePage";
+import UserProfilePage from "./pages/UserProfilePage";
 import ChatPage from "./pages/ChatPage";
 import FriendsPage from "./pages/FriendsPage";
 import NotificationsPage from "./pages/NotificationsPage";
@@ -170,6 +171,7 @@ const App = () => (
             <Route path="/create" element={<RequireUsername><CreateEventPage /></RequireUsername>} />
             <Route path="/map" element={<RequireUsername><MapPage /></RequireUsername>} />
             <Route path="/profile" element={<RequireUsername><ProfilePage /></RequireUsername>} />
+            <Route path="/user/:userId" element={<RequireUsername><UserProfilePage /></RequireUsername>} />
             <Route path="/chat" element={<RequireUsername><ChatPage /></RequireUsername>} />
             <Route path="/friends" element={<RequireUsername><FriendsPage /></RequireUsername>} />
             <Route path="/notifications" element={<RequireUsername><NotificationsPage /></RequireUsername>} />
