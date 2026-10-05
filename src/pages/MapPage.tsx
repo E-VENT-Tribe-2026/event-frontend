@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
 import BottomNav from '@/components/BottomNav';
-import { ArrowLeft, LocateFixed, RefreshCw } from 'lucide-react';
+import { ArrowLeft, LocateFixed, RefreshCw, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -82,6 +82,9 @@ export default function MapPage() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
   const [mapReady, setMapReady] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Use `loading` flag to block and disable interactions across the map page when fetching data
+  const isAnyDataLoading = loading;
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedTitle(titleSearch.trim()), 350);
@@ -318,6 +321,7 @@ export default function MapPage() {
   }, [navigate, mapReady, filteredEvents]);
 
   const locateUser = () => {
+    if (isAnyDataLoading) return;
     const map = mapInstance.current;
     const L = leafletRef.current;
     if (!map || !L) return;
@@ -362,7 +366,17 @@ export default function MapPage() {
   const manualRefresh = () => setRefreshKey((k) => k + 1);
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className={`min-h-screen bg-background pb-20 relative ${isAnyDataLoading ? 'pointer-events-none select-none' : ''}`}>
+      {/* Loading Overlay State */}
+      {isAnyDataLoading && (
+        <div className="absolute inset-0 z-50 bg-background/60 backdrop-blur-xs flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2 p-6 rounded-2xl glass-card shadow-lg">
+            <Loader2 className="h-6 w-6 text-primary animate-spin" />
+            <p className="text-xs font-semibold text-foreground">Loading</p>
+          </div>
+        </div>
+      )}
+
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
 
       {/* Header */}
@@ -482,12 +496,11 @@ export default function MapPage() {
       {/* Map */}
       <div className="relative">
         <div ref={mapRef} className="h-[min(72vh,580px)] w-full z-0" />
-        {/* Only show full blocking overlay on initial cold load when rawEvents is empty */}
         {loading && rawEvents.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm z-10 pointer-events-none">
             <div className="flex flex-col items-center gap-2 rounded-2xl glass-card px-6 py-4">
               <RefreshCw className="h-5 w-5 animate-spin text-primary" />
-              <p className="text-xs text-muted-foreground">Loading events…</p>
+              <p className="text-xs text-muted-foreground">Loading events</p>
             </div>
           </div>
         )}
