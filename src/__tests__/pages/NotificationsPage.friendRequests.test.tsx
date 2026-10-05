@@ -102,7 +102,7 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     renderPage();
     fireEvent.click(screen.getByText('john_42 sent you a friend request'));
     await waitFor(() =>
-      expect(mockNavigate).toHaveBeenCalledWith('/profile/5d41402a-bc4b-4a2b-9f6e-3e8c2b7a1d90')
+      expect(mockNavigate).toHaveBeenCalledWith('/user/5d41402a-bc4b-4a2b-9f6e-3e8c2b7a1d90')
     );
   });
 
