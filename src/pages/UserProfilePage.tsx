@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Calendar, Clock, UserMinus, UserPlus, X, Check } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, UserMinus, UserPlus, X, Check, Users, UserCheck } from 'lucide-react';
+import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
@@ -20,9 +21,13 @@ import {
   removeFriend,
   sendFriendRequest,
   userAvatarUrl,
+  userProfilePath,
+  fetchFriends,
+  type FriendItem,
 } from '@/lib/friendsApi';
 import { ProfileLoadError, type ProfileEventGroup, type UserProfile } from '@/lib/userProfileApi';
 
+type MainTab = 'events' | 'friends';
 type EventTab = 'upcoming' | 'past';
 type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove';
 
@@ -83,11 +88,14 @@ export default function UserProfilePage() {
   const viewer = getCurrentUser();
   const isSelf = Boolean(viewer?.id) && viewer!.id.trim().toLowerCase() === userId.trim().toLowerCase();
 
+  const [mainTab, setMainTab] = useState<MainTab>('events');
   const [eventTab, setEventTab] = useState<EventTab>('upcoming');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
 
-  // The token lives in per-tab sessionStorage, so a profile opened in a new tab has none yet:
-  // restore it from the Supabase session before loading.
+  // Friends Data State for the viewed user
+  const [userFriends, setUserFriends] = useState<FriendItem[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+
   const [tokenReady, setTokenReady] = useState(() => Boolean(getAuthToken()));
   useEffect(() => {
     if (tokenReady) return;
@@ -98,7 +106,7 @@ export default function UserProfilePage() {
         const token = data?.session?.access_token;
         if (token) setAuthToken(token);
       } catch {
-        // fall through: the page then shows the sign-in message below
+        // fall through
       }
       if (!cancelled) setTokenReady(true);
     })();
@@ -111,6 +119,24 @@ export default function UserProfilePage() {
     isSelf || !tokenReady ? undefined : viewer?.id,
     userId,
   );
+
+  // Fetch friends list
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    setFriendsLoading(true);
+    fetchFriends(1, 50)
+      .then((res) => {
+        if (!cancelled) setUserFriends(res.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setUserFriends([]);
+      })
+      .finally(() => {
+        if (!cancelled) setFriendsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [userId]);
 
   const action = useMutation({
     mutationFn: async (kind: FriendshipAction) => {
@@ -130,17 +156,13 @@ export default function UserProfilePage() {
       }
     },
     onSuccess: async () => {
-      // The backend deletes the "sent you a friend request" notification on accept,
-      // decline and cancel, so drop the cached notification lists too.
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
-      // Refresh the cached profile so the new state shows without a reload.
       invalidateUserProfile(userId);
       await refetch();
     },
     onError: (err) => {
       setToast({ show: true, message: errorMessage(err), type: 'error' });
-      // The state may have changed elsewhere (e.g. a 409); show the real one.
       invalidateUserProfile(userId);
       void refetch();
     },
@@ -154,7 +176,6 @@ export default function UserProfilePage() {
     };
   }, [profile]);
 
-  // Your own account always opens your own profile tab.
   if (isSelf) return <Navigate to="/profile" replace />;
 
   const run = (kind: FriendshipAction) => action.mutate(kind);
@@ -299,31 +320,96 @@ export default function UserProfilePage() {
             )}
           </div>
 
-          <div className="space-y-4 px-4">
-            <div className="flex gap-1 rounded-xl glass-card p-1" role="tablist">
-              {tabs.map((tab) => {
-                const active = eventTab === tab.id;
+          {/* Main Parent Tabs: Events vs Friends */}
+          <div className="mx-auto max-w-lg px-4 space-y-4">
+            <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
+              {[
+                { id: 'events' as const, label: 'Events', icon: Calendar },
+                { id: 'friends' as const, label: 'Friends', icon: Users },
+              ].map((tab) => {
+                const active = mainTab === tab.id;
                 return (
                   <button
                     key={tab.id}
                     type="button"
                     role="tab"
                     aria-selected={active}
-                    data-testid={`user-tab-${tab.id}`}
-                    onClick={() => setEventTab(tab.id)}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all ${
-                      active ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'
+                    onClick={() => setMainTab(tab.id)}
+                    className={`flex flex-1 items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-semibold transition-all ${
+                      active
+                        ? 'gradient-primary text-primary-foreground shadow-glow'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                     }`}
                   >
                     <tab.icon className="h-4 w-4" />
-                    {tab.label}
+                    <span>{tab.label}</span>
                   </button>
                 );
               })}
             </div>
 
-            <EventSection title="Organized" events={events.organized[eventTab]} />
-            <EventSection title="Joined" events={events.joined[eventTab]} />
+            {/* Main Content Sections */}
+            {mainTab === 'events' ? (
+              <div className="space-y-4">
+                <div className="flex gap-1 rounded-xl glass-card p-1" role="tablist">
+                  {tabs.map((tab) => {
+                    const active = eventTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        data-testid={`user-tab-${tab.id}`}
+                        onClick={() => setEventTab(tab.id)}
+                        className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all ${
+                          active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <tab.icon className="h-3.5 w-3.5" />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <EventSection title="Organized" events={events.organized[eventTab]} />
+                <EventSection title="Joined" events={events.joined[eventTab]} />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {friendsLoading ? (
+                  <div className="flex justify-center py-8">
+                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-primary" />
+                  </div>
+                ) : userFriends.length === 0 ? (
+                  <p className="text-center py-8 text-xs text-muted-foreground">No friends found.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {userFriends.map((f) => {
+                      const label = f.user.username || f.user.display_name || f.user.full_name || 'User';
+                      return (
+                        <motion.li
+                          key={f.user.id}
+                          layout
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3 cursor-pointer hover:border-primary/40 transition-all"
+                          onClick={() => navigate(userProfilePath(f.user.id, viewer?.id ?? null))}
+                        >
+                          <UserAvatar src={userAvatarUrl(f.user)} seed={f.user.id} name={label} size="md" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
+                            {f.user.full_name && <p className="truncate text-xs text-muted-foreground">{f.user.full_name}</p>}
+                          </div>
+                        </motion.li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         </main>
       )}

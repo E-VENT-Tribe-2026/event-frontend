@@ -78,7 +78,7 @@ function jsonOk(data: unknown) {
   return new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-const EMPTY_MESSAGE = 'You have no upcoming events yet.';
+const EMPTY_MESSAGE = 'Nothing planned yet';
 
 describe('HomePage — Upcoming For You section (#244)', () => {
   const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
@@ -151,7 +151,7 @@ describe('HomePage — Upcoming For You section (#244)', () => {
 
     renderHome();
 
-    await waitFor(() => expect(screen.getByText('Upcoming For You')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Upcoming events')).toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByText('My Organized Event').length).toBeGreaterThan(0));
     expect(screen.getAllByText('Event I Joined').length).toBeGreaterThan(0);
     expect(screen.queryByText('Cancelled Event')).not.toBeInTheDocument();
@@ -171,12 +171,10 @@ describe('HomePage — Upcoming For You section (#244)', () => {
       expect(urls.some((u) => u.includes('/api/participants/my/events'))).toBe(true);
     });
 
-    // Re-query on every poll so the test never holds a stale node. The Upcoming
-    // section is the wrapper shared by its header button and its cards.
+    // Re-query on every poll so the test never holds a stale node. Verify the
+    // event appears exactly once (deduplication) anywhere in the document.
     await waitFor(() => {
-      const heading = screen.getByRole('heading', { name: 'Upcoming For You' });
-      const section = heading.closest('button')!.parentElement as HTMLElement;
-      expect(within(section).getAllByRole('heading', { name: 'Own Event I Also Joined' })).toHaveLength(1);
+      expect(screen.getAllByText('Own Event I Also Joined')).toHaveLength(1);
     });
   });
 
@@ -197,7 +195,7 @@ describe('HomePage — Upcoming For You section (#244)', () => {
 
     renderHome();
 
-    await screen.findByText('Upcoming For You');
+    await screen.findByText('Upcoming events');
     expect(screen.queryByText(EMPTY_MESSAGE)).not.toBeInTheDocument();
 
     resolveMine(jsonOk({ data: [] }));

@@ -154,7 +154,7 @@ describe('HomePage', () => {
 
     renderHome();
     await waitFor(() => {
-      expect(screen.getByText(/No events match your current filters/i)).toBeInTheDocument();
+      expect(screen.getByText(/No events match your filters/i)).toBeInTheDocument();
     });
   });
 
