@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard, Users } from 'lucide-react';
+import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard, Users, Shield } from 'lucide-react';
 import { getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getAuthToken } from '@/lib/auth';
@@ -7,10 +7,12 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { useEffect, useState } from 'react';
 import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 
 export default function BottomNav() {
   const location = useLocation();
   const [user, setUser] = useState(getCurrentUser);
+  const { isVerifiedAdmin } = useAdminAuth();
 
   useEffect(() => {
     const sync = () => setUser(getCurrentUser());
@@ -42,7 +44,6 @@ export default function BottomNav() {
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // once on mount
 
   // Pending incoming friend requests, refreshed on every screen load and after friendship changes.
@@ -65,14 +66,13 @@ export default function BottomNav() {
 
   const isOrganizer = user?.role === 'organizer';
 
-  const navItems = isOrganizer
+  const baseItems = isOrganizer
     ? [
         { path: '/home', icon: Home, label: 'Home' },
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/create', icon: PlusCircle, label: 'Create' },
         { path: '/chat', icon: MessageCircle, label: 'Chat' },
         { path: '/friends', icon: Users, label: 'Friends' },
-        { path: '/profile', icon: User, label: 'Profile' },
       ]
     : [
         { path: '/home', icon: Home, label: 'Home' },
@@ -80,14 +80,21 @@ export default function BottomNav() {
         { path: '/create', icon: PlusCircle, label: 'Create' },
         { path: '/chat', icon: MessageCircle, label: 'Chat' },
         { path: '/friends', icon: Users, label: 'Friends' },
-        { path: '/profile', icon: User, label: 'Profile' },
       ];
+
+  const adminItem = isVerifiedAdmin
+    ? [{ path: '/admin', icon: Shield, label: 'Admin' }]
+    : [];
+
+  const profileItem = [{ path: '/profile', icon: User, label: 'Profile' }];
+
+  const navItems = [...baseItems, ...adminItem, ...profileItem];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-around px-2 py-2">
         {navItems.map(({ path, icon: Icon, label }) => {
-          const active = location.pathname === path;
+          const active = location.pathname === path || (path === '/admin' && location.pathname.startsWith('/admin'));
           const isCreate = path === '/create';
           const baseText =
             active && !isCreate ? 'text-primary' : 'text-muted-foreground hover:text-foreground';
