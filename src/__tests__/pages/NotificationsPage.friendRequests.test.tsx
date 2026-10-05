@@ -121,6 +121,13 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     );
   });
 
+  it('counts both received and accepted friend requests on the Activity tab', () => {
+    renderPage();
+    // rows: 1 received + 1 accepted (Activity) and 1 event update (Updates)
+    expect(screen.getByText('Activity').closest('button')).toHaveTextContent('Activity2');
+    expect(screen.getByText('Updates').closest('button')).toHaveTextContent('Updates1');
+  });
+
   it('still opens the event page when an existing event notification is selected', async () => {
     renderPage();
     fireEvent.click(screen.getByText("Event 'Summer Picnic' was updated by john_42"));

@@ -436,7 +436,7 @@ export default function NotificationsPage() {
         <div className="flex rounded-2xl glass-card p-1 gap-1">
           {[
             { id: 'all' as const, label: 'All', count: items.length },
-            { id: 'activity' as const, label: 'Activity', count: items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request').length },
+            { id: 'activity' as const, label: 'Activity', count: items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request' || n.kind === 'friend_request_accepted').length },
             { id: 'updates' as const, label: 'Updates', count: items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted').length },
             { id: 'reminders' as const, label: 'Reminders', count: items.filter(n => n.kind === 'reminder').length },
           ].map((tab) => {
