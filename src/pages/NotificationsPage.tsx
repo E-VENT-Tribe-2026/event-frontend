@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getNotifications, saveNotifications, type Notification } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification, type RelatedUser } from '@/lib/notificationsApi';
+import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
 import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { useNotifications, invalidateNotifications } from '@/lib/queries';
+import { userProfilePath } from '@/lib/friendsApi';
 
 type NotificationKind =
   | 'user_joined'
@@ -18,7 +19,7 @@ type NotificationKind =
   | 'event_deleted'
   | 'event_cancelled'
   | 'reminder'
-  | 'friend_request_received'
+  | 'friend_request'
   | 'friend_request_accepted'
   | 'other';
 
@@ -27,44 +28,42 @@ type UINotification = {
   kind: NotificationKind;
   message: string;
   relatedEventId: string | null;
+  relatedUserId: string | null;
   eventTitle: string;
   createdAt: string | null;
   read: boolean;
-  /** The user this notification is about — friend requests only (ticket #243). */
-  relatedUserId: string | null;
-  relatedUser: RelatedUser | null;
 };
 
 const iconMap: Record<NotificationKind, React.ElementType> = {
-  user_joined:               UserPlus,
-  user_left:                 UserMinus,
-  event_created:             PlusCircle,
-  event_updated:             Info,
-  event_deleted:             Trash2,
-  event_cancelled:           BellOff,
-  reminder:                  CalendarClock,
-  friend_request_received:   Contact,
-  friend_request_accepted:   UserCheck,
-  other:                     Info,
+  user_joined:     UserPlus,
+  user_left:       UserMinus,
+  event_created:   PlusCircle,
+  event_updated:   Info,
+  event_deleted:   Trash2,
+  event_cancelled: BellOff,
+  reminder:        CalendarClock,
+  friend_request:  Contact,
+  friend_request_accepted: UserCheck,
+  other:           Info,
 };
 
 const colorMap: Record<NotificationKind, string> = {
-  user_joined:               'text-green-500 bg-green-500/15',
-  user_left:                 'text-destructive bg-destructive/15',
-  event_created:             'text-green-500 bg-green-500/15',
-  event_updated:             'text-primary bg-primary/20',
-  event_deleted:             'text-destructive bg-destructive/15',
-  event_cancelled:           'text-destructive bg-destructive/15',
-  reminder:                  'text-accent bg-accent/20',
-  friend_request_received:   'text-accent bg-accent/20',
-  friend_request_accepted:   'text-green-500 bg-green-500/15',
-  other:                     'text-primary bg-primary/20',
+  user_joined:     'text-green-500 bg-green-500/15',
+  user_left:       'text-destructive bg-destructive/15',
+  event_created:   'text-green-500 bg-green-500/15',
+  event_updated:   'text-primary bg-primary/20',
+  event_deleted:   'text-destructive bg-destructive/15',
+  event_cancelled: 'text-destructive bg-destructive/15',
+  reminder:        'text-accent bg-accent/20',
+  friend_request:  'text-primary bg-primary/20',
+  friend_request_accepted: 'text-green-500 bg-green-500/15',
+  other:           'text-primary bg-primary/20',
 };
 
 function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
-  if (t === 'friend_request_received') return 'friend_request_received';
   if (t === 'friend_request_accepted') return 'friend_request_accepted';
+  if (t.startsWith('friend_request')) return 'friend_request';
   if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
   if (t === 'user_left' || t.includes('left')) return 'user_left';
   if (t === 'event_created' || t.includes('creat')) return 'event_created';
@@ -81,11 +80,10 @@ function fromApi(n: ApiNotification): UINotification {
     kind: normalizeKind(n.type),
     message: n.message || 'Event update',
     relatedEventId: n.related_event_id ?? null,
+    relatedUserId: n.related_user_id ?? null,
     eventTitle: n.event_title ?? '',
     createdAt: n.created_at ?? null,
     read: Boolean(n.read),
-    relatedUserId: n.related_user_id ?? null,
-    relatedUser: n.related_user ?? null,
   };
 }
 
@@ -95,11 +93,10 @@ function fromLocal(n: Notification): UINotification {
     kind: normalizeKind(n.type),
     message: n.description || n.title,
     relatedEventId: null,
+    relatedUserId: null,
     eventTitle: '',
     createdAt: null,
     read: n.read,
-    relatedUserId: null,
-    relatedUser: null,
   };
 }
 
@@ -158,7 +155,7 @@ export default function NotificationsPage() {
   // Filter items based on selected tab category
   const filteredItems = useMemo(() => {
     if (subFilter === 'activity') {
-      return items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created');
+      return items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request' || n.kind === 'friend_request_accepted');
     }
     if (subFilter === 'updates') {
       return items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted');
@@ -285,7 +282,9 @@ export default function NotificationsPage() {
       }
     }
     if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
-    else if (n.relatedUserId) navigate(`/user/${n.relatedUserId}`);
+    else if ((n.kind === 'friend_request' || n.kind === 'friend_request_accepted') && n.relatedUserId) {
+      navigate(userProfilePath(n.relatedUserId, getCurrentUser()?.id));
+    }
   };
 
   const onDelete = async (id: string, e: React.MouseEvent) => {

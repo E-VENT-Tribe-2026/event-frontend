@@ -20,6 +20,7 @@ const ROUTES: Array<{ pattern: string; title: string }> = [
   { pattern: '/notifications', title: 'Notifications' },
   { pattern: '/profile', title: 'Profile' },
   { pattern: '/chat', title: 'Messages' },
+  { pattern: '/friends', title: 'Friends' },
   { pattern: '/map', title: 'Map' },
   { pattern: '/home', title: 'Home' },
   { pattern: '/', title: 'Welcome' },

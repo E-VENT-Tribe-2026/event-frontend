@@ -2,27 +2,17 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
 
-export type RelatedUser = {
-  id: string;
-  username?: string | null;
-  full_name?: string | null;
-  avatar_url?: string | null;
-  avatar_kind?: 'photo' | 'icon' | null;
-  icon_id?: string | null;
-};
-
 export type ApiNotification = {
   id: string;
   type: string;
   message: string;
   related_event_id?: string | null;
+  /** The other user, for friend request notifications. */
+  related_user_id?: string | null;
   event_title?: string | null;
   created_at?: string | null;
   read?: boolean;
   actor_name?: string | null;
-  /** Present on friend_request_received / friend_request_accepted (ticket #243). */
-  related_user_id?: string | null;
-  related_user?: RelatedUser | null;
 };
 
 function normalizeType(type: string): string {
@@ -81,6 +71,11 @@ export async function fetchNotifications(token: string): Promise<ApiNotification
             : typeof row.event_id === 'string'
               ? row.event_id
               : null,
+        // The related user object is the source of truth for opening the profile.
+        related_user_id:
+          typeof row.related_user?.id === 'string' ? row.related_user.id
+          : typeof row.related_user_id === 'string' ? row.related_user_id
+          : null,
         event_title:
           typeof row.event_title === 'string'
             ? row.event_title
@@ -95,20 +90,6 @@ export async function fetchNotifications(token: string): Promise<ApiNotification
           : typeof row.triggered_by_name === 'string' ? row.triggered_by_name
           : typeof row.profiles?.full_name === 'string' ? row.profiles.full_name
           : null,
-        related_user_id: typeof row.related_user_id === 'string' ? row.related_user_id : null,
-        related_user:
-          row.related_user && typeof row.related_user === 'object'
-            ? {
-                id: String(row.related_user.id ?? ''),
-                username: typeof row.related_user.username === 'string' ? row.related_user.username : null,
-                full_name: typeof row.related_user.full_name === 'string' ? row.related_user.full_name : null,
-                avatar_url: typeof row.related_user.avatar_url === 'string' ? row.related_user.avatar_url : null,
-                avatar_kind: row.related_user.avatar_kind === 'photo' || row.related_user.avatar_kind === 'icon'
-                  ? row.related_user.avatar_kind
-                  : null,
-                icon_id: typeof row.related_user.icon_id === 'string' ? row.related_user.icon_id : null,
-              }
-            : null,
       })) as ApiNotification[];
     },
     TTL.SHORT, // 30s — notifications should feel fresh

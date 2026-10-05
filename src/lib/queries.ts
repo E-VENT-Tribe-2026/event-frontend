@@ -12,11 +12,13 @@ import { getApiUrl } from './api';
 import { getAuthToken } from './auth';
 import { mapApiEventToItem, parseEventsApiList } from './mapApiEvent';
 import { fetchNotifications, type ApiNotification } from './notificationsApi';
+import { fetchUserProfile } from './userProfileApi';
 import type { EventItem } from './storage';
 
 // ── Query Keys ────────────────────────────────────────────────────────────────
 export const QK = {
   profile:          (userId: string)                    => ['profile', userId],
+  userProfile:      (viewerId: string, userId: string)  => ['userProfile', viewerId, userId],
   events:           (params: Record<string, string>)    => ['events', params],
   eventDetail:      (id: string)                        => ['event', id],
   participants:     (eventId: string)                   => ['participants', eventId],
@@ -48,6 +50,19 @@ export function useProfile(userId: string | undefined) {
     queryFn: () => apiFetch<Record<string, unknown>>(getApiUrl('/api/profile/me')),
     enabled: Boolean(userId && getAuthToken()),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ── Another user's profile (events + friendship state) ───────────────────────
+// Keyed by viewer too: the friendship state differs per viewer.
+export function useUserProfile(viewerId: string | undefined, userId: string | undefined) {
+  return useQuery({
+    queryKey: QK.userProfile(viewerId ?? '', userId ?? ''),
+    queryFn: () => fetchUserProfile(userId as string),
+    enabled: Boolean(viewerId && userId && getAuthToken()),
+    staleTime: 2 * 60 * 1000,
+    // A refused profile (private/missing) is not worth retrying.
+    retry: false,
   });
 }
 
@@ -199,6 +214,11 @@ export function invalidateNotifications() {
 
 export function invalidateProfile(userId: string) {
   queryClient.invalidateQueries({ queryKey: QK.profile(userId) });
+}
+
+/** Refresh a user's profile after a friendship action (own key for each viewer). */
+export function invalidateUserProfile(userId: string) {
+  queryClient.invalidateQueries({ queryKey: ['userProfile'], predicate: (q) => q.queryKey[2] === userId });
 }
 
 export function clearAllQueries() {

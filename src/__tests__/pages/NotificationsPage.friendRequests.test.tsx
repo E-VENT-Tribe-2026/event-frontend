@@ -45,14 +45,16 @@ const EXAMPLE_ROWS: ApiNotification[] = [
     created_at: new Date().toISOString(),
     read: false,
     related_user_id: '5d41402a-bc4b-4a2b-9f6e-3e8c2b7a1d90',
-    related_user: {
-      id: '5d41402a-bc4b-4a2b-9f6e-3e8c2b7a1d90',
-      username: 'john_42',
-      full_name: 'John Smith',
-      avatar_url: 'https://cdn.example.com/avatars/john_42.jpg',
-      avatar_kind: 'photo',
-      icon_id: null,
-    },
+  },
+  {
+    id: '302',
+    type: 'friend_request_accepted',
+    message: 'jane_doe accepted your friend request',
+    related_event_id: null,
+    event_title: null,
+    created_at: new Date().toISOString(),
+    read: false,
+    related_user_id: '8f14e45f-ceea-4e67-a2c3-1c9d0f5b7a21',
   },
   {
     id: '280',
@@ -63,7 +65,6 @@ const EXAMPLE_ROWS: ApiNotification[] = [
     created_at: new Date().toISOString(),
     read: true,
     related_user_id: null,
-    related_user: null,
   },
 ];
 
@@ -86,10 +87,16 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows the friend_request_received notification with its own kind label', () => {
+  it('shows a received friend request with its own kind label', () => {
     renderPage();
-    expect(screen.getByText('friend request received')).toBeInTheDocument();
+    expect(screen.getByText('friend request')).toBeInTheDocument();
     expect(screen.getByText('john_42 sent you a friend request')).toBeInTheDocument();
+  });
+
+  it('shows an accepted friend request with its own, different kind label', () => {
+    renderPage();
+    expect(screen.getByText('friend request accepted')).toBeInTheDocument();
+    expect(screen.getByText('jane_doe accepted your friend request')).toBeInTheDocument();
   });
 
   it('still shows an existing event notification unchanged, with its event title', () => {
@@ -98,7 +105,7 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     expect(screen.getByText('Event: Summer Picnic')).toBeInTheDocument();
   });
 
-  it('navigates to the related user\'s profile when a friend request notification is selected', async () => {
+  it('opens the sender\'s profile when a received friend request is selected', async () => {
     renderPage();
     fireEvent.click(screen.getByText('john_42 sent you a friend request'));
     await waitFor(() =>
@@ -106,7 +113,15 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     );
   });
 
-  it('still navigates to the event page when an existing event notification is selected', async () => {
+  it('opens the other user\'s profile when an accepted friend request is selected', async () => {
+    renderPage();
+    fireEvent.click(screen.getByText('jane_doe accepted your friend request'));
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith('/user/8f14e45f-ceea-4e67-a2c3-1c9d0f5b7a21')
+    );
+  });
+
+  it('still opens the event page when an existing event notification is selected', async () => {
     renderPage();
     fireEvent.click(screen.getByText("Event 'Summer Picnic' was updated by john_42"));
     await waitFor(() =>
