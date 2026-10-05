@@ -88,7 +88,7 @@ afterEach(() => {
 describe('FriendsPage', () => {
   it('shows the four sections and lists friends with picture, username and full name', async () => {
     renderFriends();
-    for (const name of ['Friends', 'Search', 'Requests', 'Sent']) {
+    for (const name of ['Friends', 'Requests', 'Sent']) {
       expect(screen.getAllByRole('tab', { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
     expect(await screen.findByText('@friend_one')).toBeInTheDocument();

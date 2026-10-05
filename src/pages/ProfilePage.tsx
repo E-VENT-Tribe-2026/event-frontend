@@ -11,7 +11,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck } from 'lucide-react';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -29,6 +29,17 @@ import { storageRefusalMessage } from '@/lib/profilePhoto';
 import { PROFILE_ICONS } from '@/lib/profileAssets';
 import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
 import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
+import { 
+  fetchFriends, 
+  fetchIncomingRequests, 
+  acceptFriendRequest, 
+  declineFriendRequest, 
+  removeFriend, 
+  userAvatarUrl, 
+  userProfilePath,
+  type FriendItem, 
+  type FriendRequestItem 
+} from '@/lib/friendsApi';
 
 const PROFILE_BANNERS = Object.entries(CATEGORY_BANNERS).map(([label, url]) => ({
   id: label.toLowerCase(),
@@ -107,6 +118,12 @@ export default function ProfilePage() {
   const [localEventsEpoch, setLocalEventsEpoch] = useState(0);
   const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
 
+  // Friends & Requests Live Data States
+  const [acceptedFriends, setAcceptedFriends] = useState<FriendItem[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<FriendRequestItem[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
   // Memoized Data Calculations
   const events = useMemo(() => getEvents(), [localEventsEpoch]);
   
@@ -172,6 +189,27 @@ export default function ProfilePage() {
       return evt && !evt.participants.includes(user.id) ? { request: r, event: evt } : null;
     }).filter(Boolean);
   }, [user, events]);
+
+  // Fetch Friends and Incoming Requests
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    let cancelled = false;
+    setFriendsLoading(true);
+
+    Promise.all([
+      fetchFriends(1, 50).catch(() => ({ data: [], has_more: false })),
+      fetchIncomingRequests(1, 50).catch(() => ({ data: [], has_more: false }))
+    ]).then(([friendsRes, requestsRes]) => {
+      if (cancelled) return;
+      setAcceptedFriends(friendsRes.data || []);
+      setIncomingRequests(requestsRes.data || []);
+    }).finally(() => {
+      if (!cancelled) setFriendsLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, []);
 
   // Initial Load with client-side caching
   useEffect(() => {
@@ -527,6 +565,49 @@ export default function ProfilePage() {
   };
 
   const handleLogout = () => { logout(); clearAuthToken(); navigate('/login'); };
+
+  // Friend actions handling
+  const handleAcceptRequest = async (req: FriendRequestItem) => {
+    setBusyKey(`in:${req.request_id}`);
+    try {
+      const res = await acceptFriendRequest(req.request_id);
+      setIncomingRequests(prev => prev.filter(r => r.request_id !== req.request_id));
+      setAcceptedFriends(prev => [res, ...prev.filter(f => f.user.id !== res.user.id)]);
+      setToast({ show: true, message: 'Friend request accepted!', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to accept', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleDeclineRequest = async (req: FriendRequestItem) => {
+    setBusyKey(`in:${req.request_id}`);
+    try {
+      await declineFriendRequest(req.request_id);
+      setIncomingRequests(prev => prev.filter(r => r.request_id !== req.request_id));
+      setToast({ show: true, message: 'Friend request declined', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to decline', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleRemoveFriend = async (friendUserId: string) => {
+    setBusyKey(`friend:${friendUserId}`);
+    try {
+      await removeFriend(friendUserId);
+      setAcceptedFriends(prev => prev.filter(f => f.user.id !== friendUserId));
+      setToast({ show: true, message: 'Friend removed', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to remove friend', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const openProfile = (userId: string) => navigate(userProfilePath(userId, user?.id ?? null));
 
   if (profileLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" /></div>;
   if (!user) { navigate('/login'); return null; }
@@ -1035,8 +1116,8 @@ export default function ProfilePage() {
               {/* Friends Sub-Tabs with Icons */}
               <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
                 {[
-                  { id: 'accepted' as const, label: 'Accepted', icon: UserCheck },
-                  { id: 'requests' as const, label: 'Requests', icon: UserPlus },
+                  { id: 'accepted' as const, label: 'Accepted', icon: UserCheck, count: acceptedFriends.length },
+                  { id: 'requests' as const, label: 'Requests', icon: UserPlus, count: incomingRequests.length },
                 ].map((fSub) => {
                   const isFSubActive = friendSubTab === fSub.id;
                   return (
@@ -1051,19 +1132,109 @@ export default function ProfilePage() {
                     >
                       <fSub.icon className="h-3.5 w-3.5 shrink-0" />
                       <span>{fSub.label}</span>
+                      <span className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
+                        isFSubActive ? 'bg-background/25 text-inherit' : 'bg-secondary text-muted-foreground'
+                      }`}>
+                        {fSub.count}
+                      </span>
                     </button>
                   );
                 })}
               </div>
 
               {/* Friends Sub-Content */}
-              {friendSubTab === 'accepted' ? (
+              {friendsLoading ? (
+                <div className="flex justify-center py-12">
+                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-primary" />
+                </div>
+              ) : friendSubTab === 'accepted' ? (
                 <div className="space-y-2.5">
-                  <p className="text-center py-8 text-xs text-muted-foreground">No friends connected yet.</p>
+                  {acceptedFriends.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">No friends connected yet.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {acceptedFriends.map((f) => {
+                        const label = f.user.username || f.user.display_name || f.user.full_name || 'User';
+                        return (
+                          <motion.li
+                            key={f.user.id}
+                            layout
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3"
+                          >
+                            <button type="button" onClick={() => openProfile(f.user.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                              <UserAvatar src={userAvatarUrl(f.user)} seed={f.user.id} name={label} size="md" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
+                                {f.user.full_name && <p className="truncate text-xs text-muted-foreground">{f.user.full_name}</p>}
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveFriend(f.user.id)}
+                              disabled={busyKey === `friend:${f.user.id}`}
+                              className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-destructive/15 hover:text-destructive flex items-center gap-1 transition-colors disabled:opacity-50"
+                            >
+                              <UserMinus className="h-3.5 w-3.5" />
+                              Remove
+                            </button>
+                          </motion.li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  <p className="text-center py-8 text-xs text-muted-foreground">No pending friend requests.</p>
+                  {incomingRequests.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">No pending friend requests.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {incomingRequests.map((r) => {
+                        const label = r.user.username || r.user.display_name || r.user.full_name || 'User';
+                        return (
+                          <motion.li
+                            key={r.request_id}
+                            layout
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3"
+                          >
+                            <button type="button" onClick={() => openProfile(r.user.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                              <UserAvatar src={userAvatarUrl(r.user)} seed={r.user.id} name={label} size="md" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
+                                {r.user.full_name && <p className="truncate text-xs text-muted-foreground">{r.user.full_name}</p>}
+                              </div>
+                            </button>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleAcceptRequest(r)}
+                                disabled={busyKey === `in:${r.request_id}`}
+                                className="rounded-full px-3 py-1.5 text-xs font-semibold gradient-primary text-primary-foreground flex items-center gap-1 transition-colors disabled:opacity-50"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                Accept
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeclineRequest(r)}
+                                disabled={busyKey === `in:${r.request_id}`}
+                                className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 flex items-center gap-1 transition-colors disabled:opacity-50"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                                Decline
+                              </button>
+                            </div>
+                          </motion.li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
               )}
             </div>

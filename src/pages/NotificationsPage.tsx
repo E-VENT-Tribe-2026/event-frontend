@@ -148,7 +148,6 @@ export default function NotificationsPage() {
     }
   }, [rawNotifications, queryLoading]);
 
-  // Filter items based on selected tab category
   const filteredItems = useMemo(() => {
     if (subFilter === 'activity') {
       return items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request');
@@ -162,7 +161,6 @@ export default function NotificationsPage() {
     return items;
   }, [items, subFilter]);
 
-  // Group filtered items by time buckets: Today, Yesterday, Earlier
   const groupedItems = useMemo(() => {
     const today: UINotification[] = [];
     const yesterday: UINotification[] = [];
@@ -318,7 +316,6 @@ export default function NotificationsPage() {
     }
   };
 
-  // Render individual notification card helper
   const renderCard = (n: UINotification, i: number) => {
     const Icon = iconMap[n.kind];
     const isDeleting = deletingIds.has(n.id);
@@ -328,7 +325,9 @@ export default function NotificationsPage() {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: i * 0.02 }}
-        className={`flex items-center gap-3 rounded-2xl glass-card px-4 py-3.5 transition-all hover:border-border/60 ${n.read ? 'opacity-55' : 'border-l-4 border-l-primary shadow-sm bg-primary/[0.02]'}`}
+        className={`flex items-center gap-3.5 rounded-2xl glass-card p-4 transition-all hover:border-border/80 shadow-sm cursor-pointer ${
+          n.read ? 'opacity-60 bg-secondary/20' : 'border-l-4 border-l-primary bg-primary/[0.04]'
+        }`}
         onClick={() => void onOpenNotification(n)}
       >
         <input
@@ -336,21 +335,21 @@ export default function NotificationsPage() {
           checked={selectedIds.has(n.id)}
           onChange={() => toggleSelected(n.id)}
           onClick={(event) => event.stopPropagation()}
-          className="h-4 w-4 shrink-0 accent-primary cursor-pointer"
-          aria-label={`Select notification`}
+          className="h-4 w-4 shrink-0 accent-primary cursor-pointer rounded"
+          aria-label="Select notification"
         />
-        <div className={`shrink-0 rounded-xl p-2.5 ${colorMap[n.kind]}`}>
+        <div className={`shrink-0 rounded-xl p-2.5 shadow-xs ${colorMap[n.kind]}`}>
           <Icon className="h-4 w-4" />
         </div>
-        <div className="flex-1 min-w-0 cursor-pointer">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            {!n.read && <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />}
+            {!n.read && <span className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />}
             <span className="text-[10px] font-bold uppercase tracking-wider text-primary">{n.kind.replace(/_/g, ' ')}</span>
             <span className="text-[10px] text-muted-foreground">· {relativeTime(n.createdAt)}</span>
           </div>
-          <p className="text-sm font-medium text-foreground truncate mt-0.5">{n.message}</p>
+          <p className="text-xs font-semibold text-foreground truncate mt-0.5">{n.message}</p>
           {n.eventTitle && (
-            <p className="text-xs text-muted-foreground truncate mt-0.5">Event: {n.eventTitle}</p>
+            <p className="text-[11px] text-muted-foreground truncate mt-0.5">Event: {n.eventTitle}</p>
           )}
         </div>
         <div className="shrink-0 flex items-center gap-1.5">
@@ -358,7 +357,7 @@ export default function NotificationsPage() {
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); navigate(`/event/${n.relatedEventId}`); }}
-              className="hidden sm:inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+              className="hidden sm:inline-flex items-center gap-1 rounded-xl bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors"
             >
               View <ExternalLink className="h-3 w-3" />
             </button>
@@ -368,8 +367,9 @@ export default function NotificationsPage() {
               type="button"
               disabled={markingId === n.id}
               onClick={(e) => void onMarkRead(n, e)}
-              className="rounded-lg p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+              className="rounded-xl p-2 text-muted-foreground hover:bg-primary/15 hover:text-primary transition-colors"
               aria-label="Mark as read"
+              title="Mark as read"
             >
               {markingId === n.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}
             </button>
@@ -378,8 +378,9 @@ export default function NotificationsPage() {
             type="button"
             disabled={isDeleting}
             onClick={(e) => void onDelete(n.id, e)}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            className="rounded-xl p-2 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
             aria-label="Delete notification"
+            title="Delete notification"
           >
             {isDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
           </button>
@@ -389,80 +390,86 @@ export default function NotificationsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="min-h-screen bg-background pb-24">
       <AppToast
         message={toast.message}
         type={toast.type}
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
-      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
+
+      {/* Header */}
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-border/60 bg-background/95 backdrop-blur-lg px-4 py-3.5 shadow-xs">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
             className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
             aria-label="Back"
           >
-            <ArrowLeft className="h-5 w-5 text-foreground" />
+            <ArrowLeft className="h-4 w-4 text-foreground" />
           </button>
-          <h1 className="text-lg font-bold text-foreground">Notifications</h1>
+          <h1 className="text-base font-bold text-foreground">Notifications</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => void onMarkAllRead()}
             disabled={loading || unreadCount === 0 || markingAll}
-            className="rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
+            className="rounded-full bg-secondary px-3.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
           >
-            {markingAll ? 'Marking...' : 'Mark Read'}
+            {markingAll ? 'Marking...' : 'Mark All Read'}
           </button>
           {unreadCount > 0 && (
-            <span className="rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full gradient-primary text-[10px] font-bold text-primary-foreground shadow-glow">
               {unreadCount}
             </span>
           )}
         </div>
       </header>
 
-      <div className="mx-auto max-w-lg px-4 pt-3 space-y-3">
+      <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
         {/* Sub-filter Tabs */}
-        <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
-          <button
-            type="button"
-            onClick={() => { setSubFilter('all'); setVisibleCount(10); }}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'all' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            All ({items.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSubFilter('activity'); setVisibleCount(10); }}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'activity' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            Activity
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSubFilter('updates'); setVisibleCount(10); }}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'updates' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            Updates
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSubFilter('reminders'); setVisibleCount(10); }}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${subFilter === 'reminders' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            Reminders
-          </button>
+        <div className="flex rounded-2xl glass-card p-1 gap-1">
+          {[
+            { id: 'all' as const, label: 'All', count: items.length },
+            { id: 'activity' as const, label: 'Activity', count: items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request').length },
+            { id: 'updates' as const, label: 'Updates', count: items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted').length },
+            { id: 'reminders' as const, label: 'Reminders', count: items.filter(n => n.kind === 'reminder').length },
+          ].map((tab) => {
+            const isActive = subFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => { setSubFilter(tab.id); setVisibleCount(PAGE_SIZE); }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isActive
+                    ? 'gradient-primary text-primary-foreground shadow-glow'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
+                    isActive
+                      ? 'bg-background/25 text-inherit'
+                      : 'bg-secondary text-muted-foreground'
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
+        {/* Selection Bar */}
         {!loading && filteredItems.length > 0 && (
-          <div className="flex items-center justify-between rounded-xl glass-card px-3.5 py-2 text-xs">
+          <div className="flex items-center justify-between rounded-2xl glass-card px-4 py-2.5 text-xs">
             <button
               type="button"
               onClick={toggleSelectAll}
-              className="font-medium text-foreground hover:text-primary transition-colors"
+              className="font-semibold text-foreground hover:text-primary transition-colors"
             >
               {allSelected ? 'Deselect All' : 'Select All'} ({selectedCount})
             </button>
@@ -470,23 +477,23 @@ export default function NotificationsPage() {
               type="button"
               onClick={() => void onDeleteSelected()}
               disabled={selectedCount === 0 || deletingSelected}
-              className="inline-flex items-center gap-1 font-semibold text-destructive transition-colors hover:opacity-80 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 font-semibold text-destructive transition-colors hover:opacity-80 disabled:opacity-40"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              {deletingSelected ? 'Deleting...' : 'Delete'}
+              {deletingSelected ? 'Deleting...' : 'Delete Selected'}
             </button>
           </div>
         )}
 
         {usingFallback && (
-          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-3.5 py-2 text-center text-xs text-amber-500">
+          <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-center text-xs text-amber-500 font-medium">
             Offline mode: showing local notifications only.
           </div>
         )}
 
         {loading && (
-          <div className="py-12 text-center text-sm text-muted-foreground">
-            <RefreshCw className="mx-auto mb-2 h-4 w-4 animate-spin" />
+          <div className="py-16 text-center text-sm text-muted-foreground">
+            <RefreshCw className="mx-auto mb-2.5 h-5 w-5 animate-spin text-primary" />
             Loading notifications...
           </div>
         )}
@@ -495,21 +502,21 @@ export default function NotificationsPage() {
         {!loading && filteredItems.length > 0 && (
           <div className="space-y-4">
             {groupedItems.today.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1">Today</p>
                 {groupedItems.today.slice(0, visibleCount).map((n, i) => renderCard(n, i))}
               </div>
             )}
 
             {groupedItems.yesterday.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1 pt-2">Yesterday</p>
                 {groupedItems.yesterday.slice(0, Math.max(0, visibleCount - groupedItems.today.length)).map((n, i) => renderCard(n, i))}
               </div>
             )}
 
             {groupedItems.earlier.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1 pt-2">Earlier</p>
                 {groupedItems.earlier.slice(0, Math.max(0, visibleCount - groupedItems.today.length - groupedItems.yesterday.length)).map((n, i) => renderCard(n, i))}
               </div>
@@ -518,25 +525,25 @@ export default function NotificationsPage() {
         )}
 
         {!loading && filteredItems.length === 0 && (
-          <div className="py-20 text-center">
-            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60">
+          <div className="py-24 text-center glass-card rounded-3xl p-8 space-y-3">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60">
               <BellOff className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="text-sm font-medium text-foreground">
+            <p className="text-sm font-semibold text-foreground">
               {subFilter === 'reminders' ? 'No reminders right now' : subFilter === 'activity' ? 'No recent activity' : subFilter === 'updates' ? 'No recent updates' : 'No notifications found'}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">You're all caught up in this category!</p>
+            <p className="text-xs text-muted-foreground">You're all caught up in this category!</p>
           </div>
         )}
       </div>
 
       {!loading && filteredItems.length > 0 && (
-        <div className="mx-auto max-w-lg px-4 py-4">
+        <div className="mx-auto max-w-lg px-4 pt-4 pb-6">
           {filteredItems.length > visibleCount ? (
             <button
               type="button"
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="w-full rounded-xl border border-border py-2.5 text-xs font-semibold text-primary hover:bg-secondary/50 transition-colors"
+              className="w-full rounded-2xl border border-border/60 bg-secondary/50 py-3 text-xs font-semibold text-primary hover:bg-secondary transition-colors"
             >
               Show more · {filteredItems.length - visibleCount} remaining
             </button>
@@ -544,13 +551,14 @@ export default function NotificationsPage() {
             <button
               type="button"
               onClick={() => setVisibleCount(PAGE_SIZE)}
-              className="w-full rounded-xl border border-border py-2.5 text-xs font-semibold text-primary hover:bg-secondary/50 transition-colors"
+              className="w-full rounded-2xl border border-border/60 bg-secondary/50 py-3 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
             >
               Show less
             </button>
           ) : null}
         </div>
       )}
+
       <BottomNav />
     </div>
   );
