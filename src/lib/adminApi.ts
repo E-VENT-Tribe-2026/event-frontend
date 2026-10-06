@@ -41,6 +41,62 @@ export interface AdminEventSummary {
   is_cancelled?: boolean;
 }
 
+export type AdminEventStatusFilter = 'all' | 'upcoming' | 'past' | 'cancelled';
+
+/** Person shown on an event (organizer or participant). Picture, full name and username. */
+export interface AdminEventPerson {
+  id: string;
+  username: string | null;
+  full_name: string;
+  display_name?: string;
+  avatar_url?: string | null;
+  avatar_kind?: string;
+  icon_id?: string | null;
+}
+
+/** One row of GET /api/admin/events. */
+export interface AdminEventListItem {
+  id: string;
+  title: string;
+  date: string;
+  status: string;
+  is_cancelled?: boolean;
+  organizer: AdminEventPerson | null;
+}
+
+export interface AdminEventsResponse {
+  items: AdminEventListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export interface AdminEventParticipant extends AdminEventPerson {
+  status?: string;
+  created_at?: string;
+}
+
+/** GET /api/admin/events/{id}: full event (also cancelled or ended) plus participants. */
+export interface AdminEventDetails {
+  id: string;
+  title: string;
+  description?: string | null;
+  category?: string | null;
+  start_datetime: string;
+  end_datetime?: string | null;
+  location_name?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  cost?: number | null;
+  max_capacity?: number | null;
+  status: string;
+  is_cancelled?: boolean;
+  organizer: AdminEventPerson | null;
+  participant_count?: number;
+  participants?: AdminEventParticipant[];
+}
+
 export interface AdminUserDetails {
   id: string;
   username: string | null;
@@ -220,4 +276,46 @@ export async function grantAdminRole(userId: string): Promise<GrantAdminResponse
     cache: 'no-store',
   });
   return handleAdminResponse<GrantAdminResponse>(res);
+}
+
+/**
+ * Fetches one page of events for a tab (all / upcoming / past / cancelled),
+ * with optional case-insensitive title search over the whole tab.
+ * Never cached client-side.
+ */
+export async function fetchAdminEvents(
+  statusFilter: AdminEventStatusFilter = 'all',
+  page = 1,
+  limit = 20,
+  search?: string,
+): Promise<AdminEventsResponse> {
+  const params = new URLSearchParams();
+  params.set('status_filter', statusFilter);
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+  if (search?.trim()) {
+    params.set('search', search.trim());
+  }
+
+  const url = `${getApiUrl(API_ENDPOINTS.ADMIN_EVENTS)}?${params.toString()}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  return handleAdminResponse<AdminEventsResponse>(res);
+}
+
+/**
+ * Fetches the full details of one event, including cancelled or ended ones, with its participants.
+ * Never cached client-side.
+ */
+export async function fetchAdminEventDetails(eventId: string): Promise<AdminEventDetails> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_EVENT_DETAIL(eventId));
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  return handleAdminResponse<AdminEventDetails>(res);
 }
