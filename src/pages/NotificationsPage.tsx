@@ -4,7 +4,7 @@ import { getCurrentUser, getNotifications, saveNotifications, type Notification 
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink } from 'lucide-react';
+import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -20,6 +20,7 @@ type NotificationKind =
   | 'event_cancelled'
   | 'reminder'
   | 'friend_request'
+  | 'friend_request_accepted'
   | 'other';
 
 type UINotification = {
@@ -41,7 +42,8 @@ const iconMap: Record<NotificationKind, React.ElementType> = {
   event_deleted:   Trash2,
   event_cancelled: BellOff,
   reminder:        CalendarClock,
-  friend_request:  UserPlus,
+  friend_request:  Contact,
+  friend_request_accepted: UserCheck,
   other:           Info,
 };
 
@@ -54,11 +56,13 @@ const colorMap: Record<NotificationKind, string> = {
   event_cancelled: 'text-destructive bg-destructive/15',
   reminder:        'text-accent bg-accent/20',
   friend_request:  'text-primary bg-primary/20',
+  friend_request_accepted: 'text-green-500 bg-green-500/15',
   other:           'text-primary bg-primary/20',
 };
 
 function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
+  if (t === 'friend_request_accepted') return 'friend_request_accepted';
   if (t.startsWith('friend_request')) return 'friend_request';
   if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
   if (t === 'user_left' || t.includes('left')) return 'user_left';
@@ -150,7 +154,7 @@ export default function NotificationsPage() {
 
   const filteredItems = useMemo(() => {
     if (subFilter === 'activity') {
-      return items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request');
+      return items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request' || n.kind === 'friend_request_accepted');
     }
     if (subFilter === 'updates') {
       return items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted');
@@ -276,7 +280,7 @@ export default function NotificationsPage() {
       }
     }
     if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
-    else if (n.kind === 'friend_request' && n.relatedUserId) {
+    else if ((n.kind === 'friend_request' || n.kind === 'friend_request_accepted') && n.relatedUserId) {
       navigate(userProfilePath(n.relatedUserId, getCurrentUser()?.id));
     }
   };
@@ -432,7 +436,7 @@ export default function NotificationsPage() {
         <div className="flex rounded-2xl glass-card p-1 gap-1">
           {[
             { id: 'all' as const, label: 'All', count: items.length },
-            { id: 'activity' as const, label: 'Activity', count: items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request').length },
+            { id: 'activity' as const, label: 'Activity', count: items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request' || n.kind === 'friend_request_accepted').length },
             { id: 'updates' as const, label: 'Updates', count: items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted').length },
             { id: 'reminders' as const, label: 'Reminders', count: items.filter(n => n.kind === 'reminder').length },
           ].map((tab) => {

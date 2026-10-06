@@ -16,6 +16,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { getCurrentUser } from '@/lib/storage';
+import { invalidatePrefix } from '@/lib/queryCache';
+import { invalidateNotifications } from '@/lib/queries';
 import {
   acceptFriendRequest,
   cancelFriendRequest,
@@ -247,10 +249,18 @@ export default function FriendsPage() {
   }, [query, runSearch]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
+  // The backend deletes the "friend request received" notification when a
+  // request is accepted, declined or cancelled.
+  const refreshNotifications = () => {
+    invalidatePrefix('/api/notifications');
+    invalidateNotifications();
+  };
+
   const onAccept = async (req: FriendRequestItem) => {
     setBusyKey(`in:${req.request_id}`);
     try {
       const res = await acceptFriendRequest(req.request_id);
+      refreshNotifications();
       incoming.setState((s) => ({ ...s, items: s.items.filter((r) => r.request_id !== req.request_id) }));
       friends.setState((s) => ({
         ...s,
@@ -267,6 +277,7 @@ export default function FriendsPage() {
     setBusyKey(`in:${req.request_id}`);
     try {
       await declineFriendRequest(req.request_id);
+      refreshNotifications();
       incoming.setState((s) => ({ ...s, items: s.items.filter((r) => r.request_id !== req.request_id) }));
     } catch (err) {
       showError(err);
@@ -279,6 +290,7 @@ export default function FriendsPage() {
     setBusyKey(`sent:${req.request_id}`);
     try {
       await cancelFriendRequest(req.request_id);
+      refreshNotifications();
       sent.setState((s) => ({ ...s, items: s.items.filter((r) => r.request_id !== req.request_id) }));
     } catch (err) {
       showError(err);
