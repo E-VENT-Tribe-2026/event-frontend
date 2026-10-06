@@ -206,6 +206,14 @@ describe('Admin Panel — Ticket #248', () => {
   });
 
   it('switches between Users and Events tabs', async () => {
+    vi.spyOn(adminApi, 'fetchAdminEvents').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+      total_pages: 1,
+    });
+
     render(
       <MemoryRouter initialEntries={['/admin']}>
         <AdminPanelPage />
@@ -215,8 +223,8 @@ describe('Admin Panel — Ticket #248', () => {
     const eventsTabBtn = screen.getByRole('tab', { name: /Events/i });
     fireEvent.click(eventsTabBtn);
 
-    expect(await screen.findByText(/Events Management/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ticket #249 Integration Point/i)).toBeInTheDocument();
+    expect(await screen.findByText('Total events')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Search by event title')).toBeInTheDocument();
   });
 
   describe('BottomNav & AdminGuard', () => {
