@@ -11,7 +11,7 @@ import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { destinationAfterSignIn } from '@/lib/username';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
-import { needsAdminVerification, setPendingAdminVerification, type AdminAuthStatus } from '@/lib/adminAuth';
+import { needsAdminVerification, setPendingAdminVerification, clearPendingAdminVerification, type AdminAuthStatus } from '@/lib/adminAuth';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -82,6 +82,7 @@ export default function LoginPage() {
         navigate('/admin-verify');
         return;
       }
+      clearPendingAdminVerification();
 
       const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {

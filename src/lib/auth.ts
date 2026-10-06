@@ -24,6 +24,7 @@ export function clearAuthToken() {
   authToken = null;
   if (typeof window !== 'undefined') {
     window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    window.sessionStorage.removeItem('event_pending_admin_verification');
     clearSessionUserSnapshot();
   }
 }
