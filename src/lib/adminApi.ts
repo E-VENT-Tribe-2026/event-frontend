@@ -1,6 +1,7 @@
 import { getApiUrl } from './api';
 import { API_ENDPOINTS } from './apiUrls';
 import { getAuthToken } from './auth';
+import { getPendingAdminVerification } from './adminAuth';
 
 export interface AdminCountsResponse {
   total_users: number;
@@ -76,14 +77,13 @@ export interface AdminVerifyResponse {
 
 /**
  * Common headers for Admin API requests.
- * Explicitly enforces no-cache headers to satisfy security requirement (exception to 11.1).
+ * Explicitly enforces no-cache using fetch cache: 'no-store' to satisfy security requirement (exception to 11.1),
+ * while keeping request headers within server CORS whitelist (Accept, Authorization).
  */
 function getAdminHeaders(): Record<string, string> {
   const token = getAuthToken();
   const headers: Record<string, string> = {
     Accept: 'application/json',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    Pragma: 'no-cache',
   };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -111,6 +111,7 @@ async function handleAdminResponse<T>(res: Response): Promise<T> {
  * Calls GET /api/admin/verify or GET /api/auth/mfa/status.
  */
 export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; role?: string; adminId?: string }> {
+  if (getPendingAdminVerification()) return { isVerifiedAdmin: false };
   const token = getAuthToken();
   if (!token) return { isVerifiedAdmin: false };
 
@@ -127,7 +128,7 @@ export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; 
     }
 
     // If /api/admin/verify returns 403 or 404, optionally check MFA status endpoint
-    if (res.status === 404) {
+    if (res.status === 404 || res.status === 403) {
       const mfaRes = await fetch(getApiUrl(API_ENDPOINTS.MFA_STATUS), {
         method: 'GET',
         headers: getAdminHeaders(),
@@ -140,7 +141,9 @@ export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; 
           is_verified?: boolean;
         };
         const isVerifiedAdmin = Boolean(mfaData.is_admin && mfaData.is_verified);
-        return { isVerifiedAdmin, role: mfaData.role };
+        if (isVerifiedAdmin) {
+          return { isVerifiedAdmin: true, role: mfaData.role || 'administrator' };
+        }
       }
     }
 

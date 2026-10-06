@@ -1,4 +1,5 @@
 import { getApiUrl } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 
 /**
  * Admin sign-in verification (TOTP / authenticator app). */
@@ -37,7 +38,16 @@ export function getPendingAdminVerification(): PendingAdminVerification | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.accessToken === 'string') return parsed as PendingAdminVerification;
+    const token = typeof parsed?.accessToken === 'string' && parsed.accessToken.trim()
+      ? parsed.accessToken.trim()
+      : getAuthToken()?.trim() || '';
+    if (parsed && token) {
+      return {
+        accessToken: token,
+        hasMfaLinked: Boolean(parsed.hasMfaLinked),
+        factorId: typeof parsed.factorId === 'string' && parsed.factorId.trim() ? parsed.factorId.trim() : undefined,
+      };
+    }
     return null;
   } catch {
     return null;
@@ -69,10 +79,14 @@ export type MfaEnrollResult = {
 
 /** Scenario B, Step 2 — only called when has_mfa_linked is false. */
 export async function enrollMfa(token: string): Promise<MfaEnrollResult | { error: string }> {
+  const effectiveToken = token?.trim() || getAuthToken()?.trim() || '';
+  if (!effectiveToken) {
+    return { error: 'Authentication required. Please sign in again.' };
+  }
   try {
     const res = await fetch(getApiUrl('/api/auth/mfa/enroll'), {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      headers: { Authorization: `Bearer ${effectiveToken}`, Accept: 'application/json' },
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -94,13 +108,17 @@ export async function verifyMfaCode(
   code: string,
   factorId?: string,
 ): Promise<MfaVerifyResult | { error: string }> {
+  const effectiveToken = token?.trim() || getAuthToken()?.trim() || '';
+  if (!effectiveToken) {
+    return { error: 'Authentication required. Please sign in again.' };
+  }
   try {
     const body: Record<string, string> = { code };
     if (factorId) body.factor_id = factorId;
     const res = await fetch(getApiUrl('/api/auth/mfa/verify'), {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${effectiveToken}`,
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },

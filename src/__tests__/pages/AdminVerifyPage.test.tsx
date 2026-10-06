@@ -106,7 +106,6 @@ describe('AdminVerifyPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /verify and continue/i }));
 
     await waitFor(() => {
-      // Per the ticket's AC: reaches the normal post-sign-in screen, not a special admin route.
       expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true });
     });
     expect(getPendingAdminVerification()).toBeNull();

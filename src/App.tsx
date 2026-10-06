@@ -45,9 +45,9 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 
 const persister = typeof window !== 'undefined'
   ? createSyncStoragePersister({
-      storage: window.localStorage,
-      key: 'event-tribe-query-cache',
-    })
+    storage: window.localStorage,
+    key: 'event-tribe-query-cache',
+  })
   : undefined;
 
 
@@ -78,8 +78,8 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
         });
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
-      .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => { });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // once on app mount
 
   useEffect(() => {
