@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShieldCheck, Calendar, UserCheck, Loader2, AlertCircle } from 'lucide-react';
 import { UserAvatar } from '@/components/UserAvatar';
@@ -12,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { adminEventPath } from '@/lib/adminRoutes';
 import { fetchAdminUserDetails, grantAdminRole, type AdminUserDetails, type AdminEventSummary } from '@/lib/adminApi';
 
 interface AdminUserDetailsModalProps {
@@ -62,6 +64,7 @@ function EventSubList({
   events?: AdminEventSummary[];
   emptyMessage: string;
 }) {
+  const navigate = useNavigate();
   const items = events || [];
   return (
     <div className="space-y-1.5">
@@ -76,9 +79,12 @@ function EventSubList({
           {items.map((event) => {
             const isCancelled = event.is_cancelled || event.status === 'cancelled';
             return (
-              <div
+              <button
+                type="button"
                 key={event.id}
-                className="flex items-center justify-between rounded-lg bg-secondary/50 p-2 text-xs border border-border/40"
+                onClick={() => navigate(adminEventPath(event.id))}
+                aria-label={`View details for ${event.title}`}
+                className="flex w-full items-center justify-between rounded-lg bg-secondary/50 p-2 text-left text-xs border border-border/40 hover:border-primary/40 hover:bg-secondary"
               >
                 <div className="min-w-0 flex-1 pr-2">
                   <p className="font-medium text-foreground truncate">{event.title}</p>
@@ -93,7 +99,7 @@ function EventSubList({
                     {event.status || 'Active'}
                   </span>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
