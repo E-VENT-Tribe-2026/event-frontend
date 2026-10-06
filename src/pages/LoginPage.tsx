@@ -11,6 +11,7 @@ import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { destinationAfterSignIn } from '@/lib/username';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
+import { needsAdminVerification, setPendingAdminVerification, type AdminAuthStatus } from '@/lib/adminAuth';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -65,6 +66,21 @@ export default function LoginPage() {
           access_token: accessToken,
           refresh_token: refreshToken,
         });
+      }
+
+      // An administrator whose current sign-in isn't verified
+      // yet goes straight to the verification step — before any profile
+      // fetch or normal post-login setup.
+      const authStatus = data as unknown as AdminAuthStatus;
+      if (needsAdminVerification(authStatus)) {
+        setPendingAdminVerification({
+          accessToken,
+          hasMfaLinked: Boolean(authStatus.has_mfa_linked),
+          factorId: typeof authStatus.factor_id === 'string' ? authStatus.factor_id : undefined,
+        });
+        setIsSubmitting(false);
+        navigate('/admin-verify');
+        return;
       }
 
       const me = await fetchAuthUserFromToken(accessToken);

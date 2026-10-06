@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { getAuthToken } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { hasChosenUsername } from '@/lib/username';
+import { getPendingAdminVerification } from '@/lib/adminAuth';
 
 /** Signed-in accounts without a username stay on the selection step. */
 export default function RequireUsername({ children }: { children: React.ReactNode }) {
@@ -10,7 +11,7 @@ export default function RequireUsername({ children }: { children: React.ReactNod
   const [state, setState] = useState<'checking' | 'ok' | 'need'>(token ? 'checking' : 'ok');
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || getPendingAdminVerification()) return;
     let cancelled = false;
     (async () => {
       try {
@@ -28,6 +29,13 @@ export default function RequireUsername({ children }: { children: React.ReactNod
       cancelled = true;
     };
   }, [token]);
+
+  // An administrator who hasn't completed sign-in verification
+  // yet cannot reach any other screen of the application — checked ahead of
+  // the username check below, since this is the stricter gate.
+  if (token && getPendingAdminVerification()) {
+    return <Navigate to="/admin-verify" replace />;
+  }
 
   if (!token) return <>{children}</>;
   if (state === 'checking') return null;

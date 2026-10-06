@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import LoginPage from '@/pages/LoginPage';
 import { clearAuthToken } from '@/lib/auth';
+import { getPendingAdminVerification } from '@/lib/adminAuth';
 
 const { mockNavigate } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -144,6 +145,78 @@ describe('LoginPage', () => {
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/choose-username');
+    });
+  });
+
+  // Ticket #247 — built against Scenarios A/B/C posted on the ticket.
+  it('sends an administrator with no linked app to /admin-verify (Scenario B)', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/auth/login')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'aal1-token',
+            token_type: 'bearer',
+            role: 'administrator',
+            is_admin: true,
+            has_mfa_linked: false,
+            is_verified: false,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('not mocked', { status: 500 });
+    });
+
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'admin@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/admin-verify');
+    });
+    expect(getPendingAdminVerification()).toEqual({
+      accessToken: 'aal1-token',
+      hasMfaLinked: false,
+      factorId: undefined,
+    });
+  });
+
+  it('sends an administrator with an already-linked app to /admin-verify with the factor id (Scenario C)', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/auth/login')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'aal1-token-2',
+            token_type: 'bearer',
+            role: 'administrator',
+            is_admin: true,
+            has_mfa_linked: true,
+            is_verified: false,
+            factor_id: '018f3a5e-aaaa',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('not mocked', { status: 500 });
+    });
+
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'admin@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/admin-verify');
+    });
+    expect(getPendingAdminVerification()).toEqual({
+      accessToken: 'aal1-token-2',
+      hasMfaLinked: true,
+      factorId: '018f3a5e-aaaa',
     });
   });
 });

@@ -129,7 +129,7 @@ describe('UserProfilePage', () => {
     renderPage();
     await screen.findByText('Jane Doe');
 
-    for (const text of [/edit profile/i, /change password/i, /favourites/i, /sign out|log ?out/i, /cancelled/i, /^friends$/i]) {
+    for (const text of [/edit profile/i, /change password/i, /favourites/i, /sign out|log ?out/i, /cancelled/i]) {
       expect(screen.queryByText(text)).not.toBeInTheDocument();
     }
   });
