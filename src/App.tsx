@@ -28,6 +28,8 @@ import OrganizerDashboardPage from "./pages/OrganizerDashboardPage";
 import TicketPage from "./pages/TicketPage";
 import NotFound from "./pages/NotFound";
 import RouteDocumentTitle from "./components/RouteDocumentTitle";
+import AdminPanelPage from "./pages/AdminPanelPage";
+import AdminGuard from "@/components/AdminGuard";
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
@@ -43,9 +45,9 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 
 const persister = typeof window !== 'undefined'
   ? createSyncStoragePersister({
-      storage: window.localStorage,
-      key: 'event-tribe-query-cache',
-    })
+    storage: window.localStorage,
+    key: 'event-tribe-query-cache',
+  })
   : undefined;
 
 
@@ -76,8 +78,8 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
         });
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
-      .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => { });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // once on app mount
 
   useEffect(() => {
@@ -179,6 +181,7 @@ const App = () => (
             <Route path="/notifications" element={<RequireUsername><NotificationsPage /></RequireUsername>} />
             <Route path="/payment/:eventId" element={<RequireUsername><PaymentPage /></RequireUsername>} />
             <Route path="/dashboard" element={<RequireUsername><OrganizerDashboardPage /></RequireUsername>} />
+            <Route path="/admin" element={<RequireUsername><AdminGuard><AdminPanelPage /></AdminGuard></RequireUsername>} />
             <Route path="/ticket/:ticketId" element={<RequireUsername><TicketPage /></RequireUsername>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

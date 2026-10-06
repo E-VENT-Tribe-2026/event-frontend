@@ -9,7 +9,7 @@ import { logout, setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
-import { destinationAfterSignIn } from '@/lib/username';
+import { destinationAfterSignIn, hasChosenUsername } from '@/lib/username';
 import {
   getPendingAdminVerification,
   clearPendingAdminVerification,
@@ -33,18 +33,19 @@ export default function AdminVerifyPage() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
 
-  // Nothing to verify (direct navigation).
+  // Nothing to verify (direct navigation or missing session token).
   useEffect(() => {
-    if (!pending.current) {
+    if (!pending.current || !pending.current.accessToken?.trim()) {
       navigate('/login', { replace: true });
     }
   }, [navigate]);
 
   // First-time linking: fetch the QR code once, per ticket's Scenario B.
   useEffect(() => {
-    if (!pending.current || pending.current.hasMfaLinked) return;
+    const token = pending.current?.accessToken?.trim();
+    if (!token || pending.current?.hasMfaLinked) return;
     setIsEnrolling(true);
-    enrollMfa(pending.current.accessToken).then((result) => {
+    enrollMfa(token).then((result) => {
       setIsEnrolling(false);
       if ('error' in result) {
         setToast({ show: true, message: result.error, type: 'error' });
@@ -55,7 +56,7 @@ export default function AdminVerifyPage() {
     });
   }, []);
 
-  if (!pending.current) return null;
+  if (!pending.current || !pending.current.accessToken?.trim()) return null;
   const hasMfaLinked = pending.current.hasMfaLinked;
 
   const handleGoBackToSignIn = () => {
@@ -110,9 +111,20 @@ export default function AdminVerifyPage() {
     }
 
     if (me?.id) {
-      setCurrentUserFromOAuth({ id: me.id, email: me.email || '', name: fullName, username: username ?? '', avatar: avatarUrl, bio, interests });
+      setCurrentUserFromOAuth({
+        id: me.id,
+        email: me.email || '',
+        name: fullName,
+        username: username ?? '',
+        avatar: avatarUrl,
+        bio,
+        interests,
+        role: 'administrator',
+      });
+      window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
     }
-    navigate(destinationAfterSignIn(username), { replace: true });
+    const destination = destinationAfterSignIn(username);
+    navigate(destination, { replace: true });
   };
 
   return (
