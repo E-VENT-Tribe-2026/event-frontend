@@ -1,15 +1,17 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Search, Users, ShieldCheck, UserCheck, Loader2, X, ChevronRight } from 'lucide-react';
+import { Search, Users, ShieldCheck, UserCheck, Loader2, X, ChevronRight, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UserAvatar } from '@/components/UserAvatar';
-import AdminUserDetailsModal from './AdminUserDetailsModal';
 import {
   fetchAdminCounts,
   fetchAdminUsers,
   type AdminUserSummary,
 } from '@/lib/adminApi';
 
+type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings';
+
 interface AdminUsersTabProps {
+  onOpenUser: (userId: string) => void;
   onErrorToast: (msg: string) => void;
   onSuccessToast: (msg: string) => void;
 }
@@ -17,7 +19,14 @@ interface AdminUsersTabProps {
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 350;
 
-export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUsersTabProps) {
+const FILTER_LABELS: Record<FilterChip, string> = {
+  all: 'All',
+  administrators: 'Administrators',
+  suspended: 'Suspended',
+  with_warnings: 'With Warnings',
+};
+
+export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTabProps) {
   // Counts
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [loadingCounts, setLoadingCounts] = useState<boolean>(true);
@@ -30,10 +39,7 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [searchInput, setSearchInput] = useState<string>('');
   const [activeSearch, setActiveSearch] = useState<string>('');
-
-  // Selected user for details modal
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const [activeFilter, setActiveFilter] = useState<FilterChip>('all');
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countsFetchedRef = useRef<boolean>(false);
@@ -49,7 +55,7 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
         }
       })
       .catch(() => {
-        // Fallback or non-blocking
+        // Non-blocking
       })
       .finally(() => {
         if (!cancelled) setLoadingCounts(false);
@@ -62,7 +68,7 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
 
   // Fetch users list
   const loadUsers = useCallback(
-    async (targetPage: number, query: string, append = false) => {
+    async (targetPage: number, query: string, filter: FilterChip, append = false) => {
       if (append) {
         setLoadingMore(true);
       } else {
@@ -70,11 +76,28 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
       }
 
       try {
-        const res = await fetchAdminUsers(targetPage, PAGE_SIZE, query);
-        setUsers((prev) => (append ? [...prev, ...res.items] : res.items));
+        // Pass filter as additional search parameter when not 'all'
+        const searchParam = query.trim();
+        const res = await fetchAdminUsers(targetPage, PAGE_SIZE, searchParam || undefined);
+
+        // Client-side filter (server may not support filter chips)
+        let items = res.items;
+        if (filter === 'administrators') {
+          items = items.filter((u) => u.role === 'administrator');
+        } else if (filter === 'suspended') {
+          // suspended field may not be on summary; show nothing if unknown
+          items = items.filter((u) => (u as AdminUserSummary & { is_suspended?: boolean }).is_suspended);
+        } else if (filter === 'with_warnings') {
+          items = items.filter(
+            (u) =>
+              (u as AdminUserSummary & { warnings_count?: number }).warnings_count !== undefined &&
+              ((u as AdminUserSummary & { warnings_count?: number }).warnings_count ?? 0) > 0,
+          );
+        }
+
+        setUsers((prev) => (append ? [...prev, ...items] : items));
         setPage(res.page);
         setTotalPages(res.total_pages);
-        // Fallback to res.total only if counts endpoint did not supply total_users
         if (!countsFetchedRef.current && !query.trim()) {
           setTotalUsers((prev) => (prev !== null ? prev : res.total));
         }
@@ -91,7 +114,7 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
 
   // Initial load
   useEffect(() => {
-    void loadUsers(1, '');
+    void loadUsers(1, '', 'all');
   }, [loadUsers]);
 
   // Handle debounced search input change
@@ -105,7 +128,7 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
     debounceTimerRef.current = setTimeout(() => {
       const trimmed = value.trim();
       setActiveSearch(trimmed);
-      void loadUsers(1, trimmed, false);
+      void loadUsers(1, trimmed, activeFilter, false);
     }, SEARCH_DEBOUNCE_MS);
   };
 
@@ -115,25 +138,18 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    void loadUsers(1, '', false);
+    void loadUsers(1, '', activeFilter, false);
+  };
+
+  const handleFilterChange = (filter: FilterChip) => {
+    setActiveFilter(filter);
+    void loadUsers(1, activeSearch, filter, false);
   };
 
   const handleLoadMore = () => {
     if (page < totalPages && !loadingMore) {
-      void loadUsers(page + 1, activeSearch, true);
+      void loadUsers(page + 1, activeSearch, activeFilter, true);
     }
-  };
-
-  const handleOpenUser = (userId: string) => {
-    setSelectedUserId(userId);
-    setModalOpen(true);
-  };
-
-  const handleRoleGranted = (updatedUserId: string) => {
-    // Update role in list dynamically without page reload
-    setUsers((prev) =>
-      prev.map((u) => (u.id === updatedUserId ? { ...u, role: 'administrator' } : u)),
-    );
   };
 
   return (
@@ -182,6 +198,27 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
         )}
       </div>
 
+      {/* Filter Chips */}
+      <div className="flex flex-wrap gap-2">
+        {(Object.keys(FILTER_LABELS) as FilterChip[]).map((chip) => (
+          <button
+            key={chip}
+            type="button"
+            onClick={() => handleFilterChange(chip)}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold border transition-all ${
+              activeFilter === chip
+                ? 'bg-primary/20 border-primary/40 text-primary'
+                : 'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-border/80'
+            }`}
+          >
+            {chip === 'administrators' && <ShieldCheck className="h-3 w-3" />}
+            {chip === 'suspended' && <X className="h-3 w-3" />}
+            {chip === 'with_warnings' && <AlertTriangle className="h-3 w-3" />}
+            {FILTER_LABELS[chip]}
+          </button>
+        ))}
+      </div>
+
       {/* User List Section */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
@@ -224,7 +261,7 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
                 >
                   <button
                     type="button"
-                    onClick={() => handleOpenUser(u.id)}
+                    onClick={() => onOpenUser(u.id)}
                     aria-label={`View details for ${u.full_name}`}
                     className="w-full flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card p-3.5 text-left transition-all hover:bg-secondary/40 hover:border-primary/40 active:scale-[0.99]"
                   >
@@ -237,7 +274,6 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
                         size="md"
                       />
                       <div className="min-w-0">
-                        {/* If no username, appear with full name alone */}
                         <p className="text-sm font-semibold text-foreground truncate">{u.full_name}</p>
                         {hasUsername && (
                           <p className="text-xs text-muted-foreground truncate">@{u.username}</p>
@@ -287,19 +323,6 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
           </div>
         )}
       </div>
-
-      {/* Selected User Details Modal */}
-      <AdminUserDetailsModal
-        userId={selectedUserId}
-        isOpen={modalOpen}
-        onClose={() => {
-          setModalOpen(false);
-          setSelectedUserId(null);
-        }}
-        onRoleGranted={handleRoleGranted}
-        onErrorToast={onErrorToast}
-        onSuccessToast={onSuccessToast}
-      />
     </div>
   );
 }

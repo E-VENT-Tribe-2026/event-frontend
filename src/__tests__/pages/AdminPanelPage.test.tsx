@@ -31,13 +31,15 @@ const mockUsers: adminApi.AdminUserSummary[] = [
   },
 ];
 
-const mockUserDetailsAlex: adminApi.AdminUserDetails = {
+const mockUserDetailsAlex: adminApi.AdminUserDetailsFull = {
   id: 'user-1',
   username: 'alex_smith',
   full_name: 'Alex Smith',
   created_at: '2026-03-15T10:30:00Z',
   is_admin: false,
   role: 'user',
+  is_suspended: false,
+  warnings: [],
   organized_events: {
     upcoming: [{ id: 'e1', title: 'Future Workshop', date: '2026-12-01T10:00:00Z', status: 'active' }],
     past: [{ id: 'e2', title: 'Past Meetup', date: '2026-01-10T18:00:00Z', status: 'active' }],
@@ -50,13 +52,15 @@ const mockUserDetailsAlex: adminApi.AdminUserDetails = {
   },
 };
 
-const mockUserDetailsSarah: adminApi.AdminUserDetails = {
+const mockUserDetailsSarah: adminApi.AdminUserDetailsFull = {
   id: 'user-3',
   username: 'super_admin',
   full_name: 'Sarah Connor',
   created_at: '2026-01-01T00:00:00Z',
   is_admin: true,
   role: 'administrator',
+  is_suspended: false,
+  warnings: [],
   organized_events: {
     upcoming: [],
     past: [],
@@ -90,6 +94,13 @@ describe('Admin Panel — Ticket #248', () => {
     vi.spyOn(adminApi, 'fetchAdminUserDetails').mockImplementation(async (userId) => {
       if (userId === 'user-3') return mockUserDetailsSarah;
       return mockUserDetailsAlex;
+    });
+    vi.spyOn(adminApi, 'fetchAdminEvents').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+      total_pages: 1,
     });
     vi.spyOn(adminApi, 'grantAdminRole').mockResolvedValue({
       message: 'Administrator role granted successfully.',
@@ -142,7 +153,7 @@ describe('Admin Panel — Ticket #248', () => {
     );
   });
 
-  it('opens user details modal and displays details and event breakdown', async () => {
+  it('navigates to inline user detail and displays details and event breakdown', async () => {
     render(
       <MemoryRouter initialEntries={['/admin']}>
         <AdminPanelPage />
@@ -152,8 +163,8 @@ describe('Admin Panel — Ticket #248', () => {
     const userBtn = await screen.findByRole('button', { name: /View details for Alex Smith/i });
     fireEvent.click(userBtn);
 
-    // Modal details
-    expect(await screen.findByRole('heading', { name: 'User Details' })).toBeInTheDocument();
+    // Inline detail — back button visible
+    expect(await screen.findByRole('button', { name: /Back to Users/i })).toBeInTheDocument();
     expect(screen.getByTestId('user-role-badge')).toHaveTextContent('User');
     expect(screen.getByText(/Member since/i)).toBeInTheDocument();
 
@@ -173,25 +184,25 @@ describe('Admin Panel — Ticket #248', () => {
     const userBtn = await screen.findByRole('button', { name: /View details for Alex Smith/i });
     fireEvent.click(userBtn);
 
-    // Click Grant Admin button
-    const grantBtn = await screen.findByRole('button', { name: /Grant Admin/i });
+    // Click Make Admin button
+    const grantBtn = await screen.findByRole('button', { name: /Make Admin/i });
     fireEvent.click(grantBtn);
 
     // Confirmation dialog
     expect(await screen.findByText(/Grant Administrator Role\?/i)).toBeInTheDocument();
 
-    const confirmBtn = screen.getByRole('button', { name: /Yes, Grant Admin/i });
+    const confirmBtn = screen.getByRole('button', { name: /Grant Admin/i });
     fireEvent.click(confirmBtn);
 
-    // After success: role badge updates to Admin and Grant Admin button disappears
+    // After success: role badge updates to Admin and Make Admin button disappears
     await waitFor(() => {
       expect(screen.getByTestId('admin-role-badge')).toHaveTextContent('Admin');
     });
-    expect(screen.queryByRole('button', { name: /Grant Admin/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Make Admin/i })).not.toBeInTheDocument();
     expect(adminApi.grantAdminRole).toHaveBeenCalledWith('user-1');
   });
 
-  it('shows no grant admin button for an already administrator account', async () => {
+  it('shows no make admin button for an already administrator account', async () => {
     render(
       <MemoryRouter initialEntries={['/admin']}>
         <AdminPanelPage />
@@ -202,21 +213,68 @@ describe('Admin Panel — Ticket #248', () => {
     fireEvent.click(adminUserBtn);
 
     expect(await screen.findByTestId('admin-role-badge')).toHaveTextContent('Admin');
-    expect(screen.queryByRole('button', { name: /Grant Admin/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Make Admin/i })).not.toBeInTheDocument();
   });
 
-  it('switches between Users and Events tabs', async () => {
+  it('switches between tabs (4-tab layout)', async () => {
     render(
       <MemoryRouter initialEntries={['/admin']}>
         <AdminPanelPage />
       </MemoryRouter>
     );
 
+    // Users tab is default
+    await screen.findByText('Alex Smith');
+
+    // Switch to Events tab
     const eventsTabBtn = screen.getByRole('tab', { name: /Events/i });
     fireEvent.click(eventsTabBtn);
 
     expect(await screen.findByText(/Events Management/i)).toBeInTheDocument();
     expect(screen.getByText(/Ticket #249 Integration Point/i)).toBeInTheDocument();
+
+    // Switch to Audit Log tab
+    const auditTabBtn = screen.getByRole('tab', { name: /Audit Log/i });
+    fireEvent.click(auditTabBtn);
+
+    expect(await screen.findByText(/full audit log of all administrative actions/i)).toBeInTheDocument();
+
+    // Switch to Reports tab
+    const reportsTabBtn = screen.getByRole('tab', { name: /Reports/i });
+    fireEvent.click(reportsTabBtn);
+
+    expect(await screen.findByText(/User and event reports will be managed here/i)).toBeInTheDocument();
+  });
+
+  it('hides tabs when user detail is open, shows them on back', async () => {
+    render(
+      <MemoryRouter initialEntries={['/admin']}>
+        <AdminPanelPage />
+      </MemoryRouter>
+    );
+
+    await screen.findByText('Alex Smith');
+
+    // Tabs visible initially
+    expect(screen.getByRole('tab', { name: /Events/i })).toBeInTheDocument();
+
+    // Open user detail
+    const userBtn = screen.getByRole('button', { name: /View details for Alex Smith/i });
+    fireEvent.click(userBtn);
+
+    // Tabs should be gone
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: /Events/i })).not.toBeInTheDocument();
+    });
+
+    // Go back
+    const backBtn = await screen.findByRole('button', { name: /Back to Users/i });
+    fireEvent.click(backBtn);
+
+    // Tabs should reappear
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /Events/i })).toBeInTheDocument();
+    });
   });
 
   describe('BottomNav & AdminGuard', () => {
