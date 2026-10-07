@@ -1,13 +1,19 @@
 import { useState } from 'react';
-import { Shield, Users, Calendar, Sparkles } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Shield, Users, Calendar } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import AdminUsersTab from '@/components/admin/AdminUsersTab';
+import AdminEventsTab from '@/components/admin/AdminEventsTab';
 
 type AdminTab = 'users' | 'events';
 
 export default function AdminPanelPage() {
-  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  // /admin?tab=events opens the Events tab directly (used when coming back from an event's page).
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<AdminTab>(
+    searchParams.get('tab') === 'events' ? 'events' : 'users',
+  );
   const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' | 'info' }>({
     show: false,
     message: '',
@@ -87,22 +93,7 @@ export default function AdminPanelPage() {
             onSuccessToast={(msg) => showToast(msg, 'success')}
           />
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 px-4 text-center rounded-2xl border border-dashed border-border bg-card/40 space-y-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Calendar className="h-7 w-7" />
-            </div>
-            <div className="space-y-1.5 max-w-md">
-              <div className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-[11px] font-medium text-muted-foreground">
-                <Sparkles className="h-3 w-3 text-primary" />
-                <span>Ticket #249 Integration Point</span>
-              </div>
-              <h3 className="text-base font-bold text-foreground">Events Management</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                The Events tab, event status counts (All, Upcoming, Past, Cancelled), event search, and the
-                dedicated panel event details view are built under Ticket #249.
-              </p>
-            </div>
-          </div>
+          <AdminEventsTab onErrorToast={(msg) => showToast(msg, 'error')} />
         )}
       </main>
 

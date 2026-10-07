@@ -7,6 +7,8 @@ export const API_ENDPOINTS = {
   ADMIN_VERIFY: '/api/admin/verify',
   ADMIN_COUNTS: '/api/admin/counts',
   ADMIN_USERS: '/api/admin/users',
+  ADMIN_EVENTS: '/api/admin/events',
+  ADMIN_EVENT_DETAIL: (eventId: string) => `/api/admin/events/${encodeURIComponent(eventId)}`,
   ADMIN_USER_DETAIL: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}`,
   ADMIN_GRANT_ROLE: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}/grant-admin`,
   MFA_STATUS: '/api/auth/mfa/status',

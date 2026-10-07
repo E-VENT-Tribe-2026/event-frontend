@@ -21,6 +21,7 @@ const ROUTES: Array<{ pattern: string; title: string }> = [
   { pattern: '/profile', title: 'Profile' },
   { pattern: '/chat', title: 'Messages' },
   { pattern: '/friends', title: 'Friends' },
+  { pattern: '/admin/events/:eventId', title: 'Event details (administrator)' },
   { pattern: '/admin', title: 'Administrator panel' },
   { pattern: '/map', title: 'Map' },
   { pattern: '/home', title: 'Home' },
