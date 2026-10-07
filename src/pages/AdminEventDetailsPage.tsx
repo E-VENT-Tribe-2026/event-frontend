@@ -13,8 +13,6 @@ function formatCost(cost: number | null | undefined): string | null {
 
 /**
  * The administrator panel's own event details page (/admin/events/:eventId).
- * Works for any event, including cancelled and ended ones. Nothing is cached.
- * All text from users is rendered as plain React text.
  */
 export default function AdminEventDetailsPage() {
   const { eventId } = useParams<{ eventId: string }>();
