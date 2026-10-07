@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Calendar, ClipboardList, Flag, LogOut, Sparkles } from 'lucide-react';
+import { Shield, Users, Calendar, ClipboardList, Flag, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AppToast from '@/components/AppToast';
 import AdminUsersTab from '@/components/admin/AdminUsersTab';
 import AdminUserDetail from '@/components/admin/AdminUserDetail';
+import AdminEventsTab from '@/components/admin/AdminEventsTab';
+import AdminEventDetail from '@/components/admin/AdminEventDetail';
+import AdminAuditTab from '@/components/admin/AdminAuditTab';
+import AdminReportsTab from '@/components/admin/AdminReportsTab';
+import AdminReportDetail from '@/components/admin/AdminReportDetail';
 import { clearAuthToken } from '@/lib/auth';
 import { logout } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
@@ -15,7 +20,8 @@ type AdminTab = 'users' | 'events' | 'audit' | 'reports';
 
 type StackEntry =
   | { type: 'user-detail'; userId: string }
-  | { type: 'event-detail'; eventId: string };
+  | { type: 'event-detail'; eventId: string }
+  | { type: 'report-detail'; reportId: string };
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
@@ -85,6 +91,10 @@ export default function AdminPanelPage() {
 
   const pushEventDetail = (eventId: string) => {
     setStack((prev) => [...prev, { type: 'event-detail', eventId }]);
+  };
+
+  const pushReportDetail = (reportId: string) => {
+    setStack((prev) => [...prev, { type: 'report-detail', reportId }]);
   };
 
   const popStack = () => {
@@ -197,19 +207,25 @@ export default function AdminPanelPage() {
           />
         )}
 
-        {/* Stack: event detail (future) */}
+        {/* Stack: event detail */}
         {topOfStack?.type === 'event-detail' && (
-          <div className="flex flex-col items-center justify-center py-16 text-center space-y-3 rounded-2xl border border-dashed border-border bg-card/40 px-4">
-            <Calendar className="h-10 w-10 text-muted-foreground/50" />
-            <p className="text-sm font-semibold text-foreground">Event detail coming soon</p>
-            <button
-              type="button"
-              onClick={popStack}
-              className="rounded-lg border border-border bg-secondary px-4 py-2 text-xs font-semibold hover:bg-secondary/70 transition-colors"
-            >
-              Go Back
-            </button>
-          </div>
+          <AdminEventDetail
+            eventId={topOfStack.eventId}
+            onBack={popStack}
+            onNavigateToUser={pushUserDetail}
+            onErrorToast={(msg) => showToast(msg, 'error')}
+            onSuccessToast={(msg) => showToast(msg, 'success')}
+          />
+        )}
+
+        {/* Stack: report detail */}
+        {topOfStack?.type === 'report-detail' && (
+          <AdminReportDetail
+            reportId={topOfStack.reportId}
+            onBack={popStack}
+            onErrorToast={(msg) => showToast(msg, 'error')}
+            onSuccessToast={(msg) => showToast(msg, 'success')}
+          />
         )}
 
         {/* Tab content — only shown when stack is empty */}
@@ -224,50 +240,26 @@ export default function AdminPanelPage() {
             )}
 
             {activeTab === 'events' && (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center rounded-2xl border border-dashed border-border bg-card/40 space-y-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <Calendar className="h-7 w-7" />
-                </div>
-                <div className="space-y-1.5 max-w-md">
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-[11px] font-medium text-muted-foreground">
-                    <Sparkles className="h-3 w-3 text-primary" />
-                    <span>Ticket #249 Integration Point</span>
-                  </div>
-                  <h3 className="text-base font-bold text-foreground">Events Management</h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    The Events tab, event status counts (All, Upcoming, Past, Cancelled), event search, and the
-                    dedicated panel event details view are built under Ticket #249.
-                  </p>
-                </div>
-              </div>
+              <AdminEventsTab
+                onOpenEvent={pushEventDetail}
+                onErrorToast={(msg) => showToast(msg, 'error')}
+                onSuccessToast={(msg) => showToast(msg, 'success')}
+              />
             )}
 
             {activeTab === 'audit' && (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center rounded-2xl border border-dashed border-border bg-card/40 space-y-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <ClipboardList className="h-7 w-7" />
-                </div>
-                <div className="space-y-1.5 max-w-md">
-                  <h3 className="text-base font-bold text-foreground">Audit Log</h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    A full audit log of all administrative actions will be shown here.
-                  </p>
-                </div>
-              </div>
+              <AdminAuditTab
+                onNavigateToUser={pushUserDetail}
+                onNavigateToEvent={pushEventDetail}
+                onErrorToast={(msg) => showToast(msg, 'error')}
+              />
             )}
 
             {activeTab === 'reports' && (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center rounded-2xl border border-dashed border-border bg-card/40 space-y-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <Flag className="h-7 w-7" />
-                </div>
-                <div className="space-y-1.5 max-w-md">
-                  <h3 className="text-base font-bold text-foreground">Reports</h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    User and event reports will be managed here.
-                  </p>
-                </div>
-              </div>
+              <AdminReportsTab
+                onOpenReport={pushReportDetail}
+                onErrorToast={(msg) => showToast(msg, 'error')}
+              />
             )}
           </>
         )}

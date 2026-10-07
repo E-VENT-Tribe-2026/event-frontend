@@ -102,6 +102,20 @@ describe('Admin Panel — Ticket #248', () => {
       limit: 20,
       total_pages: 1,
     });
+    vi.spyOn(adminApi, 'fetchAdminAudit').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+      total_pages: 1,
+    });
+    vi.spyOn(adminApi, 'fetchAdminReports').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+      total_pages: 1,
+    });
     vi.spyOn(adminApi, 'grantAdminRole').mockResolvedValue({
       message: 'Administrator role granted successfully.',
       user_id: 'user-1',
@@ -230,20 +244,19 @@ describe('Admin Panel — Ticket #248', () => {
     const eventsTabBtn = screen.getByRole('tab', { name: /Events/i });
     fireEvent.click(eventsTabBtn);
 
-    expect(await screen.findByText(/Events Management/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ticket #249 Integration Point/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Total Events/i)).toBeInTheDocument();
 
     // Switch to Audit Log tab
     const auditTabBtn = screen.getByRole('tab', { name: /Audit Log/i });
     fireEvent.click(auditTabBtn);
 
-    expect(await screen.findByText(/full audit log of all administrative actions/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No audit entries/i)).toBeInTheDocument();
 
     // Switch to Reports tab
     const reportsTabBtn = screen.getByRole('tab', { name: /Reports/i });
     fireEvent.click(reportsTabBtn);
 
-    expect(await screen.findByText(/User and event reports will be managed here/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Open Reports/i)).toBeInTheDocument();
   });
 
   it('hides tabs when user detail is open, shows them on back', async () => {
