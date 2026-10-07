@@ -279,9 +279,7 @@ export async function grantAdminRole(userId: string): Promise<GrantAdminResponse
 }
 
 /**
- * Fetches one page of events for a tab (all / upcoming / past / cancelled),
- * with optional case-insensitive title search over the whole tab.
- * Never cached client-side.
+ * Fetches one page of events for a tab (all / upcoming / past / cancelled).
  */
 export async function fetchAdminEvents(
   statusFilter: AdminEventStatusFilter = 'all',
