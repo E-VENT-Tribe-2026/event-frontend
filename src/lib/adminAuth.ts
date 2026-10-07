@@ -38,12 +38,9 @@ export function getPendingAdminVerification(): PendingAdminVerification | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    const token = typeof parsed?.accessToken === 'string' && parsed.accessToken.trim()
-      ? parsed.accessToken.trim()
-      : getAuthToken()?.trim() || '';
-    if (parsed && token) {
+    if (parsed && typeof parsed.accessToken === 'string' && parsed.accessToken.trim()) {
       return {
-        accessToken: token,
+        accessToken: parsed.accessToken.trim(),
         hasMfaLinked: Boolean(parsed.hasMfaLinked),
         factorId: typeof parsed.factorId === 'string' && parsed.factorId.trim() ? parsed.factorId.trim() : undefined,
       };
