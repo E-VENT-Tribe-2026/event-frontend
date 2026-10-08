@@ -1,3 +1,8 @@
+/**
+ * @deprecated Dead code — this modal was replaced by the inline AdminUserDetail page component
+ * during the admin panel refactor. It is no longer imported or mounted anywhere in the app.
+ * Kept here for reference only; safe to delete in a future cleanup pass.
+ */
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShieldCheck, Calendar, UserCheck, Loader2, AlertCircle } from 'lucide-react';

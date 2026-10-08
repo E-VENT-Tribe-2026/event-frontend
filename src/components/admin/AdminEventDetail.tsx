@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   Loader2,
@@ -92,11 +92,17 @@ function formatDateShort(isoString: string): string {
   }
 }
 
-function getStatusLabel(event: AdminEventDetail): { label: string; className: string } {
+function getStatusLabel(
+  event: AdminEventDetail,
+): { label: string; style: React.CSSProperties } {
   if (event.is_cancelled || event.status === 'cancelled') {
     return {
       label: 'Cancelled',
-      className: 'bg-destructive/15 text-destructive',
+      style: {
+        background: 'hsl(0 84% 60% / .15)',
+        color: 'var(--adm-danger-text)',
+        border: '1px solid hsl(0 84% 60% / .3)',
+      },
     };
   }
   const now = Date.now();
@@ -104,12 +110,19 @@ function getStatusLabel(event: AdminEventDetail): { label: string; className: st
   if (eventDate > now) {
     return {
       label: 'Upcoming',
-      className: 'bg-blue-500/15 text-blue-400',
+      style: {
+        background: 'hsl(199 90% 70% / .12)',
+        color: 'var(--adm-info-text)',
+        border: '1px solid hsl(199 90% 70% / .3)',
+      },
     };
   }
   return {
     label: 'Past',
-    className: 'bg-muted text-muted-foreground',
+    style: {
+      background: 'var(--adm-secondary)',
+      color: 'var(--adm-muted-fg)',
+    },
   };
 }
 
@@ -283,7 +296,8 @@ export default function AdminEventDetail({
                       )}
                     </div>
                     <span
-                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${getStatusLabel(event).className}`}
+                      className="shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                      style={getStatusLabel(event).style}
                     >
                       {getStatusLabel(event).label}
                     </span>
