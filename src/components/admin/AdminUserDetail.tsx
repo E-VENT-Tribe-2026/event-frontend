@@ -86,12 +86,17 @@ function EventSubList({
   const items = events || [];
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+      <div
+        className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider"
+        style={{ color: 'var(--adm-muted-fg)' }}
+      >
         <span>{title}</span>
         <span className="text-[11px] font-normal">({items.length})</span>
       </div>
       {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground/70 italic py-1">{emptyMessage}</p>
+        <p className="text-xs italic py-1" style={{ color: 'var(--adm-muted-fg)', opacity: 0.7 }}>
+          {emptyMessage}
+        </p>
       ) : (
         <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
           {items.map((event) => {
@@ -103,24 +108,44 @@ function EventSubList({
                 type={onClickEvent ? 'button' : undefined}
                 onClick={onClickEvent ? () => onClickEvent(event.id) : undefined}
                 aria-label={onClickEvent ? `View event ${event.title}` : undefined}
-                className={`w-full flex items-center justify-between rounded-lg bg-secondary/50 p-2 text-xs border border-border/40 text-left ${onClickEvent ? 'hover:bg-secondary/80 hover:border-primary/30 transition-colors cursor-pointer group' : ''}`}
+                className={`w-full flex items-center justify-between rounded-lg p-2 text-xs border text-left ${onClickEvent ? 'hover:opacity-80 transition-all cursor-pointer group' : ''}`}
+                style={{
+                  background: 'hsl(213 40% 18% / .5)',
+                  borderColor: 'var(--adm-border)',
+                }}
               >
                 <div className="min-w-0 flex-1 pr-2">
-                  <p className="font-medium text-foreground truncate">{event.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{formatEventDateTime(event.date)}</p>
+                  <p className="font-medium truncate" style={{ color: 'var(--adm-fg)' }}>
+                    {event.title}
+                  </p>
+                  <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+                    {formatEventDateTime(event.date)}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {isCancelled ? (
-                    <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-semibold text-destructive">
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                      style={{
+                        background: 'hsl(0 84% 60% / .15)',
+                        color: 'var(--adm-danger-text)',
+                      }}
+                    >
                       Cancelled
                     </span>
                   ) : (
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary capitalize">
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[10px] font-medium capitalize"
+                      style={{
+                        background: 'hsl(271 76% 53% / .15)',
+                        color: 'var(--adm-primary-text)',
+                      }}
+                    >
                       {event.status || 'Active'}
                     </span>
                   )}
                   {onClickEvent && (
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                    <ChevronRight className="h-3.5 w-3.5" style={{ color: 'var(--adm-muted-fg)' }} />
                   )}
                 </div>
               </Wrapper>
@@ -145,14 +170,13 @@ export default function AdminUserDetail({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
 
-  // Dialog state
   const [dialogKind, setDialogKind] = useState<DialogKind>(null);
   const [reason, setReason] = useState<string>('');
   const [acting, setActing] = useState<boolean>(false);
 
-  // Withdraw warning
   const [withdrawWarningId, setWithdrawWarningId] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<boolean>(false);
+  const [pendingWithdrawWarning, setPendingWithdrawWarning] = useState<AdminUserWarning | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -281,26 +305,47 @@ export default function AdminUserDetail({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+          style={{ color: 'var(--adm-muted-fg)' }}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Users
         </button>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border border-border/50 bg-card">
-            <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            <p className="text-xs text-muted-foreground">Loading user details...</p>
+          <div
+            className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border"
+            style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+          >
+            <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--adm-primary)' }} />
+            <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              Loading user details...
+            </p>
           </div>
         ) : error ? (
-          <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-6 text-center space-y-2">
-            <AlertCircle className="mx-auto h-6 w-6 text-destructive" />
-            <p className="text-xs text-destructive font-medium">{error}</p>
+          <div
+            className="rounded-xl border p-6 text-center space-y-2"
+            style={{
+              borderColor: 'hsl(0 84% 60% / .3)',
+              background: 'hsl(0 84% 60% / .07)',
+            }}
+          >
+            <AlertCircle className="mx-auto h-6 w-6" style={{ color: 'var(--adm-danger)' }} />
+            <p className="text-xs font-medium" style={{ color: 'var(--adm-danger-text)' }}>
+              {error}
+            </p>
           </div>
         ) : user ? (
           <>
             {/* Identity block */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <div
+              className="rounded-[16px] border p-5"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+              }}
+            >
               <div className="flex items-start gap-4">
                 <UserAvatar
                   src={user.avatar_url}
@@ -311,11 +356,18 @@ export default function AdminUserDetail({
                 />
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-base font-bold text-foreground truncate">{user.full_name}</h2>
+                    <h2 className="text-base font-bold truncate" style={{ color: 'var(--adm-fg)' }}>
+                      {user.full_name}
+                    </h2>
                     {isAdmin ? (
                       <span
                         data-testid="admin-role-badge"
-                        className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-0.5 text-xs font-semibold text-primary border border-primary/30"
+                        className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+                        style={{
+                          background: 'hsl(271 76% 53% / .2)',
+                          color: 'var(--adm-primary-text)',
+                          borderColor: 'hsl(271 76% 53% / .4)',
+                        }}
                       >
                         <ShieldCheck className="h-3.5 w-3.5" />
                         Admin
@@ -323,29 +375,50 @@ export default function AdminUserDetail({
                     ) : (
                       <span
                         data-testid="user-role-badge"
-                        className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground border border-border"
+                        className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                        style={{
+                          background: 'var(--adm-secondary)',
+                          color: 'hsl(213 20% 78%)',
+                          borderColor: 'var(--adm-border)',
+                        }}
                       >
                         <UserCheck className="h-3.5 w-3.5" />
                         User
                       </span>
                     )}
                     {isSuspended && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-400 border border-red-500/30">
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+                        style={{
+                          background: 'hsl(0 84% 60% / .15)',
+                          color: 'var(--adm-danger-text)',
+                          borderColor: 'hsl(0 84% 60% / .35)',
+                        }}
+                      >
                         <Ban className="h-3.5 w-3.5" />
                         Suspended
                       </span>
                     )}
                   </div>
 
-                  <p className="text-xs text-muted-foreground">
-                    {user.username ? `@${user.username}` : <span className="italic">No username chosen</span>}
+                  <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                    {user.username ? (
+                      `@${user.username}`
+                    ) : (
+                      <span className="italic">No username chosen</span>
+                    )}
                   </p>
 
                   {user.email && (
-                    <p className="text-xs text-muted-foreground">{user.email}</p>
+                    <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                      {user.email}
+                    </p>
                   )}
 
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-0.5">
+                  <div
+                    className="flex items-center gap-1.5 text-xs pt-0.5"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  >
                     <Calendar className="h-3.5 w-3.5" />
                     <span>Member since {formatDate(user.created_at)}</span>
                   </div>
@@ -357,9 +430,14 @@ export default function AdminUserDetail({
                 <button
                   type="button"
                   onClick={() => openDialog('warn')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-secondary px-3 py-2 text-xs font-semibold text-foreground hover:bg-secondary/70 active:scale-95 transition-all"
+                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold active:scale-95 transition-all"
+                  style={{
+                    borderColor: 'hsl(38 92% 52% / .4)',
+                    background: 'hsl(38 92% 52% / .12)',
+                    color: 'var(--adm-warn-text)',
+                  }}
                 >
-                  <AlertTriangle className="h-3.5 w-3.5 text-warn-text" />
+                  <AlertTriangle className="h-3.5 w-3.5" />
                   Warn
                 </button>
 
@@ -367,16 +445,26 @@ export default function AdminUserDetail({
                   <button
                     type="button"
                     onClick={() => openDialog('lift')}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-secondary px-3 py-2 text-xs font-semibold text-foreground hover:bg-secondary/70 active:scale-95 transition-all"
+                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold active:scale-95 transition-all"
+                    style={{
+                      borderColor: 'hsl(152 60% 42% / .4)',
+                      background: 'hsl(152 60% 42% / .12)',
+                      color: 'var(--adm-ok-text)',
+                    }}
                   >
-                    <ShieldOff className="h-3.5 w-3.5 text-ok-text" />
+                    <ShieldOff className="h-3.5 w-3.5" />
                     Lift Suspension
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={() => openDialog('suspend')}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/20 active:scale-95 transition-all"
+                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold active:scale-95 transition-all"
+                    style={{
+                      borderColor: 'hsl(0 84% 60% / .4)',
+                      background: 'hsl(0 84% 60% / .12)',
+                      color: 'var(--adm-danger-text)',
+                    }}
                   >
                     <Ban className="h-3.5 w-3.5" />
                     Suspend
@@ -387,7 +475,12 @@ export default function AdminUserDetail({
                   <button
                     type="button"
                     onClick={() => openDialog('makeAdmin')}
-                    className="inline-flex items-center gap-1.5 rounded-lg gradient-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-glow hover:opacity-90 active:scale-95 transition-all"
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold active:scale-95 transition-all"
+                    style={{
+                      background: 'var(--adm-grad)',
+                      boxShadow: 'var(--adm-shadow-glow)',
+                      color: 'white',
+                    }}
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     Make Admin
@@ -397,8 +490,17 @@ export default function AdminUserDetail({
             </div>
 
             {/* Organized Events */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-foreground">Organized Events</h3>
+            <div
+              className="rounded-[16px] border p-5 space-y-4"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+              }}
+            >
+              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                Organized Events
+              </h3>
               <EventSubList
                 title="Upcoming"
                 events={user.organized_events?.upcoming}
@@ -420,8 +522,17 @@ export default function AdminUserDetail({
             </div>
 
             {/* Joined Events */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-foreground">Joined Events</h3>
+            <div
+              className="rounded-[16px] border p-5 space-y-4"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+              }}
+            >
+              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                Joined Events
+              </h3>
               <EventSubList
                 title="Upcoming"
                 events={user.joined_events?.upcoming}
@@ -443,33 +554,57 @@ export default function AdminUserDetail({
             </div>
 
             {/* Warning History */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+            <div
+              className="rounded-[16px] border p-5 space-y-3"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+              }}
+            >
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--adm-fg)' }}>
                 Warning History
-                <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                <span
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  style={{ background: 'var(--adm-secondary)', color: 'var(--adm-muted-fg)' }}
+                >
                   {user.warnings?.length ?? 0}
                 </span>
               </h3>
               {!user.warnings || user.warnings.length === 0 ? (
-                <p className="text-xs text-muted-foreground/70 italic">No warnings issued.</p>
+                <p className="text-xs italic" style={{ color: 'var(--adm-muted-fg)', opacity: 0.7 }}>
+                  No warnings issued.
+                </p>
               ) : (
                 <div className="space-y-2">
                   {user.warnings.map((w) => (
                     <div
                       key={w.id}
-                      className="flex items-start justify-between gap-3 rounded-xl border border-border/60 bg-secondary/40 p-3"
+                      className="flex items-start justify-between gap-3 rounded-xl p-3"
+                      style={{
+                        background: 'hsl(213 40% 20% / .45)',
+                        border: '1px solid var(--adm-border)',
+                        borderLeft: '3px solid var(--adm-warn)',
+                      }}
                     >
                       <div className="min-w-0 flex-1 space-y-0.5">
-                        <p className="text-xs font-medium text-foreground">{w.reason}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {formatDate(w.issued_at)} {w.issued_by ? `· by ${w.issued_by}` : ''}
+                        <p className="text-xs font-medium" style={{ color: 'var(--adm-fg)' }}>
+                          {w.reason}
+                        </p>
+                        <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+                          {formatDate(w.issued_at)}{w.issued_by ? ` · by ${w.issued_by}` : ''}
                         </p>
                       </div>
                       <button
                         type="button"
                         disabled={withdrawing && withdrawWarningId === w.id}
-                        onClick={() => void handleWithdrawWarning(w)}
-                        className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-border bg-secondary px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/70 disabled:opacity-50 transition-all"
+                        onClick={() => setPendingWithdrawWarning(w)}
+                        className="shrink-0 inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold disabled:opacity-50 transition-all"
+                        style={{
+                          background: 'var(--adm-secondary)',
+                          borderColor: 'var(--adm-border)',
+                          color: 'var(--adm-muted-fg)',
+                        }}
                       >
                         {withdrawing && withdrawWarningId === w.id ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -504,7 +639,12 @@ export default function AdminUserDetail({
               placeholder="Enter reason..."
               aria-label="Reason"
               rows={3}
-              className="w-full rounded-xl border border-border bg-secondary px-3 py-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50 resize-none placeholder:text-muted-foreground/60"
+              className="w-full rounded-xl border px-3 py-2.5 text-xs outline-none resize-none placeholder:opacity-60"
+              style={{
+                borderColor: 'var(--adm-border)',
+                background: 'var(--adm-secondary)',
+                color: 'var(--adm-fg)',
+              }}
             />
           )}
 
@@ -518,7 +658,8 @@ export default function AdminUserDetail({
                 e.preventDefault();
                 void handleConfirm();
               }}
-              className="rounded-lg gradient-primary text-xs font-semibold text-white"
+              className="rounded-lg text-xs font-semibold text-white"
+              style={{ background: 'var(--adm-grad)' }}
             >
               {acting ? (
                 <>
@@ -535,10 +676,52 @@ export default function AdminUserDetail({
 
       {/* Withdraw warning confirmation */}
       <AlertDialog
-        open={withdrawWarningId !== null && !withdrawing}
-        onOpenChange={(open) => !open && setWithdrawWarningId(null)}
+        open={pendingWithdrawWarning !== null}
+        onOpenChange={(open) => !open && setPendingWithdrawWarning(null)}
       >
-        {/* Intentionally empty – withdraw runs immediately on button click, no extra dialog needed */}
+        <AlertDialogContent className="rounded-2xl max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base font-bold">Withdraw Warning</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground">
+              Are you sure you want to withdraw this warning? This action cannot be undone.
+              {pendingWithdrawWarning && (
+                <span
+                  className="mt-1.5 block rounded-lg px-3 py-2 text-xs"
+                  style={{ background: 'var(--adm-secondary)', color: 'var(--adm-fg)' }}
+                >
+                  &ldquo;{pendingWithdrawWarning.reason}&rdquo;
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row gap-2 justify-end">
+            <AlertDialogCancel disabled={withdrawing} className="rounded-lg text-xs mt-0">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={withdrawing}
+              onClick={(e) => {
+                e.preventDefault();
+                if (pendingWithdrawWarning) {
+                  const w = pendingWithdrawWarning;
+                  setPendingWithdrawWarning(null);
+                  void handleWithdrawWarning(w);
+                }
+              }}
+              className="rounded-lg text-xs font-semibold text-white"
+              style={{ background: 'var(--adm-grad)' }}
+            >
+              {withdrawing ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Withdrawing...
+                </>
+              ) : (
+                'Withdraw Warning'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
       </AlertDialog>
     </>
   );

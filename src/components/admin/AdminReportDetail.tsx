@@ -51,26 +51,68 @@ function formatDate(isoString: string): string {
   }
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-  dismissed: 'bg-muted text-muted-foreground border-border',
-  actioned: 'bg-green-500/15 text-green-400 border-green-500/30',
+const STATUS_STYLES: Record<string, React.CSSProperties> = {
+  pending: {
+    background: 'hsl(38 92% 52% / .15)',
+    color: 'var(--adm-warn-text)',
+    borderColor: 'hsl(38 92% 52% / .35)',
+  },
+  dismissed: {
+    background: 'var(--adm-secondary)',
+    color: 'var(--adm-muted-fg)',
+    borderColor: 'var(--adm-border)',
+  },
+  actioned: {
+    background: 'hsl(152 60% 42% / .15)',
+    color: 'var(--adm-ok-text)',
+    borderColor: 'hsl(152 60% 42% / .35)',
+  },
 };
 
-const REASON_STYLES: Record<string, string> = {
-  spam: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-  harassment: 'bg-red-500/15 text-red-400 border-red-500/30',
-  inappropriate: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  misinformation: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-  other: 'bg-muted text-muted-foreground border-border',
+const REASON_STYLES: Record<string, React.CSSProperties> = {
+  spam: {
+    background: 'hsl(38 92% 52% / .15)',
+    color: 'var(--adm-warn-text)',
+    borderColor: 'hsl(38 92% 52% / .35)',
+  },
+  harassment: {
+    background: 'hsl(0 84% 60% / .15)',
+    color: 'var(--adm-danger-text)',
+    borderColor: 'hsl(0 84% 60% / .35)',
+  },
+  inappropriate: {
+    background: 'hsl(330 100% 59% / .14)',
+    color: 'hsl(330 100% 78%)',
+    borderColor: 'hsl(330 100% 59% / .35)',
+  },
+  misinformation: {
+    background: 'hsl(55 92% 52% / .15)',
+    color: 'hsl(55 95% 70%)',
+    borderColor: 'hsl(55 92% 52% / .35)',
+  },
+  other: {
+    background: 'var(--adm-secondary)',
+    color: 'var(--adm-muted-fg)',
+    borderColor: 'var(--adm-border)',
+  },
 };
 
-function getStatusStyle(status: string): string {
-  return STATUS_STYLES[status] ?? 'bg-muted text-muted-foreground border-border';
+function getStatusStyle(status: string): React.CSSProperties {
+  return STATUS_STYLES[status] ?? {
+    background: 'var(--adm-secondary)',
+    color: 'var(--adm-muted-fg)',
+    borderColor: 'var(--adm-border)',
+  };
 }
 
-function getReasonStyle(reason: string): string {
-  return REASON_STYLES[reason.toLowerCase()] ?? 'bg-muted text-muted-foreground border-border';
+function getReasonStyle(reason: string): React.CSSProperties {
+  return (
+    REASON_STYLES[reason.toLowerCase()] ?? {
+      background: 'hsl(330 100% 59% / .14)',
+      color: 'hsl(330 100% 78%)',
+      borderColor: 'hsl(330 100% 59% / .35)',
+    }
+  );
 }
 
 const ACTION_CONFIGS: Record<
@@ -78,59 +120,82 @@ const ACTION_CONFIGS: Record<
   {
     label: string;
     icon: React.ReactNode;
-    btnClass: string;
+    btnStyle: React.CSSProperties;
     title: string;
     description: (targetName: string) => string;
     confirmLabel: string;
-    confirmClass: string;
+    confirmStyle: React.CSSProperties;
     needsNote: boolean;
   }
 > = {
   dismiss: {
     label: 'Dismiss',
     icon: <XCircle className="h-3.5 w-3.5" />,
-    btnClass:
-      'border-border bg-secondary text-foreground hover:bg-secondary/70',
+    btnStyle: {
+      borderColor: 'var(--adm-border)',
+      background: 'var(--adm-secondary)',
+      color: 'var(--adm-fg)',
+    },
     title: 'Dismiss Report',
     description: (t) => `Dismiss this report about "${t}" without taking further action.`,
     confirmLabel: 'Dismiss',
-    confirmClass: 'rounded-lg text-xs font-semibold',
+    confirmStyle: {
+      background: 'var(--adm-secondary)',
+      color: 'var(--adm-fg)',
+      borderColor: 'var(--adm-border)',
+    },
     needsNote: false,
   },
   warn: {
     label: 'Warn',
-    icon: <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />,
-    btnClass:
-      'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20',
+    icon: <AlertTriangle className="h-3.5 w-3.5" style={{ color: 'var(--adm-warn-text)' }} />,
+    btnStyle: {
+      borderColor: 'hsl(38 92% 52% / .35)',
+      background: 'hsl(38 92% 52% / .12)',
+      color: 'var(--adm-warn-text)',
+    },
     title: 'Issue Warning',
     description: (t) => `Issue a warning to the target of this report ("${t}").`,
     confirmLabel: 'Issue Warning',
-    confirmClass:
-      'rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-500/90',
+    confirmStyle: {
+      background: 'hsl(38 92% 52%)',
+      color: 'white',
+    },
     needsNote: true,
   },
   remove: {
     label: 'Remove',
-    icon: <Trash2 className="h-3.5 w-3.5 text-pink-400" />,
-    btnClass:
-      'border-pink-500/30 bg-pink-500/10 text-pink-400 hover:bg-pink-500/20',
+    icon: <Trash2 className="h-3.5 w-3.5" style={{ color: 'hsl(330 100% 78%)' }} />,
+    btnStyle: {
+      borderColor: 'hsl(330 100% 59% / .35)',
+      background: 'hsl(330 100% 59% / .12)',
+      color: 'hsl(330 100% 78%)',
+    },
     title: 'Remove Content',
     description: (t) => `Permanently remove "${t}". This action cannot be undone.`,
     confirmLabel: 'Remove',
-    confirmClass:
-      'rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90',
+    confirmStyle: {
+      background: 'var(--adm-danger)',
+      color: 'white',
+    },
     needsNote: false,
   },
   suspend: {
     label: 'Suspend',
-    icon: <Ban className="h-3.5 w-3.5 text-red-400" />,
-    btnClass:
-      'border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20',
+    icon: <Ban className="h-3.5 w-3.5" style={{ color: 'var(--adm-danger-text)' }} />,
+    btnStyle: {
+      borderColor: 'hsl(0 84% 60% / .35)',
+      background: 'hsl(0 84% 60% / .12)',
+      color: 'var(--adm-danger-text)',
+    },
     title: 'Suspend User',
-    description: (t) => `Suspend the account of "${t}". They will lose access until the suspension is lifted.`,
+    description: (t) =>
+      `Suspend the account of "${t}". They will lose access until the suspension is lifted.`,
     confirmLabel: 'Suspend',
-    confirmClass:
-      'rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-500/90',
+    confirmStyle: {
+      background: 'var(--adm-danger)',
+      color: 'white',
+    },
     needsNote: true,
   },
 };
@@ -215,37 +280,61 @@ export default function AdminReportDetail({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+          style={{ color: 'var(--adm-muted-fg)' }}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Reports
         </button>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border border-border/50 bg-card">
-            <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            <p className="text-xs text-muted-foreground">Loading report...</p>
+          <div
+            className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border"
+            style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+          >
+            <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--adm-primary)' }} />
+            <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              Loading report...
+            </p>
           </div>
         ) : error ? (
-          <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-6 text-center space-y-2">
-            <AlertCircle className="mx-auto h-6 w-6 text-destructive" />
-            <p className="text-xs text-destructive font-medium">{error}</p>
+          <div
+            className="rounded-xl border p-6 text-center space-y-2"
+            style={{
+              borderColor: 'hsl(0 84% 60% / .3)',
+              background: 'hsl(0 84% 60% / .07)',
+            }}
+          >
+            <AlertCircle className="mx-auto h-6 w-6" style={{ color: 'var(--adm-danger)' }} />
+            <p className="text-xs font-medium" style={{ color: 'var(--adm-danger-text)' }}>
+              {error}
+            </p>
           </div>
         ) : report ? (
           <>
             {/* Summary card */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+            <div
+              className="rounded-[16px] border p-5 space-y-4"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+              }}
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1 min-w-0">
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  <p
+                    className="text-[11px] font-semibold uppercase tracking-wider"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  >
                     {report.target_type === 'event' ? 'Event' : 'User'} Report
                   </p>
-                  <h2 className="text-base font-bold text-foreground leading-tight">
+                  <h2 className="text-base font-bold leading-tight" style={{ color: 'var(--adm-fg)' }}>
                     {report.target_name}
                   </h2>
                 </div>
                 <span
-                  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold capitalize ${getStatusStyle(report.status)}`}
+                  className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold capitalize"
+                  style={getStatusStyle(report.status)}
                 >
                   {report.status}
                 </span>
@@ -253,12 +342,16 @@ export default function AdminReportDetail({
 
               <dl className="grid grid-cols-1 gap-y-2.5 sm:grid-cols-2 text-xs">
                 <div>
-                  <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">
+                  <dt
+                    className="text-[11px] uppercase tracking-wider font-medium mb-0.5"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  >
                     Reason
                   </dt>
                   <dd>
                     <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getReasonStyle(report.reason)}`}
+                      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                      style={getReasonStyle(report.reason)}
                     >
                       {report.reason}
                     </span>
@@ -266,25 +359,38 @@ export default function AdminReportDetail({
                 </div>
 
                 <div>
-                  <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">
+                  <dt
+                    className="text-[11px] uppercase tracking-wider font-medium mb-0.5"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  >
                     Reported by
                   </dt>
-                  <dd className="font-semibold text-foreground">{report.reporter_name}</dd>
+                  <dd className="font-semibold" style={{ color: 'var(--adm-fg)' }}>
+                    {report.reporter_name}
+                  </dd>
                 </div>
 
                 <div>
-                  <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">
+                  <dt
+                    className="text-[11px] uppercase tracking-wider font-medium mb-0.5"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  >
                     Filed
                   </dt>
-                  <dd className="font-semibold text-foreground">{formatDate(report.created_at)}</dd>
+                  <dd className="font-semibold" style={{ color: 'var(--adm-fg)' }}>
+                    {formatDate(report.created_at)}
+                  </dd>
                 </div>
 
                 {report.resolved_at && (
                   <div>
-                    <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">
+                    <dt
+                      className="text-[11px] uppercase tracking-wider font-medium mb-0.5"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    >
                       Resolved
                     </dt>
-                    <dd className="font-semibold text-foreground">
+                    <dd className="font-semibold" style={{ color: 'var(--adm-fg)' }}>
                       {formatDate(report.resolved_at)}
                       {report.resolved_by ? ` by ${report.resolved_by}` : ''}
                     </dd>
@@ -294,10 +400,20 @@ export default function AdminReportDetail({
 
               {report.description && (
                 <div>
-                  <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1">
+                  <p
+                    className="text-[11px] uppercase tracking-wider font-medium mb-1"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  >
                     Description
                   </p>
-                  <p className="text-xs text-foreground/90 leading-relaxed rounded-xl bg-secondary/40 border border-border/40 p-3">
+                  <p
+                    className="text-xs leading-relaxed rounded-xl border p-3"
+                    style={{
+                      color: 'var(--adm-fg)',
+                      background: 'hsl(213 40% 18% / .5)',
+                      borderColor: 'var(--adm-border)',
+                    }}
+                  >
                     {report.description}
                   </p>
                 </div>
@@ -305,10 +421,20 @@ export default function AdminReportDetail({
 
               {report.admin_note && (
                 <div>
-                  <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1">
+                  <p
+                    className="text-[11px] uppercase tracking-wider font-medium mb-1"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  >
                     Admin Note
                   </p>
-                  <p className="text-xs text-foreground/90 leading-relaxed rounded-xl bg-secondary/40 border border-border/40 p-3">
+                  <p
+                    className="text-xs leading-relaxed rounded-xl border p-3"
+                    style={{
+                      color: 'var(--adm-fg)',
+                      background: 'hsl(213 40% 18% / .5)',
+                      borderColor: 'var(--adm-border)',
+                    }}
+                  >
                     {report.admin_note}
                   </p>
                 </div>
@@ -317,8 +443,16 @@ export default function AdminReportDetail({
 
             {/* Action buttons */}
             {!isAlreadyResolved ? (
-              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-                <h3 className="text-sm font-bold text-foreground">Moderate</h3>
+              <div
+                className="rounded-[16px] border p-5 space-y-3"
+                style={{
+                  background: 'var(--adm-grad-card)',
+                  borderColor: 'var(--adm-border)',
+                }}
+              >
+                <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                  Moderate
+                </h3>
                 <div className="flex flex-wrap gap-2">
                   {(Object.keys(ACTION_CONFIGS) as ActionKind[]).map((kind) => {
                     const c = ACTION_CONFIGS[kind];
@@ -327,7 +461,8 @@ export default function AdminReportDetail({
                         key={kind}
                         type="button"
                         onClick={() => openAction(kind)}
-                        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold active:scale-95 transition-all ${c.btnClass}`}
+                        className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold active:scale-95 transition-all"
+                        style={c.btnStyle}
                       >
                         {c.icon}
                         {c.label}
@@ -337,7 +472,14 @@ export default function AdminReportDetail({
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-2 rounded-2xl border border-green-500/30 bg-green-500/5 p-4 text-xs font-medium text-green-400">
+              <div
+                className="flex items-center gap-2 rounded-[16px] border p-4 text-xs font-medium"
+                style={{
+                  borderColor: 'hsl(152 60% 42% / .35)',
+                  background: 'hsl(152 60% 42% / .07)',
+                  color: 'var(--adm-ok-text)',
+                }}
+              >
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
                 This report has been resolved.
               </div>
@@ -368,7 +510,12 @@ export default function AdminReportDetail({
               placeholder="Add a note (optional)..."
               aria-label="Admin note"
               rows={3}
-              className="w-full rounded-xl border border-border bg-secondary px-3 py-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50 resize-none placeholder:text-muted-foreground/60"
+              className="w-full rounded-xl border px-3 py-2.5 text-xs outline-none resize-none placeholder:opacity-60"
+              style={{
+                borderColor: 'var(--adm-border)',
+                background: 'var(--adm-secondary)',
+                color: 'var(--adm-fg)',
+              }}
             />
           )}
 
@@ -382,7 +529,8 @@ export default function AdminReportDetail({
                 e.preventDefault();
                 void handleConfirm();
               }}
-              className={config?.confirmClass ?? 'rounded-lg text-xs font-semibold'}
+              className="rounded-lg text-xs font-semibold"
+              style={config?.confirmStyle ?? {}}
             >
               {acting ? (
                 <>

@@ -40,24 +40,26 @@ interface AdminEventDetailProps {
   onSuccessToast: (message: string) => void;
 }
 
-const CATEGORY_GRADIENT: Record<string, string> = {
-  music: 'from-pink-700/60 to-pink-900/30',
-  sports: 'from-green-700/60 to-green-900/30',
-  tech: 'from-blue-700/60 to-blue-900/30',
-  technology: 'from-blue-700/60 to-blue-900/30',
-  food: 'from-orange-700/60 to-orange-900/30',
-  art: 'from-purple-700/60 to-purple-900/30',
-  arts: 'from-purple-700/60 to-purple-900/30',
-  gaming: 'from-cyan-700/60 to-cyan-900/30',
-  health: 'from-teal-700/60 to-teal-900/30',
-  education: 'from-yellow-700/60 to-yellow-900/30',
-  social: 'from-rose-700/60 to-rose-900/30',
-  business: 'from-indigo-700/60 to-indigo-900/30',
+const CATEGORY_HUE: Record<string, number> = {
+  music: 290,
+  tech: 200,
+  technology: 200,
+  food: 18,
+  sports: 150,
+  sport: 150,
+  art: 330,
+  arts: 330,
+  gaming: 255,
+  health: 160,
+  education: 55,
+  social: 340,
+  business: 220,
+  other: 213,
 };
 
-function getCategoryGradient(category?: string): string {
-  if (!category) return 'from-primary/40 to-primary/10';
-  return CATEGORY_GRADIENT[category.toLowerCase()] ?? 'from-primary/40 to-primary/10';
+function getCategoryHue(category?: string): number {
+  if (!category) return 271;
+  return CATEGORY_HUE[category.toLowerCase()] ?? 271;
 }
 
 function formatDate(isoString: string): string {
@@ -124,26 +126,34 @@ function ParticipantRow({
       type={onNavigate ? 'button' : undefined}
       onClick={onNavigate ? () => onNavigate(participant.id) : undefined}
       aria-label={onNavigate ? `View user ${participant.full_name}` : undefined}
-      className={`w-full flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-secondary/30 p-3 text-left text-xs ${
+      className={`w-full flex items-center justify-between gap-3 rounded-xl border p-3 text-left text-xs ${
         onNavigate
-          ? 'hover:bg-secondary/60 hover:border-primary/30 cursor-pointer group transition-colors'
+          ? 'hover:opacity-80 cursor-pointer group transition-all'
           : ''
       }`}
+      style={{
+        background: 'hsl(213 40% 18% / .5)',
+        borderColor: 'var(--adm-border)',
+      }}
     >
       <div className="min-w-0 flex-1">
-        <p className="font-semibold text-foreground truncate">{participant.full_name}</p>
+        <p className="font-semibold truncate" style={{ color: 'var(--adm-fg)' }}>
+          {participant.full_name}
+        </p>
         {participant.username && (
-          <p className="text-[11px] text-muted-foreground">@{participant.username}</p>
+          <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+            @{participant.username}
+          </p>
         )}
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         {participant.joined_at && (
-          <p className="text-[11px] text-muted-foreground hidden sm:block">
+          <p className="text-[11px] hidden sm:block" style={{ color: 'var(--adm-muted-fg)' }}>
             Joined {formatDateShort(participant.joined_at)}
           </p>
         )}
         {onNavigate && (
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+          <ChevronRight className="h-3.5 w-3.5" style={{ color: 'var(--adm-muted-fg)' }} />
         )}
       </div>
     </Wrapper>
@@ -208,86 +218,156 @@ export default function AdminEventDetail({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+          style={{ color: 'var(--adm-muted-fg)' }}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Events
         </button>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border border-border/50 bg-card">
-            <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            <p className="text-xs text-muted-foreground">Loading event details...</p>
+          <div
+            className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border"
+            style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+          >
+            <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--adm-primary)' }} />
+            <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              Loading event details...
+            </p>
           </div>
         ) : error ? (
-          <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-6 text-center space-y-2">
-            <AlertCircle className="mx-auto h-6 w-6 text-destructive" />
-            <p className="text-xs text-destructive font-medium">{error}</p>
+          <div
+            className="rounded-xl border p-6 text-center space-y-2"
+            style={{
+              borderColor: 'hsl(0 84% 60% / .3)',
+              background: 'hsl(0 84% 60% / .07)',
+            }}
+          >
+            <AlertCircle className="mx-auto h-6 w-6" style={{ color: 'var(--adm-danger)' }} />
+            <p className="text-xs font-medium" style={{ color: 'var(--adm-danger-text)' }}>
+              {error}
+            </p>
           </div>
         ) : event ? (
           <>
             {/* Hero Band */}
-            <div
-              className={`rounded-2xl border border-border bg-gradient-to-br ${getCategoryGradient(event.category)} overflow-hidden shadow-sm`}
-            >
-              <div className="p-5 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    {event.category && (
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-1">
-                        {event.category}
+            {(() => {
+              const H = getCategoryHue(event.category);
+              return (
+                <div
+                  className="relative overflow-hidden"
+                  style={{
+                    height: 120,
+                    borderRadius: '16px 16px 0 0',
+                    background: `linear-gradient(135deg, hsl(${H} 70% 40%), hsl(${(H + 45) % 360} 70% 25%))`,
+                  }}
+                >
+                  {/* Faded calendar icon bottom-right */}
+                  <Calendar
+                    className="absolute bottom-2 right-3 h-20 w-20 pointer-events-none text-white"
+                    style={{ opacity: 0.28 }}
+                  />
+                  {/* Top content */}
+                  <div className="relative z-10 p-5 flex items-start justify-between gap-3">
+                    <div className="flex gap-2 flex-wrap">
+                      {event.category && (
+                        <span
+                          className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                          style={{
+                            background: 'hsl(271 76% 53% / .35)',
+                            color: 'var(--adm-primary-text)',
+                          }}
+                        >
+                          {event.category}
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${getStatusLabel(event).className}`}
+                    >
+                      {getStatusLabel(event).label}
+                    </span>
+                  </div>
+                  <div className="relative z-10 px-5 pb-4">
+                    <h2 className="text-lg font-bold text-white leading-tight">{event.title}</h2>
+                    {event.description && (
+                      <p className="mt-1 text-sm text-white/80 leading-relaxed line-clamp-2">
+                        {event.description}
                       </p>
                     )}
-                    <h2 className="text-lg font-bold text-white leading-tight">{event.title}</h2>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${getStatusLabel(event).className}`}
-                  >
-                    {getStatusLabel(event).label}
-                  </span>
                 </div>
-
-                {event.description && (
-                  <p className="text-sm text-white/80 leading-relaxed line-clamp-3">
-                    {event.description}
-                  </p>
-                )}
-              </div>
-            </div>
+              );
+            })()}
 
             {/* Facts Grid */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-foreground mb-3">Event Details</h3>
+            <div
+              className="rounded-b-2xl border p-5 space-y-4"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+                borderRadius: '0 0 16px 16px',
+              }}
+            >
+              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                Event Details
+              </h3>
               <dl className="grid grid-cols-1 gap-y-3 sm:grid-cols-2">
                 <div className="flex items-start gap-2">
-                  <Calendar className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                  <Calendar
+                    className="h-4 w-4 mt-0.5 shrink-0"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  />
                   <div>
-                    <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                    <dt
+                      className="text-[11px] uppercase tracking-wider font-medium"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    >
                       Date &amp; Time
                     </dt>
-                    <dd className="text-xs font-semibold text-foreground mt-0.5">{formatDate(event.date)}</dd>
+                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
+                      {formatDate(event.date)}
+                    </dd>
                   </div>
                 </div>
 
                 {event.location && (
                   <div className="flex items-start gap-2">
-                    <MapPin className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <MapPin
+                      className="h-4 w-4 mt-0.5 shrink-0"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    />
                     <div>
-                      <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                      <dt
+                        className="text-[11px] uppercase tracking-wider font-medium"
+                        style={{ color: 'var(--adm-muted-fg)' }}
+                      >
                         Location
                       </dt>
-                      <dd className="text-xs font-semibold text-foreground mt-0.5">{event.location}</dd>
+                      <dd
+                        className="text-xs font-semibold mt-0.5"
+                        style={{ color: 'var(--adm-fg)' }}
+                      >
+                        {event.location}
+                      </dd>
                     </div>
                   </div>
                 )}
 
                 <div className="flex items-start gap-2">
-                  <Users className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                  <Users
+                    className="h-4 w-4 mt-0.5 shrink-0"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  />
                   <div>
-                    <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                    <dt
+                      className="text-[11px] uppercase tracking-wider font-medium"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    >
                       Participants
                     </dt>
-                    <dd className="text-xs font-semibold text-foreground mt-0.5">
+                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
                       {event.participants.length}
                       {event.participants_limit ? ` / ${event.participants_limit}` : ''}
                     </dd>
@@ -296,15 +376,24 @@ export default function AdminEventDetail({
 
                 <div className="flex items-start gap-2">
                   {event.is_private ? (
-                    <Lock className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <Lock
+                      className="h-4 w-4 mt-0.5 shrink-0"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    />
                   ) : (
-                    <Globe className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <Globe
+                      className="h-4 w-4 mt-0.5 shrink-0"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    />
                   )}
                   <div>
-                    <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                    <dt
+                      className="text-[11px] uppercase tracking-wider font-medium"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    >
                       Visibility
                     </dt>
-                    <dd className="text-xs font-semibold text-foreground mt-0.5">
+                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
                       {event.is_private ? 'Private' : 'Public'}
                     </dd>
                   </div>
@@ -312,27 +401,42 @@ export default function AdminEventDetail({
 
                 <div className="flex items-start gap-2">
                   {event.requires_approval ? (
-                    <CheckCircle2 className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <CheckCircle2
+                      className="h-4 w-4 mt-0.5 shrink-0"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    />
                   ) : (
-                    <XCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <XCircle
+                      className="h-4 w-4 mt-0.5 shrink-0"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    />
                   )}
                   <div>
-                    <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                    <dt
+                      className="text-[11px] uppercase tracking-wider font-medium"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    >
                       Approval
                     </dt>
-                    <dd className="text-xs font-semibold text-foreground mt-0.5">
+                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
                       {event.requires_approval ? 'Required' : 'Open'}
                     </dd>
                   </div>
                 </div>
 
                 <div className="flex items-start gap-2">
-                  <Clock className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                  <Clock
+                    className="h-4 w-4 mt-0.5 shrink-0"
+                    style={{ color: 'var(--adm-muted-fg)' }}
+                  />
                   <div>
-                    <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                    <dt
+                      className="text-[11px] uppercase tracking-wider font-medium"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    >
                       Created
                     </dt>
-                    <dd className="text-xs font-semibold text-foreground mt-0.5">
+                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
                       {formatDateShort(event.created_at)}
                     </dd>
                   </div>
@@ -340,12 +444,21 @@ export default function AdminEventDetail({
 
                 {typeof event.reports_count === 'number' && event.reports_count > 0 && (
                   <div className="flex items-start gap-2">
-                    <AlertCircle className="h-4 w-4 mt-0.5 text-destructive shrink-0" />
+                    <AlertCircle
+                      className="h-4 w-4 mt-0.5 shrink-0"
+                      style={{ color: 'var(--adm-danger)' }}
+                    />
                     <div>
-                      <dt className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                      <dt
+                        className="text-[11px] uppercase tracking-wider font-medium"
+                        style={{ color: 'var(--adm-muted-fg)' }}
+                      >
                         Reports
                       </dt>
-                      <dd className="text-xs font-semibold text-destructive mt-0.5">
+                      <dd
+                        className="text-xs font-semibold mt-0.5"
+                        style={{ color: 'var(--adm-danger-text)' }}
+                      >
                         {event.reports_count}
                       </dd>
                     </div>
@@ -355,66 +468,122 @@ export default function AdminEventDetail({
             </div>
 
             {/* Organizer */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-              <h3 className="text-sm font-bold text-foreground">Organizer</h3>
+            <div
+              className="rounded-[16px] border p-5 space-y-3"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+              }}
+            >
+              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                Organizer
+              </h3>
               {onNavigateToUser ? (
                 <button
                   type="button"
                   onClick={() => onNavigateToUser(event.organizer_id)}
                   aria-label={`View organizer ${event.organizer_name}`}
-                  className="group w-full flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-secondary/30 p-3 text-left hover:bg-secondary/60 hover:border-primary/30 transition-colors"
+                  className="group w-full flex items-center justify-between gap-3 rounded-xl border p-3 text-left hover:opacity-80 transition-all"
+                  style={{
+                    background: 'hsl(213 40% 20% / .5)',
+                    borderColor: 'var(--adm-border)',
+                  }}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary border border-border">
-                      <User className="h-4 w-4 text-muted-foreground" />
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border"
+                      style={{
+                        background: 'var(--adm-secondary)',
+                        borderColor: 'var(--adm-border)',
+                      }}
+                    >
+                      <User className="h-4 w-4" style={{ color: 'var(--adm-muted-fg)' }} />
                     </div>
-                    <p className="text-sm font-semibold text-foreground truncate">{event.organizer_name}</p>
+                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--adm-fg)' }}>
+                      {event.organizer_name}
+                    </p>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
+                  <ChevronRight className="h-4 w-4 shrink-0" style={{ color: 'var(--adm-muted-fg)' }} />
                 </button>
               ) : (
-                <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-secondary/30 p-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary border border-border">
-                    <User className="h-4 w-4 text-muted-foreground" />
+                <div
+                  className="flex items-center gap-2.5 rounded-xl border p-3"
+                  style={{
+                    background: 'hsl(213 40% 20% / .5)',
+                    borderColor: 'var(--adm-border)',
+                  }}
+                >
+                  <div
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border"
+                    style={{ background: 'var(--adm-secondary)', borderColor: 'var(--adm-border)' }}
+                  >
+                    <User className="h-4 w-4" style={{ color: 'var(--adm-muted-fg)' }} />
                   </div>
-                  <p className="text-sm font-semibold text-foreground truncate">{event.organizer_name}</p>
+                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--adm-fg)' }}>
+                    {event.organizer_name}
+                  </p>
                 </div>
               )}
             </div>
 
             {/* Participants */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+            <div
+              className="rounded-[16px] border p-5 space-y-3"
+              style={{
+                background: 'var(--adm-grad-card)',
+                borderColor: 'var(--adm-border)',
+                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+              }}
+            >
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--adm-fg)' }}>
                 Participants
-                <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                <span
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  style={{
+                    background: 'var(--adm-secondary)',
+                    color: 'var(--adm-muted-fg)',
+                  }}
+                >
                   {event.participants.length}
                 </span>
               </h3>
               {event.participants.length === 0 ? (
-                <p className="text-xs text-muted-foreground/70 italic">No participants yet.</p>
+                <p className="text-xs italic" style={{ color: 'var(--adm-muted-fg)' }}>
+                  No participants yet.
+                </p>
               ) : (
                 <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {event.participants.map((p) => (
-                    <ParticipantRow
-                      key={p.id}
-                      participant={p}
-                      onNavigate={onNavigateToUser}
-                    />
+                    <ParticipantRow key={p.id} participant={p} onNavigate={onNavigateToUser} />
                   ))}
                 </div>
               )}
             </div>
 
             {/* Remove Event */}
-            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-5 shadow-sm space-y-3">
-              <h3 className="text-sm font-bold text-destructive">Danger Zone</h3>
-              <p className="text-xs text-muted-foreground">
+            <div
+              className="rounded-[16px] border p-5 space-y-3"
+              style={{
+                borderColor: 'hsl(0 84% 60% / .3)',
+                background: 'hsl(0 84% 60% / .07)',
+              }}
+            >
+              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-danger-text)' }}>
+                Danger Zone
+              </h3>
+              <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
                 Permanently remove this event. This action cannot be undone.
               </p>
               <button
                 type="button"
                 onClick={() => setShowRemoveDialog(true)}
-                className="inline-flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-xs font-semibold text-destructive hover:bg-destructive/20 active:scale-95 transition-all"
+                className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-xs font-semibold active:scale-95 transition-all"
+                style={{
+                  borderColor: 'hsl(0 84% 60% / .4)',
+                  background: 'hsl(0 84% 60% / .12)',
+                  color: 'var(--adm-danger-text)',
+                }}
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 Remove Event
@@ -444,7 +613,8 @@ export default function AdminEventDetail({
                 e.preventDefault();
                 void handleRemove();
               }}
-              className="rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90"
+              className="rounded-lg text-xs font-semibold text-white"
+              style={{ background: 'var(--adm-danger)' }}
             >
               {removing ? (
                 <>

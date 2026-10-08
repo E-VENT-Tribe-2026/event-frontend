@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   ClipboardList,
   Loader2,
-  AlertCircle,
   ChevronRight,
 } from 'lucide-react';
 import {
@@ -18,52 +17,75 @@ interface AdminAuditTabProps {
 
 const PAGE_SIZE = 20;
 
-type ActionKey =
-  | 'warn'
-  | 'suspend'
-  | 'lift'
-  | 'remove'
-  | 'dismiss'
-  | 'grant-admin'
-  | (string & Record<never, never>);
-
 interface ActionStyle {
   label: string;
-  className: string;
+  style: React.CSSProperties;
 }
 
 const ACTION_STYLES: Record<string, ActionStyle> = {
   warn: {
     label: 'Warn',
-    className: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    style: {
+      background: 'hsl(38 92% 52% / .15)',
+      color: 'var(--adm-warn-text)',
+      borderColor: 'hsl(38 92% 52% / .35)',
+    },
   },
   suspend: {
     label: 'Suspend',
-    className: 'bg-red-500/15 text-red-400 border-red-500/30',
+    style: {
+      background: 'hsl(0 84% 60% / .15)',
+      color: 'var(--adm-danger-text)',
+      borderColor: 'hsl(0 84% 60% / .35)',
+    },
   },
   lift: {
     label: 'Lift Suspension',
-    className: 'bg-green-500/15 text-green-400 border-green-500/30',
+    style: {
+      background: 'hsl(152 60% 42% / .15)',
+      color: 'var(--adm-ok-text)',
+      borderColor: 'hsl(152 60% 42% / .35)',
+    },
   },
   'lift-suspension': {
     label: 'Lift Suspension',
-    className: 'bg-green-500/15 text-green-400 border-green-500/30',
+    style: {
+      background: 'hsl(152 60% 42% / .15)',
+      color: 'var(--adm-ok-text)',
+      borderColor: 'hsl(152 60% 42% / .35)',
+    },
   },
   remove: {
     label: 'Remove',
-    className: 'bg-pink-500/15 text-pink-400 border-pink-500/30',
+    style: {
+      background: 'hsl(330 100% 59% / .15)',
+      color: 'hsl(330 100% 78%)',
+      borderColor: 'hsl(330 100% 59% / .35)',
+    },
   },
   dismiss: {
     label: 'Dismiss',
-    className: 'bg-muted text-muted-foreground border-border',
+    style: {
+      background: 'var(--adm-secondary)',
+      color: 'var(--adm-muted-fg)',
+      borderColor: 'var(--adm-border)',
+    },
   },
   'grant-admin': {
     label: 'Grant Admin',
-    className: 'bg-primary/15 text-primary border-primary/30',
+    style: {
+      background: 'hsl(271 76% 53% / .18)',
+      color: 'var(--adm-primary-text)',
+      borderColor: 'hsl(271 76% 53% / .4)',
+    },
   },
   'withdraw-warning': {
     label: 'Withdraw Warning',
-    className: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
+    style: {
+      background: 'hsl(38 92% 52% / .1)',
+      color: 'var(--adm-warn-text)',
+      borderColor: 'hsl(38 92% 52% / .25)',
+    },
   },
 };
 
@@ -72,18 +94,23 @@ function getActionStyle(action: string): ActionStyle {
   return (
     ACTION_STYLES[normalized] ?? {
       label: action,
-      className: 'bg-muted text-muted-foreground border-border',
+      style: {
+        background: 'var(--adm-secondary)',
+        color: 'var(--adm-muted-fg)',
+        borderColor: 'var(--adm-border)',
+      },
     }
   );
 }
 
 function ActionPill({ action }: { action: string }) {
-  const style = getActionStyle(action);
+  const s = getActionStyle(action);
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${style.className}`}
+      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+      style={s.style}
     >
-      {style.label}
+      {s.label}
     </span>
   );
 }
@@ -152,45 +179,93 @@ export default function AdminAuditTab({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        <p
+          className="text-xs font-semibold uppercase tracking-wider"
+          style={{ color: 'var(--adm-muted-fg)' }}
+        >
           Audit Log
         </p>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
           {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
         </span>
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border border-border/50 bg-card">
-          <Loader2 className="h-7 w-7 animate-spin text-primary" />
-          <p className="text-xs text-muted-foreground">Loading audit log...</p>
+        <div
+          className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border"
+          style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+        >
+          <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--adm-primary)' }} />
+          <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+            Loading audit log...
+          </p>
         </div>
       ) : entries.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-14 text-center rounded-2xl border border-dashed border-border bg-card/50 p-6 space-y-2">
-          <ClipboardList className="h-10 w-10 text-muted-foreground/50" />
-          <p className="text-sm font-medium text-foreground">No audit entries</p>
-          <p className="text-xs text-muted-foreground">Administrative actions will appear here.</p>
+        <div
+          className="flex flex-col items-center justify-center py-14 text-center rounded-2xl border border-dashed p-6 space-y-2"
+          style={{
+            background: 'hsl(213 50% 15% / .5)',
+            borderColor: 'var(--adm-border)',
+          }}
+        >
+          <ClipboardList
+            className="h-10 w-10 opacity-50"
+            style={{ color: 'var(--adm-muted-fg)' }}
+          />
+          <p className="text-sm font-medium" style={{ color: 'var(--adm-fg)' }}>
+            No audit entries
+          </p>
+          <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+            Administrative actions will appear here.
+          </p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+        <div
+          className="rounded-[16px] border overflow-hidden"
+          style={{
+            background: 'var(--adm-grad-card)',
+            borderColor: 'var(--adm-border)',
+          }}
+        >
           {/* Table header */}
-          <div className="hidden sm:grid grid-cols-[1fr_auto_auto_1fr] gap-3 border-b border-border/60 px-4 py-2.5 bg-secondary/30">
-            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <div
+            className="hidden sm:grid grid-cols-[1fr_auto_auto_1fr] gap-3 border-b px-4 py-2.5"
+            style={{
+              background: 'hsl(213 40% 18% / .6)',
+              borderBottomColor: 'var(--adm-border)',
+            }}
+          >
+            <p
+              className="text-[11px] font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--adm-muted-fg)' }}
+            >
               Admin
             </p>
-            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            <p
+              className="text-[11px] font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--adm-muted-fg)' }}
+            >
               Action
             </p>
-            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            <p
+              className="text-[11px] font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--adm-muted-fg)' }}
+            >
               Target
             </p>
-            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider text-right">
+            <p
+              className="text-[11px] font-semibold uppercase tracking-wider text-right"
+              style={{ color: 'var(--adm-muted-fg)' }}
+            >
               Date
             </p>
           </div>
 
           {/* Rows */}
-          <ul className="divide-y divide-border/40">
+          <ul
+            className="divide-y"
+            style={{ borderColor: 'var(--adm-border)' }}
+          >
             {entries.map((entry) => {
               const hasTarget = Boolean(entry.target_id);
               const isUserTarget = entry.target_type === 'user';
@@ -199,11 +274,18 @@ export default function AdminAuditTab({
               const canNavigateEvent = hasTarget && isEventTarget && onNavigateToEvent;
 
               return (
-                <li key={entry.id} className="px-4 py-3">
+                <li
+                  key={entry.id}
+                  className="px-4 py-3"
+                  style={{ borderColor: 'var(--adm-border)' }}
+                >
                   {/* Mobile layout */}
                   <div className="sm:hidden space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-foreground truncate">
+                      <span
+                        className="text-xs font-semibold truncate"
+                        style={{ color: 'var(--adm-fg)' }}
+                      >
                         {entry.admin_name}
                       </span>
                       <ActionPill action={entry.action} />
@@ -218,20 +300,35 @@ export default function AdminAuditTab({
                           onNavigateToEvent={onNavigateToEvent}
                         />
                       ) : (
-                        <span className="text-xs text-muted-foreground italic">—</span>
+                        <span className="text-xs italic" style={{ color: 'var(--adm-muted-fg)' }}>
+                          —
+                        </span>
                       )}
-                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                      <span
+                        className="text-[11px] whitespace-nowrap"
+                        style={{ color: 'var(--adm-muted-fg)' }}
+                      >
                         {formatDate(entry.created_at)}
                       </span>
                     </div>
                     {entry.details && (
-                      <p className="text-[11px] text-muted-foreground/80 truncate">{entry.details}</p>
+                      <p
+                        className="text-[11px] truncate"
+                        style={{ color: 'var(--adm-muted-fg)', opacity: 0.8 }}
+                      >
+                        {entry.details}
+                      </p>
                     )}
                   </div>
 
                   {/* Desktop layout */}
                   <div className="hidden sm:grid grid-cols-[1fr_auto_auto_1fr] items-center gap-3">
-                    <p className="text-xs font-semibold text-foreground truncate">{entry.admin_name}</p>
+                    <p
+                      className="text-xs font-semibold truncate"
+                      style={{ color: 'var(--adm-fg)' }}
+                    >
+                      {entry.admin_name}
+                    </p>
                     <ActionPill action={entry.action} />
                     {hasTarget ? (
                       <TargetButton
@@ -242,9 +339,14 @@ export default function AdminAuditTab({
                         onNavigateToEvent={onNavigateToEvent}
                       />
                     ) : (
-                      <span className="text-xs text-muted-foreground italic">—</span>
+                      <span className="text-xs italic" style={{ color: 'var(--adm-muted-fg)' }}>
+                        —
+                      </span>
                     )}
-                    <p className="text-[11px] text-muted-foreground text-right whitespace-nowrap">
+                    <p
+                      className="text-[11px] text-right whitespace-nowrap"
+                      style={{ color: 'var(--adm-muted-fg)' }}
+                    >
                       {formatDate(entry.created_at)}
                     </p>
                   </div>
@@ -262,7 +364,12 @@ export default function AdminAuditTab({
             type="button"
             disabled={loadingMore}
             onClick={handleLoadMore}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-secondary px-5 py-2.5 text-xs font-semibold text-foreground hover:bg-secondary/80 active:scale-95 transition-all disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-xl border px-5 py-2.5 text-xs font-semibold transition-all disabled:opacity-50 active:scale-95"
+            style={{
+              borderColor: 'var(--adm-border)',
+              background: 'var(--adm-secondary)',
+              color: 'var(--adm-fg)',
+            }}
           >
             {loadingMore ? (
               <>
@@ -308,8 +415,13 @@ function TargetButton({
       <button
         type="button"
         onClick={() => onNavigateToUser(entry.target_id!)}
-        aria-label={`View target user`}
-        className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-secondary/50 px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary hover:border-primary/30 transition-colors"
+        aria-label="View target user"
+        className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors hover:opacity-80"
+        style={{
+          borderColor: 'var(--adm-border)',
+          background: 'hsl(213 40% 20% / .5)',
+          color: 'var(--adm-fg)',
+        }}
       >
         <span className="truncate max-w-[100px]">{targetLabel}</span>
         <ChevronRight className="h-3 w-3 shrink-0" />
@@ -322,8 +434,13 @@ function TargetButton({
       <button
         type="button"
         onClick={() => onNavigateToEvent(entry.target_id!)}
-        aria-label={`View target event`}
-        className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-secondary/50 px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary hover:border-primary/30 transition-colors"
+        aria-label="View target event"
+        className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors hover:opacity-80"
+        style={{
+          borderColor: 'var(--adm-border)',
+          background: 'hsl(213 40% 20% / .5)',
+          color: 'var(--adm-fg)',
+        }}
       >
         <span className="truncate max-w-[100px]">{targetLabel}</span>
         <ChevronRight className="h-3 w-3 shrink-0" />
@@ -332,7 +449,14 @@ function TargetButton({
   }
 
   return (
-    <span className="inline-flex items-center rounded-lg border border-border/40 bg-secondary/30 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+    <span
+      className="inline-flex items-center rounded-lg border px-2 py-1 text-[11px] font-medium"
+      style={{
+        borderColor: 'var(--adm-border)',
+        background: 'hsl(213 40% 20% / .3)',
+        color: 'var(--adm-muted-fg)',
+      }}
+    >
       <span className="truncate max-w-[100px]">{targetLabel}</span>
     </span>
   );
