@@ -75,6 +75,10 @@ const mockUserDetailsSarah: adminApi.AdminUserDetailsFull = {
 
 describe('Admin Panel — Ticket #248', () => {
   beforeEach(() => {
+    // Mock fetch for AdminPanelPage's profile name fetch (fire-and-forget — just needs to not throw)
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve({ ok: true, json: async () => ({ full_name: 'Test Admin', username: 'test_admin' }) } as Response)
+    ));
     vi.spyOn(authModule, 'getAuthToken').mockReturnValue('mock_token');
     vi.spyOn(adminApi, 'checkAdminVerified').mockResolvedValue({
       isVerifiedAdmin: true,
@@ -125,6 +129,7 @@ describe('Admin Panel — Ticket #248', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('renders total registered users count and lists users', async () => {
@@ -134,9 +139,9 @@ describe('Admin Panel — Ticket #248', () => {
       </MemoryRouter>
     );
 
-    // Check count
-    expect(await screen.findByText('150')).toBeInTheDocument();
-    expect(screen.getByText('Total Registered Users')).toBeInTheDocument();
+    // Check count — comes from fetchAdminUsers response total field
+    expect(await screen.findByText('3')).toBeInTheDocument();
+    expect(screen.getByText('Registered users')).toBeInTheDocument();
 
     // Check users
     expect(screen.getByText('Alex Smith')).toBeInTheDocument();
@@ -156,12 +161,12 @@ describe('Admin Panel — Ticket #248', () => {
 
     await screen.findByText('Alex Smith');
 
-    const searchInput = screen.getByPlaceholderText(/Search users by username/i);
+    const searchInput = screen.getByPlaceholderText(/Search by username/i);
     fireEvent.change(searchInput, { target: { value: 'alex' } });
 
     await waitFor(
       () => {
-        expect(adminApi.fetchAdminUsers).toHaveBeenCalledWith(1, 20, 'alex');
+        expect(adminApi.fetchAdminUsers).toHaveBeenCalledWith(1, 50, 'alex');
       },
       { timeout: 1000 }
     );

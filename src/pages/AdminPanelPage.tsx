@@ -31,6 +31,8 @@ export default function AdminPanelPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>('users');
   const [stack, setStack] = useState<StackEntry[]>([]);
   const [adminName, setAdminName] = useState<string>('');
+  const [adminAvatar, setAdminAvatar] = useState<string | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState<boolean>(false);
   const [openReportCount, setOpenReportCount] = useState<number | null>(null);
 
   const [showAccount, setShowAccount] = useState(false);
@@ -55,7 +57,7 @@ export default function AdminPanelPage() {
     setToast({ show: true, message, type });
   };
 
-  // Fetch the admin's name from the profile endpoint
+  // Fetch the admin's name and avatar from the profile endpoint
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
@@ -72,6 +74,10 @@ export default function AdminPanelPage() {
           (profile.name as string | undefined) ||
           'Administrator';
         setAdminName(name);
+        
+        const avatar = (profile.avatar_url as string | undefined) || null;
+        setAdminAvatar(avatar);
+
         const profileId = (profile.id as string | undefined) || (profile.user_id as string | undefined) || '';
         setAdminId(profileId);
       })
@@ -100,14 +106,20 @@ export default function AdminPanelPage() {
   };
 
   const pushUserDetail = (userId: string) => {
+    setShowAccount(false);
+    setUserView((v) => ({ ...v, active: false }));
     setStack((prev) => [...prev, { type: 'user-detail', userId }]);
   };
 
   const pushEventDetail = (eventId: string) => {
+    setShowAccount(false);
+    setUserView((v) => ({ ...v, active: false }));
     setStack((prev) => [...prev, { type: 'event-detail', eventId }]);
   };
 
   const pushReportDetail = (reportId: string) => {
+    setShowAccount(false);
+    setUserView((v) => ({ ...v, active: false }));
     setStack((prev) => [...prev, { type: 'report-detail', reportId }]);
   };
 
@@ -117,12 +129,12 @@ export default function AdminPanelPage() {
 
   const switchTab = (tab: AdminTab) => {
     setShowAccount(false);
+    setUserView((v) => ({ ...v, active: false }));
     setStack([]);
     setActiveTab(tab);
   };
 
   const topOfStack = stack[stack.length - 1] ?? null;
-  const showTabs = topOfStack === null;
 
   const TABS: { id: AdminTab; label: string; icon: React.ReactNode }[] = [
     { id: 'users', label: 'Users', icon: <Users className="h-4 w-4" /> },
@@ -152,7 +164,7 @@ export default function AdminPanelPage() {
           borderColor: 'var(--adm-border)',
         }}
       >
-        <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
+        <div className="mx-auto max-w-5xl px-4 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-3">
             {/* Logo + title */}
             <div className="flex items-center gap-2.5 min-w-0">
@@ -176,13 +188,21 @@ export default function AdminPanelPage() {
                   Admin Panel
                 </h1>
                 {adminName && (
-                  <p className="text-[12px] truncate" style={{ color: 'var(--adm-muted-fg)' }}>
-                    Signed in as{' '}
-                    <span className="font-semibold" style={{ color: 'var(--adm-fg)' }}>
-                      {adminName}
-                    </span>
-                  </p>
-                )}
+                <p className="text-[12px] flex items-center gap-1.5 truncate" style={{ color: 'var(--adm-muted-fg)' }}>
+                  <span>Signed in as</span>
+                    {adminName}
+                  <span
+                    className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+                    style={{
+                      background: 'hsl(271 76% 53% / .15)',
+                      color: 'hsl(271 76% 75%)',
+                      border: '1px solid hsl(271 76% 53% / .35)',
+                    }}
+                  >
+                    Administrator
+                  </span>
+                </p>
+              )}
               </div>
             </div>
 
@@ -191,7 +211,16 @@ export default function AdminPanelPage() {
               {/* Eye / User view toggle */}
               <button
                 type="button"
-                onClick={() => setUserView((v) => ({ ...v, active: !v.active }))}
+                onClick={() => {
+                  setUserView((v) => {
+                    const nextActive = !v.active;
+                    if (nextActive) {
+                      setShowAccount(false);
+                      setStack([]);
+                    }
+                    return { ...v, active: nextActive };
+                  });
+                }}
                 aria-label="Toggle user view"
                 onMouseEnter={() => setHoveredBtn('userview')}
                 onMouseLeave={() => setHoveredBtn(null)}
@@ -216,7 +245,7 @@ export default function AdminPanelPage() {
                 }
               >
                 <Eye className="h-3.5 w-3.5" />
-                User view
+                User view · Read-only
               </button>
 
               {/* My Account button */}
@@ -225,8 +254,14 @@ export default function AdminPanelPage() {
                   type="button"
                   aria-label="My account"
                   onClick={() => {
-                    setShowAccount((prev) => !prev);
-                    if (userView.active) setUserView((v) => ({ ...v, active: false }));
+                    setShowAccount((prev) => {
+                      const nextShow = !prev;
+                      if (nextShow) {
+                        setUserView((v) => ({ ...v, active: false }));
+                        setStack([]);
+                      }
+                      return nextShow;
+                    });
                   }}
                   onMouseEnter={() => setHoveredBtn('account')}
                   onMouseLeave={() => setHoveredBtn(null)}
@@ -248,26 +283,36 @@ export default function AdminPanelPage() {
                     color: showAccount ? 'var(--adm-fg)' : 'var(--adm-muted-fg)',
                   }}
                 >
-                  {/* Initials avatar */}
-                  <span
-                    className="flex items-center justify-center text-white shrink-0"
-                    style={{
-                      width: 28,
-                      height: 28,
-                      background: 'var(--adm-grad)',
-                      borderRadius: '50%',
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {adminName
-                      .trim()
-                      .split(/\s+/)
-                      .map((w) => w[0])
-                      .slice(0, 2)
-                      .join('')
-                      .toUpperCase()}
-                  </span>
+                  {/* Avatar or Initials badge */}
+                  {adminAvatar && !avatarFailed ? (
+                    <img
+                      src={adminAvatar}
+                      alt={adminName}
+                      onError={() => setAvatarFailed(true)}
+                      className="shrink-0 rounded-full object-cover"
+                      style={{ width: 28, height: 28 }}
+                    />
+                  ) : (
+                    <span
+                      className="flex items-center justify-center text-white shrink-0"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        background: 'var(--adm-grad)',
+                        borderRadius: '50%',
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {adminName
+                        .trim()
+                        .split(/\s+/)
+                        .map((w) => w[0])
+                        .slice(0, 2)
+                        .join('')
+                        .toUpperCase()}
+                    </span>
+                  )}
                   My account
                 </button>
               )}
@@ -294,8 +339,8 @@ export default function AdminPanelPage() {
             </div>
           </div>
 
-          {/* 4-Tab segmented control — only visible when no stack AND not in user view */}
-          {showTabs && !userView.active && !showAccount && (
+          {/* 4-Tab segmented control — only visible when no stack, not in user view, and not in My Account */}
+          {!topOfStack && !userView.active && !showAccount && (
             <div
               role="tablist"
               aria-label="Admin sections"
@@ -347,48 +392,13 @@ export default function AdminPanelPage() {
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
-        {/* My Account view */}
-        {showAccount && topOfStack === null && !userView.active && (
+      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+        {/* Priority 1: My Account view */}
+        {showAccount ? (
           <AdminMyAccount adminId={adminId} onClose={() => setShowAccount(false)} />
-        )}
-
-        {/* Stack: user detail */}
-        {topOfStack?.type === 'user-detail' && (
-          <AdminUserDetail
-            userId={topOfStack.userId}
-            onBack={popStack}
-            onOpenEvent={pushEventDetail}
-            onErrorToast={(msg) => showToast(msg, 'error')}
-            onSuccessToast={(msg) => showToast(msg, 'success')}
-          />
-        )}
-
-        {/* Stack: event detail */}
-        {topOfStack?.type === 'event-detail' && (
-          <AdminEventDetail
-            eventId={topOfStack.eventId}
-            onBack={popStack}
-            onNavigateToUser={pushUserDetail}
-            onErrorToast={(msg) => showToast(msg, 'error')}
-            onSuccessToast={(msg) => showToast(msg, 'success')}
-          />
-        )}
-
-        {/* Stack: report detail */}
-        {topOfStack?.type === 'report-detail' && (
-          <AdminReportDetail
-            reportId={topOfStack.reportId}
-            onBack={popStack}
-            onErrorToast={(msg) => showToast(msg, 'error')}
-            onSuccessToast={(msg) => showToast(msg, 'success')}
-          />
-        )}
-
-        {/* User view mode */}
-        {showTabs && userView.active && (
+        ) : userView.active ? (
+          /* Priority 2: User view mode */
           <>
-            {/* Sticky warning banner */}
             <div
               className="sticky top-[60px] z-30 mb-4 flex items-center justify-between gap-3 rounded-[14px] border px-4 py-2.5 text-xs font-medium"
               style={{
@@ -413,16 +423,37 @@ export default function AdminPanelPage() {
               onBack={() => setUserView((v) => ({ ...v, active: false }))}
             />
           </>
-        )}
-
-        {/* Tab content — only shown when stack is empty and not in user view */}
-        {showTabs && !userView.active && !showAccount && (
+        ) : topOfStack?.type === 'user-detail' ? (
+          /* Priority 3: Stack detail views */
+          <AdminUserDetail
+            userId={topOfStack.userId}
+            onBack={popStack}
+            onOpenEvent={pushEventDetail}
+            onErrorToast={(msg) => showToast(msg, 'error')}
+            onSuccessToast={(msg) => showToast(msg, 'success')}
+          />
+        ) : topOfStack?.type === 'event-detail' ? (
+          <AdminEventDetail
+            eventId={topOfStack.eventId}
+            onBack={popStack}
+            onNavigateToUser={pushUserDetail}
+            onErrorToast={(msg) => showToast(msg, 'error')}
+            onSuccessToast={(msg) => showToast(msg, 'success')}
+          />
+        ) : topOfStack?.type === 'report-detail' ? (
+          <AdminReportDetail
+            reportId={topOfStack.reportId}
+            onBack={popStack}
+            onErrorToast={(msg) => showToast(msg, 'error')}
+            onSuccessToast={(msg) => showToast(msg, 'success')}
+          />
+        ) : (
+          /* Priority 4: Active tab views */
           <>
             {activeTab === 'users' && (
               <AdminUsersTab
                 onOpenUser={pushUserDetail}
                 onErrorToast={(msg) => showToast(msg, 'error')}
-                onSuccessToast={(msg) => showToast(msg, 'success')}
               />
             )}
 

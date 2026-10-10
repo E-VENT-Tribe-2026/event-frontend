@@ -4,16 +4,23 @@ import {
   Loader2,
   AlertCircle,
   Calendar,
+  Clock,
   MapPin,
   Users,
-  Lock,
-  Globe,
-  User,
-  Trash2,
+  Euro,
   CheckCircle2,
-  XCircle,
-  Clock,
+  Shield,
+  MessageCircle,
+  Trash2,
   ChevronRight,
+  Gamepad2,
+  Trophy,
+  Cpu,
+  Plane,
+  Music,
+  Palette,
+  Utensils,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -31,14 +38,41 @@ import {
   type AdminEventDetail,
   type AdminEventParticipant,
 } from '@/lib/adminApi';
+import AdminEventChat from '@/components/admin/AdminEventChat';
 
 interface AdminEventDetailProps {
   eventId: string;
   onBack: () => void;
   onNavigateToUser?: (userId: string) => void;
+  onOpenChat?: (eventId: string) => void;
   onErrorToast: (message: string) => void;
   onSuccessToast: (message: string) => void;
 }
+
+type EventExtra = {
+  price?: number | null;
+  is_free?: boolean;
+  currency?: string;
+  location_name?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  cost?: number | null;
+  max_capacity?: number | null;
+  start_datetime?: string;
+  participant_count?: number;
+  organizer?: {
+    id?: string;
+    username?: string;
+    full_name?: string;
+    display_name?: string;
+    avatar_url?: string;
+  };
+};
+
+type ParticipantExtra = AdminEventParticipant & {
+  avatar_url?: string;
+  is_pro?: boolean;
+};
 
 const CATEGORY_HUE: Record<string, number> = {
   music: 290,
@@ -54,7 +88,21 @@ const CATEGORY_HUE: Record<string, number> = {
   education: 55,
   social: 340,
   business: 220,
+  travel: 222,
   other: 213,
+};
+
+const CATEGORY_ICON: Record<string, LucideIcon> = {
+  gaming: Gamepad2,
+  sports: Trophy,
+  sport: Trophy,
+  tech: Cpu,
+  technology: Cpu,
+  travel: Plane,
+  music: Music,
+  art: Palette,
+  arts: Palette,
+  food: Utensils,
 };
 
 function getCategoryHue(category?: string): number {
@@ -62,75 +110,136 @@ function getCategoryHue(category?: string): number {
   return CATEGORY_HUE[category.toLowerCase()] ?? 271;
 }
 
-function formatDate(isoString: string): string {
+const pad = (n: number) => String(n).padStart(2, '0');
+
+function formatDateTime(isoString: string): string {
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return isoString;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function getStatusLabel(event: AdminEventDetail, startIso: string): 'Cancelled' | 'Upcoming' | 'Past' {
+  if (event.is_cancelled || event.status === 'cancelled') return 'Cancelled';
+  return new Date(startIso).getTime() > Date.now() ? 'Upcoming' : 'Past';
+}
+
+function formatPrice(extra: EventExtra): string | null {
+  const value = extra.cost ?? extra.price;
+  if (extra.is_free) return 'Free';
+  if (typeof value !== 'number') return null;
+  if (value === 0) return 'Free';
   try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: extra.currency || 'EUR',
+      maximumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    }).format(value);
   } catch {
-    return isoString;
+    return `€${value}`;
   }
 }
 
-function formatDateShort(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return isoString;
+const AVATAR_HUES = [340, 160, 45, 280, 225, 200, 20];
+
+function InitialsAvatar({
+  src,
+  name,
+  seed,
+  size = 38,
+}: {
+  src?: string;
+  name: string;
+  seed: string;
+  size?: number;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const key = String(seed || name || '?');
+  const safeName = name || '?';
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  const hue = AVATAR_HUES[h % AVATAR_HUES.length];
+  const initials =
+    safeName
+      .trim()
+      .split(/\s+/)
+      .map((w) => w[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || '?';
+
+  if (src && !imgFailed) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        onError={() => setImgFailed(true)}
+        className="shrink-0 rounded-full object-cover"
+        style={{ width: size, height: size }}
+      />
+    );
   }
+  return (
+    <span
+      aria-hidden="true"
+      className="flex shrink-0 items-center justify-center rounded-full font-bold text-white"
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.36),
+        background: `linear-gradient(135deg, hsl(${hue} 60% 48%), hsl(${hue} 62% 32%))`,
+        border: `2px solid hsl(${hue} 60% 60% / .45)`,
+      }}
+    >
+      {initials}
+    </span>
+  );
 }
 
-function getStatusLabel(
-  event: AdminEventDetail,
-): { label: string; style: React.CSSProperties } {
-  if (event.is_cancelled || event.status === 'cancelled') {
-    return {
-      label: 'Cancelled',
-      style: {
-        background: 'hsl(0 84% 60% / .15)',
-        color: 'var(--adm-danger-text)',
-        border: '1px solid hsl(0 84% 60% / .3)',
-      },
-    };
-  }
-  const now = Date.now();
-  const eventDate = new Date(event.date).getTime();
-  if (eventDate > now) {
-    return {
-      label: 'Upcoming',
-      style: {
-        background: 'hsl(199 90% 70% / .12)',
-        color: 'var(--adm-info-text)',
-        border: '1px solid hsl(199 90% 70% / .3)',
-      },
-    };
-  }
-  return {
-    label: 'Past',
-    style: {
-      background: 'var(--adm-secondary)',
-      color: 'var(--adm-muted-fg)',
-    },
-  };
+const CARD_STYLE: React.CSSProperties = {
+  background: 'var(--adm-grad-card)',
+  borderColor: 'var(--adm-border)',
+  boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
+};
+
+function Fact({
+  icon: Icon,
+  label,
+  value,
+  danger,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <Icon
+        className="mt-0.5 h-4 w-4 shrink-0"
+        style={{ color: danger ? 'var(--adm-danger)' : 'var(--adm-primary-text)' }}
+      />
+      <div className="min-w-0">
+        <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+          {label}
+        </p>
+        <p
+          className="text-xs font-normal"
+          style={{ color: danger ? 'var(--adm-danger-text)' : 'var(--adm-fg)' }}
+        >
+          {value}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function ParticipantRow({
   participant,
+  isOrganizer,
   onNavigate,
 }: {
-  participant: AdminEventParticipant;
+  participant: ParticipantExtra;
+  isOrganizer: boolean;
   onNavigate?: (userId: string) => void;
 }) {
   const Wrapper = onNavigate ? 'button' : 'div';
@@ -139,44 +248,107 @@ function ParticipantRow({
       type={onNavigate ? 'button' : undefined}
       onClick={onNavigate ? () => onNavigate(participant.id) : undefined}
       aria-label={onNavigate ? `View user ${participant.full_name}` : undefined}
-      className={`w-full flex items-center justify-between gap-3 rounded-xl border p-3 text-left text-xs ${
-        onNavigate
-          ? 'hover:opacity-80 cursor-pointer group transition-all'
-          : ''
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left ${
+        onNavigate ? 'cursor-pointer transition-opacity hover:opacity-80' : ''
       }`}
-      style={{
-        background: 'hsl(213 40% 18% / .5)',
-        borderColor: 'var(--adm-border)',
-      }}
+      style={{ background: 'hsl(213 40% 18% / .55)' }}
     >
+      <InitialsAvatar
+        src={participant.avatar_url}
+        seed={participant.id}
+        name={participant.full_name}
+        size={38}
+      />
       <div className="min-w-0 flex-1">
-        <p className="font-semibold truncate" style={{ color: 'var(--adm-fg)' }}>
-          {participant.full_name}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-semibold" style={{ color: 'var(--adm-fg)' }}>
+            {participant.full_name}
+          </p>
+          {participant.is_pro && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+              style={{
+                background: 'hsl(45 93% 50% / .15)',
+                color: 'hsl(45 93% 60%)',
+                borderColor: 'hsl(45 93% 50% / .4)',
+              }}
+            >
+              Pro
+            </span>
+          )}
+        </div>
         {participant.username && (
-          <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+          <p className="truncate text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
             @{participant.username}
           </p>
         )}
       </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {participant.joined_at && (
-          <p className="text-[11px] hidden sm:block" style={{ color: 'var(--adm-muted-fg)' }}>
-            Joined {formatDateShort(participant.joined_at)}
-          </p>
+      <div className="flex shrink-0 items-center gap-2">
+        {isOrganizer && (
+          <span
+            className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+            style={{
+              background: 'hsl(271 76% 53% / .22)',
+              color: 'var(--adm-primary-text)',
+            }}
+          >
+            Organizer
+          </span>
         )}
         {onNavigate && (
-          <ChevronRight className="h-3.5 w-3.5" style={{ color: 'var(--adm-muted-fg)' }} />
+          <ChevronRight className="h-4 w-4" style={{ color: 'var(--adm-muted-fg)' }} />
         )}
       </div>
     </Wrapper>
   );
 }
 
-export default function AdminEventDetail({
+function MapPlaceholder() {
+  return (
+    <div
+      className="relative h-40 overflow-hidden rounded-xl border"
+      style={{
+        borderColor: 'var(--adm-border)',
+        background: 'hsl(213 40% 17%)',
+        backgroundImage:
+          'linear-gradient(hsl(213 30% 26% / .5) 1px, transparent 1px), linear-gradient(90deg, hsl(213 30% 26% / .5) 1px, transparent 1px)',
+        backgroundSize: '28px 28px',
+      }}
+    >
+      <svg
+        className="absolute inset-0 h-full w-full"
+        viewBox="0 0 1000 160"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <polygon points="0,170 0,158 1000,40 1000,58 90,170" fill="hsl(213 25% 32% / .85)" />
+        <polygon points="375,0 405,0 380,160 350,160" fill="hsl(213 25% 32% / .85)" />
+      </svg>
+      <MapPin
+        className="absolute h-9 w-9"
+        style={{
+          left: '52%',
+          top: '28%',
+          transform: 'translateX(-50%)',
+          color: 'hsl(330 85% 55%)',
+        }}
+        strokeWidth={2.5}
+      />
+      <span
+        className="absolute bottom-2 right-3 text-[10px]"
+        style={{ color: 'var(--adm-muted-fg)' }}
+      >
+        Map (placeholder)
+      </span>
+    </div>
+  );
+}
+
+export default function AdminEventDetailPage({
   eventId,
   onBack,
   onNavigateToUser,
+  onOpenChat,
   onErrorToast,
   onSuccessToast,
 }: AdminEventDetailProps) {
@@ -185,6 +357,7 @@ export default function AdminEventDetail({
   const [error, setError] = useState('');
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [showChat, setShowChat] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,9 +397,40 @@ export default function AdminEventDetail({
     }
   };
 
+  if (showChat && event) {
+    return (
+      <AdminEventChat
+        eventId={eventId}
+        eventTitle={event.title}
+        onBack={() => setShowChat(false)}
+        onErrorToast={onErrorToast}
+        onSuccessToast={onSuccessToast}
+      />
+    );
+  }
+
+  const extra = (event ?? {}) as EventExtra;
+  const org = extra.organizer;
+  const participants = (event?.participants ?? []) as ParticipantExtra[];
+  const organizerId = org?.id ?? event?.organizer_id ?? '';
+  const organizerEntry = organizerId
+    ? participants.find((p) => p.id === organizerId)
+    : undefined;
+  const organizerName =
+    org?.display_name || org?.full_name || event?.organizer_name || organizerEntry?.full_name || 'Unknown organizer';
+  const organizerUsername = org?.username ?? organizerEntry?.username;
+  const organizerAvatar = org?.avatar_url ?? organizerEntry?.avatar_url;
+
+  const startIso = extra.start_datetime || event?.date || '';
+  const locationName = extra.location_name || event?.location || '';
+  const capacity = extra.max_capacity ?? event?.participants_limit;
+  const participantCount = extra.participant_count ?? participants.length;
+  const priceLabel = event ? formatPrice(extra) : null;
+  const status = event ? getStatusLabel(event, startIso) : null;
+
   return (
     <>
-      <div className="space-y-5">
+      <div className="space-y-4">
         {/* Back button */}
         <button
           type="button"
@@ -263,346 +467,218 @@ export default function AdminEventDetail({
           </div>
         ) : event ? (
           <>
-            {/* Hero Band */}
+            {/* ===== Main card: hero + details ===== */}
             {(() => {
               const H = getCategoryHue(event.category);
+              const HeroIcon = CATEGORY_ICON[(event.category ?? '').toLowerCase()] ?? Calendar;
+              const categoryLabel = event.category
+                ? event.category.charAt(0).toUpperCase() + event.category.slice(1)
+                : '';
               return (
-                <div
-                  className="relative overflow-hidden"
-                  style={{
-                    height: 120,
-                    borderRadius: '16px 16px 0 0',
-                    background: `linear-gradient(135deg, hsl(${H} 70% 40%), hsl(${(H + 45) % 360} 70% 25%))`,
-                  }}
-                >
-                  {/* Faded calendar icon bottom-right */}
-                  <Calendar
-                    className="absolute bottom-2 right-3 h-20 w-20 pointer-events-none text-white"
-                    style={{ opacity: 0.28 }}
-                  />
-                  {/* Top content */}
-                  <div className="relative z-10 p-5 flex items-start justify-between gap-3">
-                    <div className="flex gap-2 flex-wrap">
-                      {event.category && (
+                <div className="overflow-hidden rounded-[16px] border" style={CARD_STYLE}>
+                  {/* Hero band */}
+                  <div
+                    className="relative h-[120px]"
+                    style={{
+                      background: `linear-gradient(135deg, hsl(${H} 70% 42%), hsl(${(H + 45) % 360} 70% 26%))`,
+                    }}
+                  >
+                    <HeroIcon
+                      className="pointer-events-none absolute right-8 top-1/2 h-24 w-24 -translate-y-1/2 text-white"
+                      style={{ opacity: 0.3 }}
+                      strokeWidth={1.4}
+                    />
+                  </div>
+
+                  <div className="space-y-4 p-5">
+                    {/* Title + category */}
+                    <div className="flex items-start justify-between gap-3">
+                      <h2 className="text-[22px] font-bold leading-tight" style={{ color: 'var(--adm-fg)' }}>
+                        {event.title}
+                      </h2>
+                      {categoryLabel && (
                         <span
-                          className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                          className="shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold"
                           style={{
-                            background: 'hsl(271 76% 53% / .35)',
+                            background: 'hsl(271 76% 53% / .22)',
                             color: 'var(--adm-primary-text)',
                           }}
                         >
-                          {event.category}
+                          {categoryLabel}
                         </span>
                       )}
                     </div>
-                    <span
-                      className="shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                      style={getStatusLabel(event).style}
-                    >
-                      {getStatusLabel(event).label}
-                    </span>
-                  </div>
-                  <div className="relative z-10 px-5 pb-4">
-                    <h2 className="text-lg font-bold text-white leading-tight">{event.title}</h2>
+
+                    {/* Organizer */}
+                    {(() => {
+                      const Wrapper = onNavigateToUser ? 'button' : 'div';
+                      return (
+                        <Wrapper
+                          type={onNavigateToUser ? 'button' : undefined}
+                          onClick={
+                            onNavigateToUser && organizerId ? () => onNavigateToUser(organizerId) : undefined
+                          }
+                          aria-label={
+                            onNavigateToUser ? `View organizer ${organizerName}` : undefined
+                          }
+                          className={`flex items-center gap-3 text-left ${
+                            onNavigateToUser ? 'cursor-pointer transition-opacity hover:opacity-80' : ''
+                          }`}
+                        >
+                          <InitialsAvatar
+                            src={organizerAvatar}
+                            seed={organizerId}
+                            name={organizerName}
+                            size={46}
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold" style={{ color: 'var(--adm-fg)' }}>
+                              {organizerName}
+                            </p>
+                            {organizerUsername && (
+                              <p className="truncate text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+                                @{organizerUsername}
+                              </p>
+                            )}
+                            <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+                              Organizer
+                            </p>
+                          </div>
+                        </Wrapper>
+                      );
+                    })()}
+
+                    {/* Description */}
                     {event.description && (
-                      <p className="mt-1 text-sm text-white/80 leading-relaxed line-clamp-2">
+                      <p className="text-sm leading-relaxed" style={{ color: 'var(--adm-fg)' }}>
                         {event.description}
                       </p>
                     )}
+
+                    {/* Facts */}
+                    <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                      <Fact icon={Clock} label="Date and time" value={formatDateTime(startIso)} />
+                      {locationName && (
+                        <Fact icon={MapPin} label="Location" value={locationName} />
+                      )}
+                      <Fact
+                        icon={Users}
+                        label="Participants"
+                        value={
+                          capacity
+                            ? `${participantCount}/${capacity}`
+                            : String(participantCount)
+                        }
+                      />
+                      {priceLabel && <Fact icon={Euro} label="Price" value={priceLabel} />}
+                      {status && <Fact icon={CheckCircle2} label="Status" value={status} />}
+                      {typeof event.reports_count === 'number' && event.reports_count > 0 && (
+                        <Fact
+                          icon={AlertCircle}
+                          label="Reports"
+                          value={String(event.reports_count)}
+                          danger
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             })()}
 
-            {/* Facts Grid */}
-            <div
-              className="rounded-b-2xl border p-5 space-y-4"
-              style={{
-                background: 'var(--adm-grad-card)',
-                borderColor: 'var(--adm-border)',
-                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
-                borderRadius: '0 0 16px 16px',
-              }}
-            >
-              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
-                Event Details
-              </h3>
-              <dl className="grid grid-cols-1 gap-y-3 sm:grid-cols-2">
-                <div className="flex items-start gap-2">
-                  <Calendar
-                    className="h-4 w-4 mt-0.5 shrink-0"
-                    style={{ color: 'var(--adm-muted-fg)' }}
-                  />
-                  <div>
-                    <dt
-                      className="text-[11px] uppercase tracking-wider font-medium"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    >
-                      Date &amp; Time
-                    </dt>
-                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
-                      {formatDate(event.date)}
-                    </dd>
-                  </div>
-                </div>
-
-                {event.location && (
-                  <div className="flex items-start gap-2">
-                    <MapPin
-                      className="h-4 w-4 mt-0.5 shrink-0"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    />
-                    <div>
-                      <dt
-                        className="text-[11px] uppercase tracking-wider font-medium"
-                        style={{ color: 'var(--adm-muted-fg)' }}
-                      >
-                        Location
-                      </dt>
-                      <dd
-                        className="text-xs font-semibold mt-0.5"
-                        style={{ color: 'var(--adm-fg)' }}
-                      >
-                        {event.location}
-                      </dd>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-start gap-2">
-                  <Users
-                    className="h-4 w-4 mt-0.5 shrink-0"
-                    style={{ color: 'var(--adm-muted-fg)' }}
-                  />
-                  <div>
-                    <dt
-                      className="text-[11px] uppercase tracking-wider font-medium"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    >
-                      Participants
-                    </dt>
-                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
-                      {event.participants.length}
-                      {event.participants_limit ? ` / ${event.participants_limit}` : ''}
-                    </dd>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2">
-                  {event.is_private ? (
-                    <Lock
-                      className="h-4 w-4 mt-0.5 shrink-0"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    />
-                  ) : (
-                    <Globe
-                      className="h-4 w-4 mt-0.5 shrink-0"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    />
-                  )}
-                  <div>
-                    <dt
-                      className="text-[11px] uppercase tracking-wider font-medium"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    >
-                      Visibility
-                    </dt>
-                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
-                      {event.is_private ? 'Private' : 'Public'}
-                    </dd>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2">
-                  {event.requires_approval ? (
-                    <CheckCircle2
-                      className="h-4 w-4 mt-0.5 shrink-0"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    />
-                  ) : (
-                    <XCircle
-                      className="h-4 w-4 mt-0.5 shrink-0"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    />
-                  )}
-                  <div>
-                    <dt
-                      className="text-[11px] uppercase tracking-wider font-medium"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    >
-                      Approval
-                    </dt>
-                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
-                      {event.requires_approval ? 'Required' : 'Open'}
-                    </dd>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2">
-                  <Clock
-                    className="h-4 w-4 mt-0.5 shrink-0"
-                    style={{ color: 'var(--adm-muted-fg)' }}
-                  />
-                  <div>
-                    <dt
-                      className="text-[11px] uppercase tracking-wider font-medium"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    >
-                      Created
-                    </dt>
-                    <dd className="text-xs font-semibold mt-0.5" style={{ color: 'var(--adm-fg)' }}>
-                      {formatDateShort(event.created_at)}
-                    </dd>
-                  </div>
-                </div>
-
-                {typeof event.reports_count === 'number' && event.reports_count > 0 && (
-                  <div className="flex items-start gap-2">
-                    <AlertCircle
-                      className="h-4 w-4 mt-0.5 shrink-0"
-                      style={{ color: 'var(--adm-danger)' }}
-                    />
-                    <div>
-                      <dt
-                        className="text-[11px] uppercase tracking-wider font-medium"
-                        style={{ color: 'var(--adm-muted-fg)' }}
-                      >
-                        Reports
-                      </dt>
-                      <dd
-                        className="text-xs font-semibold mt-0.5"
-                        style={{ color: 'var(--adm-danger-text)' }}
-                      >
-                        {event.reports_count}
-                      </dd>
-                    </div>
-                  </div>
-                )}
-              </dl>
-            </div>
-
-            {/* Organizer */}
-            <div
-              className="rounded-[16px] border p-5 space-y-3"
-              style={{
-                background: 'var(--adm-grad-card)',
-                borderColor: 'var(--adm-border)',
-                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
-              }}
-            >
-              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
-                Organizer
-              </h3>
-              {onNavigateToUser ? (
+            {/* ===== Moderation ===== */}
+            <div className="rounded-[16px] border p-5 space-y-3" style={CARD_STYLE}>
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4" style={{ color: 'var(--adm-primary-text)' }} />
+                <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                  Moderation
+                </h3>
+              </div>
+              <div className="flex flex-wrap gap-2.5">
                 <button
                   type="button"
-                  onClick={() => onNavigateToUser(event.organizer_id)}
-                  aria-label={`View organizer ${event.organizer_name}`}
-                  className="group w-full flex items-center justify-between gap-3 rounded-xl border p-3 text-left hover:opacity-80 transition-all"
-                  style={{
-                    background: 'hsl(213 40% 20% / .5)',
-                    borderColor: 'var(--adm-border)',
+                  onClick={() => {
+                    setShowChat(true);
+                    onOpenChat?.(event.id);
                   }}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border"
-                      style={{
-                        background: 'var(--adm-secondary)',
-                        borderColor: 'var(--adm-border)',
-                      }}
-                    >
-                      <User className="h-4 w-4" style={{ color: 'var(--adm-muted-fg)' }} />
-                    </div>
-                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--adm-fg)' }}>
-                      {event.organizer_name}
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 shrink-0" style={{ color: 'var(--adm-muted-fg)' }} />
-                </button>
-              ) : (
-                <div
-                  className="flex items-center gap-2.5 rounded-xl border p-3"
-                  style={{
-                    background: 'hsl(213 40% 20% / .5)',
-                    borderColor: 'var(--adm-border)',
-                  }}
-                >
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border"
-                    style={{ background: 'var(--adm-secondary)', borderColor: 'var(--adm-border)' }}
-                  >
-                    <User className="h-4 w-4" style={{ color: 'var(--adm-muted-fg)' }} />
-                  </div>
-                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--adm-fg)' }}>
-                    {event.organizer_name}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Participants */}
-            <div
-              className="rounded-[16px] border p-5 space-y-3"
-              style={{
-                background: 'var(--adm-grad-card)',
-                borderColor: 'var(--adm-border)',
-                boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
-              }}
-            >
-              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--adm-fg)' }}>
-                Participants
-                <span
-                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all active:scale-95"
                   style={{
                     background: 'var(--adm-secondary)',
-                    color: 'var(--adm-muted-fg)',
+                    borderColor: 'var(--adm-border)',
+                    color: 'var(--adm-fg)',
                   }}
                 >
-                  {event.participants.length}
+                  <MessageCircle className="h-4 w-4" />
+                  Open event chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRemoveDialog(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all active:scale-95"
+                  style={{
+                    borderColor: 'hsl(0 84% 60% / .4)',
+                    background: 'hsl(0 84% 60% / .1)',
+                    color: 'var(--adm-danger-text)',
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove event
+                </button>
+              </div>
+            </div>
+
+            {/* ===== Participants ===== */}
+            <div className="rounded-[16px] border p-5 space-y-3" style={CARD_STYLE}>
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4" style={{ color: 'var(--adm-primary-text)' }} />
+                <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                  Participants
+                </h3>
+                <span
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  style={{ background: 'var(--adm-secondary)', color: 'var(--adm-muted-fg)' }}
+                >
+                  {participantCount}
                 </span>
-              </h3>
-              {event.participants.length === 0 ? (
-                <p className="text-xs italic" style={{ color: 'var(--adm-muted-fg)' }}>
-                  No participants yet.
-                </p>
+              </div>
+              {participants.length === 0 ? (
+                <div
+                  className="rounded-xl border border-dashed px-3 py-5 text-center text-xs"
+                  style={{ borderColor: 'var(--adm-border)', color: 'var(--adm-muted-fg)' }}
+                >
+                  {participantCount > 0
+                    ? 'Participant details are not included in this response.'
+                    : 'No participants yet.'}
+                </div>
               ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                  {event.participants.map((p) => (
-                    <ParticipantRow key={p.id} participant={p} onNavigate={onNavigateToUser} />
+                <div className="space-y-2">
+                  {participants.map((p) => (
+                    <ParticipantRow
+                      key={p.id}
+                      participant={p}
+                      isOrganizer={p.id === organizerId}
+                      onNavigate={onNavigateToUser}
+                    />
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Remove Event */}
-            <div
-              className="rounded-[16px] border p-5 space-y-3"
-              style={{
-                borderColor: 'hsl(0 84% 60% / .3)',
-                background: 'hsl(0 84% 60% / .07)',
-              }}
-            >
-              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-danger-text)' }}>
-                Danger Zone
-              </h3>
-              <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-                Permanently remove this event. This action cannot be undone.
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowRemoveDialog(true)}
-                className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-xs font-semibold active:scale-95 transition-all"
-                style={{
-                  borderColor: 'hsl(0 84% 60% / .4)',
-                  background: 'hsl(0 84% 60% / .12)',
-                  color: 'var(--adm-danger-text)',
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Remove Event
-              </button>
-            </div>
+            {/* ===== Location ===== */}
+            {locationName && (
+              <div className="rounded-[16px] border p-5 space-y-3" style={CARD_STYLE}>
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4" style={{ color: 'var(--adm-primary-text)' }} />
+                  <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                    Location
+                  </h3>
+                </div>
+                <MapPlaceholder />
+                <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                  {locationName}
+                </p>
+              </div>
+            )}
           </>
         ) : null}
       </div>

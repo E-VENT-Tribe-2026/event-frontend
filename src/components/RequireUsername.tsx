@@ -44,7 +44,7 @@ export default function RequireUsername({ children }: { children: React.ReactNod
     return <Navigate to="/admin-verify" replace />;
   }
 
-  if (!token) return <>{children}</>;
+  if (!token) return <Navigate to="/login" replace />;
   if (state === 'checking') return null;
   if (state === 'need') return <Navigate to="/choose-username" replace />;
 

@@ -36,7 +36,7 @@ import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
 import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
-import { getAuthToken, clearAuthToken } from '@/lib/auth';
+import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
 import { logout, getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
 import { clearCache } from '@/lib/queryCache';
@@ -130,6 +130,18 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     clearAllQueries();
     navigate('/login', { replace: true });
   };
+
+  // Kick the user out immediately whenever any API call receives a 401 (expired token)
+  useEffect(() => {
+    const onExpired = () => {
+      setShowWarning(false);
+      handleLogout();
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  // handleLogout is stable within the component lifetime
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleStay = () => {
     setShowWarning(false);

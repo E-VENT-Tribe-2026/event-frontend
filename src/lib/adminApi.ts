@@ -34,6 +34,7 @@ export interface AdminUsersResponse {
 }
 
 export interface AdminEventSummary {
+  location: string;
   id: string;
   title: string;
   date: string;
@@ -141,6 +142,7 @@ export interface AdminEventSummaryFull {
   participants_count: number;
   reports_count: number;
   created_at: string;
+  category?: string;
 }
 
 export interface AdminEventsResponse {
@@ -430,9 +432,7 @@ export async function liftSuspension(userId: string): Promise<AdminActionRespons
  * Fetches paginated events for the admin panel.
  */
 export async function fetchAdminEvents(
-  page = 1,
-  limit = 20,
-  search?: string,
+page = 1, limit = 20, search?: string, catParam?: string,
 ): Promise<AdminEventsResponse> {
   const params = new URLSearchParams();
   params.set('page', String(page));

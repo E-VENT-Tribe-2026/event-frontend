@@ -1,38 +1,67 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { Search, Users, ShieldCheck, UserCheck, Loader2, X, ChevronRight, AlertTriangle } from 'lucide-react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import {
+  Search,
+  Users,
+  Loader2,
+  X,
+  ChevronRight,
+  AlertTriangle,
+  ShieldCheck,
+  Shield,
+  Ban,
+  Star,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UserAvatar } from '@/components/UserAvatar';
-import {
-  fetchAdminCounts,
-  fetchAdminUsers,
-  type AdminUserSummary,
-} from '@/lib/adminApi';
+import { fetchAdminUsers, type AdminUserSummary } from '@/lib/adminApi';
 
-type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings';
+type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings' | 'pro';
+
+type UserRow = AdminUserSummary & {
+  is_suspended?: boolean;
+  warnings_count?: number;
+  is_pro?: boolean;
+};
 
 interface AdminUsersTabProps {
   onOpenUser: (userId: string) => void;
   onErrorToast: (msg: string) => void;
-  onSuccessToast: (msg: string) => void;
 }
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 350;
 
 const FILTER_LABELS: Record<FilterChip, string> = {
   all: 'All',
   administrators: 'Administrators',
   suspended: 'Suspended',
-  with_warnings: 'With Warnings',
+  with_warnings: 'With warnings',
+  pro: 'Pro',
+};
+
+const FILTER_ICONS: Partial<Record<FilterChip, typeof Shield>> = {
+  administrators: Shield,
+  suspended: Ban,
+  with_warnings: AlertTriangle,
+  pro: Star,
+};
+
+const isAdminUser = (u: UserRow) => (u.role ?? '').toLowerCase().includes('admin');
+const isSuspendedUser = (u: UserRow) => Boolean(u.is_suspended);
+const hasWarnings = (u: UserRow) => (u.warnings_count ?? 0) > 0;
+const isProUser = (u: UserRow) => Boolean(u.is_pro);
+
+const FILTER_PREDICATES: Record<FilterChip, (u: UserRow) => boolean> = {
+  all: () => true,
+  administrators: isAdminUser,
+  suspended: isSuspendedUser,
+  with_warnings: hasWarnings,
+  pro: isProUser,
 };
 
 export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTabProps) {
-  // Counts
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
-  const [loadingCounts, setLoadingCounts] = useState<boolean>(true);
-
-  // Users list & search
-  const [users, setUsers] = useState<AdminUserSummary[]>([]);
+  const [allFetchedUsers, setAllFetchedUsers] = useState<UserRow[]>([]);
   const [page, setPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
@@ -44,157 +73,172 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countsFetchedRef = useRef<boolean>(false);
+  const requestIdRef = useRef(0);
+  // Search query for which every page is already loaded (null = not fully loaded)
+  const fullyLoadedRef = useRef<string | null>(null);
+  const onErrorToastRef = useRef(onErrorToast);
+  onErrorToastRef.current = onErrorToast;
 
-  // Load counts on mount
-  useEffect(() => {
-    let cancelled = false;
-    fetchAdminCounts()
-      .then((data) => {
-        if (!cancelled && typeof data.total_users === 'number') {
-          countsFetchedRef.current = true;
-          setTotalUsers(data.total_users);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoadingCounts(false);
-      });
+  // Filtering is derived from the loaded data, so switching chips is instant once loaded
+  const users = useMemo(
+    () => allFetchedUsers.filter(FILTER_PREDICATES[activeFilter]),
+    [allFetchedUsers, activeFilter],
+  );
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Fetch users list
   const loadUsers = useCallback(
-    async (targetPage: number, query: string, filter: FilterChip, append = false) => {
-      if (append) {
+    async (
+      targetPage: number,
+      query: string,
+      opts: { append?: boolean; loadAll?: boolean } = {},
+    ) => {
+      const reqId = ++requestIdRef.current;
+      if (opts.append) {
         setLoadingMore(true);
       } else {
         setLoadingUsers(true);
+        setLoadingMore(false);
       }
 
       try {
-        const searchParam = query.trim();
-        const res = await fetchAdminUsers(targetPage, PAGE_SIZE, searchParam || undefined);
+        let current = targetPage;
+        let items: UserRow[] = [];
+        let last;
 
-        let items = res.items;
-        if (filter === 'administrators') {
-          items = items.filter((u) => u.role === 'administrator');
-        } else if (filter === 'suspended') {
-          items = items.filter((u) => (u as AdminUserSummary & { is_suspended?: boolean }).is_suspended);
-        } else if (filter === 'with_warnings') {
-          items = items.filter(
-            (u) =>
-              (u as AdminUserSummary & { warnings_count?: number }).warnings_count !== undefined &&
-              ((u as AdminUserSummary & { warnings_count?: number }).warnings_count ?? 0) > 0,
-          );
+        // Fetch one page, or every remaining page when loadAll is set
+        while (true) {
+          const res = await fetchAdminUsers(current, PAGE_SIZE, query.trim() || undefined);
+          if (reqId !== requestIdRef.current) return;
+          items = items.concat(res.items as UserRow[]);
+          last = res;
+          if (!opts.loadAll || res.page >= res.total_pages) break;
+          current = res.page + 1;
         }
 
-        setUsers((prev) => (append ? [...prev, ...items] : items));
-        setPage(res.page);
-        setTotalPages(res.total_pages);
-        if (!countsFetchedRef.current && !query.trim()) {
-          setTotalUsers((prev) => (prev !== null ? prev : res.total));
+        setAllFetchedUsers((prev) => {
+          const combined = opts.append ? [...prev, ...items] : items;
+          return Array.from(new Map(combined.map((u) => [u.id, u])).values());
+        });
+
+        setPage(last.page);
+        setTotalPages(last.total_pages);
+        fullyLoadedRef.current = last.page >= last.total_pages ? query.trim() : null;
+
+        if (!query.trim() && last.total !== undefined) {
+          setTotalUsers(last.total);
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to fetch users';
-        onErrorToast(msg);
+        if (reqId !== requestIdRef.current) return;
+        onErrorToastRef.current(err instanceof Error ? err.message : 'Failed to fetch users');
       } finally {
-        setLoadingUsers(false);
-        setLoadingMore(false);
+        if (reqId === requestIdRef.current) {
+          setLoadingUsers(false);
+          setLoadingMore(false);
+        }
       }
     },
-    [onErrorToast],
+    [],
   );
 
-  // Initial load
+  // Runs on mount and whenever the search or filter changes
   useEffect(() => {
-    void loadUsers(1, '', 'all');
-  }, [loadUsers]);
+    if (fullyLoadedRef.current === activeSearch) return; // everything already in memory
+    void loadUsers(1, activeSearch, { loadAll: activeFilter !== 'all' });
+  }, [activeSearch, activeFilter, loadUsers]);
 
   const handleSearchChange = (value: string) => {
     setSearchInput(value);
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      const trimmed = value.trim();
-      setActiveSearch(trimmed);
-      void loadUsers(1, trimmed, activeFilter, false);
-    }, SEARCH_DEBOUNCE_MS);
+    debounceTimerRef.current = setTimeout(
+      () => setActiveSearch(value.trim()),
+      SEARCH_DEBOUNCE_MS,
+    );
   };
 
   const handleClearSearch = () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     setSearchInput('');
     setActiveSearch('');
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    void loadUsers(1, '', activeFilter, false);
-  };
-
-  const handleFilterChange = (filter: FilterChip) => {
-    setActiveFilter(filter);
-    void loadUsers(1, activeSearch, filter, false);
   };
 
   const handleLoadMore = () => {
     if (page < totalPages && !loadingMore) {
-      void loadUsers(page + 1, activeSearch, activeFilter, true);
+      void loadUsers(page + 1, activeSearch, { append: true });
     }
   };
 
-  // Compute counts per filter for chips
-  const filterCounts: Record<FilterChip, number> = {
-    all: totalUsers ?? users.length,
-    administrators: users.filter((u) => u.role === 'administrator').length,
-    suspended: users.filter((u) => (u as AdminUserSummary & { is_suspended?: boolean }).is_suspended).length,
-    with_warnings: users.filter(
-      (u) => ((u as AdminUserSummary & { warnings_count?: number }).warnings_count ?? 0) > 0,
-    ).length,
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Total Registered Users Card */}
+    <div className="space-y-4">
+      {/* Registered users card */}
       <div
-        className="rounded-[16px] border p-5"
-        style={{
-          background: 'var(--adm-grad-card)',
-          borderColor: 'var(--adm-border)',
-          boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
-        }}
+        className="rounded-[18px] border p-4 sm:p-5"
+        style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div
+            className="flex h-12 w-12 items-center justify-center rounded-xl"
+            style={{ background: 'hsl(210 80% 50% / .18)', color: 'hsl(210 90% 60%)' }}
+          >
+            <Users className="h-5 w-5" />
+          </div>
           <div>
-            <p
-              className="text-xs font-medium uppercase tracking-wider"
-              style={{ color: 'var(--adm-muted-fg)' }}
+            <h2
+              className="text-2xl font-bold leading-none tracking-tight"
+              style={{ color: 'var(--adm-fg)' }}
             >
-              Total Registered Users
-            </p>
-            <h2 className="mt-1.5 text-3xl font-extrabold" style={{ color: 'var(--adm-fg)' }}>
-              {loadingCounts && totalUsers === null ? (
+              {totalUsers === null ? (
                 <span
-                  className="inline-block h-8 w-16 animate-pulse rounded"
+                  className="inline-block h-6 w-10 animate-pulse rounded"
                   style={{ background: 'var(--adm-secondary)' }}
                 />
               ) : (
-                (totalUsers ?? users.length).toLocaleString()
+                totalUsers.toLocaleString()
               )}
             </h2>
-          </div>
-          <div
-            className="flex h-12 w-12 items-center justify-center rounded-2xl"
-            style={{ background: 'hsl(271 76% 53% / .18)', color: 'var(--adm-primary)' }}
-          >
-            <Users className="h-6 w-6" />
+            <p className="mt-1 text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              Registered users
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Search Input */}
+      {/* Filter chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        {(Object.keys(FILTER_LABELS) as FilterChip[]).map((chip) => {
+          const isActive = activeFilter === chip;
+          const Icon = FILTER_ICONS[chip];
+          return (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => setActiveFilter(chip)}
+              aria-pressed={isActive}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all"
+              style={
+                isActive
+                  ? {
+                      background: 'hsl(271 76% 53%)',
+                      borderColor: 'hsl(271 76% 53%)',
+                      color: 'white',
+                      boxShadow: '0 0 14px hsl(271 76% 53% / .45)',
+                    }
+                  : {
+                      background: 'var(--adm-card)',
+                      borderColor: 'var(--adm-border)',
+                      color: 'var(--adm-fg)',
+                    }
+              }
+            >
+              {Icon && <Icon className="h-3.5 w-3.5" />}
+              <span>{FILTER_LABELS[chip]}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Search */}
       <div className="relative">
         <Search
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4"
+          className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
           style={{ color: 'var(--adm-muted-fg)' }}
         />
         <input
@@ -203,17 +247,15 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
           onChange={(e) => handleSearchChange(e.target.value)}
           onFocus={() => setSearchFocused(true)}
           onBlur={() => setSearchFocused(false)}
-          placeholder="Search users by username..."
-          aria-label="Search users by username"
-          className="w-full rounded-[12px] border pl-10 pr-10 text-sm outline-none transition-colors"
+          placeholder="Search by username..."
+          aria-label="Search by username"
+          className="w-full rounded-[14px] border pl-11 pr-10 text-sm outline-none transition-colors"
           style={{
             background: 'var(--adm-card)',
             borderColor: searchFocused ? 'hsl(271 76% 53% / .7)' : 'var(--adm-border)',
             boxShadow: searchFocused ? '0 0 0 3px hsl(271 76% 53% / .15)' : 'none',
             color: 'var(--adm-fg)',
             height: 44,
-            paddingTop: '0.75rem',
-            paddingBottom: '0.75rem',
           }}
         />
         {searchInput && (
@@ -229,60 +271,23 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
         )}
       </div>
 
-      {/* Filter Chips */}
-      <div className="flex flex-wrap gap-2">
-        {(Object.keys(FILTER_LABELS) as FilterChip[]).map((chip) => {
-          const isActive = activeFilter === chip;
-          return (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => handleFilterChange(chip)}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 transition-all ${isActive ? 'text-[12.5px] font-semibold' : 'text-[12.5px] font-medium'}`}
-              style={
-                isActive
-                  ? {
-                      background: 'var(--adm-grad)',
-                      borderColor: 'var(--adm-primary)',
-                      color: 'white',
-                      boxShadow: 'var(--adm-shadow-glow)',
-                    }
-                  : {
-                      background: 'var(--adm-card)',
-                      borderColor: 'hsl(213 30% 28%)',
-                      color: 'hsl(213 20% 82%)',
-                    }
-              }
-            >
-              {chip === 'administrators' && <ShieldCheck className="h-3 w-3" />}
-              {chip === 'suspended' && <X className="h-3 w-3" />}
-              {chip === 'with_warnings' && <AlertTriangle className="h-3 w-3" />}
-              {FILTER_LABELS[chip]}
-              {chip !== 'all' && (
-                <span className="font-bold">{filterCounts[chip]}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* User List Section */}
+      {/* List */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <p
-            className="text-xs font-semibold uppercase tracking-wider"
+            className="text-[11px] font-medium uppercase tracking-wider"
             style={{ color: 'var(--adm-muted-fg)' }}
           >
-            {activeSearch ? `Search Results for "${activeSearch}"` : 'Registered Users'}
+            User
           </p>
-          <span className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-            {users.length} {users.length === 1 ? 'user' : 'users'}
+          <span className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+            Role · warnings · status
           </span>
         </div>
 
         {loadingUsers ? (
           <div
-            className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border"
+            className="flex flex-col items-center justify-center space-y-3 rounded-2xl border py-16"
             style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
           >
             <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--adm-primary)' }} />
@@ -292,33 +297,33 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
           </div>
         ) : users.length === 0 ? (
           <div
-            className="flex flex-col items-center justify-center py-14 text-center rounded-2xl border border-dashed p-6 space-y-2"
+            className="flex flex-col items-center justify-center space-y-2 rounded-2xl border border-dashed p-6 py-14 text-center"
             style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
           >
             <Users className="h-10 w-10 opacity-50" style={{ color: 'var(--adm-muted-fg)' }} />
             <p className="text-sm font-medium" style={{ color: 'var(--adm-fg)' }}>
               No users found
             </p>
-            <p className="text-xs max-w-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+            <p className="max-w-xs text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
               {activeSearch
                 ? `No user accounts matched "${activeSearch}". Try another search term.`
-                : 'There are no registered accounts in the system yet.'}
+                : 'No users match this filter.'}
             </p>
           </div>
         ) : (
           <ul className="space-y-2">
             {users.map((u) => {
-              const isAdmin = u.role === 'administrator';
+              const isAdmin = isAdminUser(u);
+              const suspended = isSuspendedUser(u);
+              const warnings = u.warnings_count ?? 0;
               const hasUsername = Boolean(u.username && u.username.trim());
               const isHovered = hoveredRow === u.id;
 
               return (
                 <motion.li
                   key={u.id}
-                  layout
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="group relative"
                 >
                   <button
                     type="button"
@@ -326,13 +331,13 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
                     onMouseEnter={() => setHoveredRow(u.id)}
                     onMouseLeave={() => setHoveredRow(null)}
                     aria-label={`View details for ${u.full_name}`}
-                    className="w-full flex items-center justify-between gap-3 rounded-[12px] border px-3.5 py-3 text-left transition-all active:scale-[0.99]"
+                    className="flex w-full items-center justify-between gap-3 rounded-[14px] border px-4 py-3.5 text-left transition-all active:scale-[0.99]"
                     style={{
                       background: isHovered ? 'hsl(213 50% 17%)' : 'var(--adm-card)',
                       borderColor: isHovered ? 'hsl(271 76% 53% / .55)' : 'var(--adm-border)',
                     }}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex min-w-0 items-center gap-3.5">
                       <UserAvatar
                         src={u.avatar_url}
                         srcSecondary={u.avatar_url}
@@ -342,23 +347,77 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
                       />
                       <div className="min-w-0">
                         <p
-                          className="text-sm font-semibold truncate"
+                          className="truncate text-sm font-semibold"
                           style={{ color: 'var(--adm-fg)' }}
                         >
                           {u.full_name}
                         </p>
                         {hasUsername && (
-                          <p className="text-xs truncate" style={{ color: 'var(--adm-muted-fg)' }}>
+                          <p
+                            className="truncate text-xs"
+                            style={{ color: 'var(--adm-muted-fg)' }}
+                          >
                             @{u.username}
                           </p>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2.5 shrink-0">
+                    <div className="flex shrink-0 items-center gap-2">
+                      {isProUser(u) && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
+                          style={{
+                            background: 'hsl(45 93% 50% / .15)',
+                            color: 'hsl(45 93% 60%)',
+                            borderColor: 'hsl(45 93% 50% / .35)',
+                          }}
+                        >
+                          <Star className="h-3 w-3" />
+                          Pro
+                        </span>
+                      )}
+
+                      {warnings > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
+                          style={{
+                            background: 'hsl(38 92% 52% / .15)',
+                            color: 'var(--adm-warn-text)',
+                            borderColor: 'hsl(38 92% 52% / .35)',
+                          }}
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          {warnings}
+                        </span>
+                      )}
+
+                      <span
+                        className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                        style={
+                          suspended
+                            ? {
+                                background: 'hsl(0 72% 51% / .15)',
+                                color: 'hsl(0 85% 70%)',
+                                borderColor: 'hsl(0 72% 51% / .4)',
+                              }
+                            : {
+                                background: 'hsl(142 70% 45% / .15)',
+                                color: 'hsl(142 70% 60%)',
+                                borderColor: 'hsl(142 70% 45% / .35)',
+                              }
+                        }
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ background: suspended ? 'hsl(0 85% 70%)' : 'hsl(142 70% 60%)' }}
+                        />
+                        {suspended ? 'Suspended' : 'Active'}
+                      </span>
+
                       {isAdmin ? (
                         <span
-                          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold"
+                          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
                           style={{
                             background: 'hsl(271 76% 53% / .18)',
                             color: 'var(--adm-primary-text)',
@@ -370,16 +429,17 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
                         </span>
                       ) : (
                         <span
-                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium"
                           style={{
                             background: 'var(--adm-secondary)',
+                            borderColor: 'var(--adm-border)',
                             color: 'hsl(213 20% 78%)',
                           }}
                         >
-                          <UserCheck className="h-3 w-3" />
                           User
                         </span>
                       )}
+
                       <ChevronRight
                         className="h-4 w-4 transition-colors"
                         style={{ color: isHovered ? 'var(--adm-fg)' : 'var(--adm-muted-fg)' }}
@@ -392,14 +452,14 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
           </ul>
         )}
 
-        {/* Load More Button */}
-        {page < totalPages && !loadingUsers && (
-          <div className="pt-2 text-center">
+        {/* Load more (only for "All"; other filters load everything up front) */}
+        {activeFilter === 'all' && page < totalPages && !loadingUsers && (
+          <div className="pt-1 text-center">
             <button
               type="button"
               disabled={loadingMore}
               onClick={handleLoadMore}
-              className="inline-flex items-center gap-2 rounded-xl border px-5 py-2.5 text-xs font-semibold transition-all disabled:opacity-50 active:scale-95"
+              className="inline-flex items-center gap-2 rounded-xl border px-5 py-2.5 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
               style={{
                 borderColor: 'var(--adm-border)',
                 background: 'var(--adm-secondary)',

@@ -21,6 +21,7 @@ export default function AdminMyAccount({ adminId, onClose }: AdminMyAccountProps
   const [user, setUser] = useState<AdminUserDetailsFull | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
+  const [imgFailed, setImgFailed] = useState<boolean>(false);
 
   useEffect(() => {
     if (!adminId) {
@@ -61,25 +62,19 @@ export default function AdminMyAccount({ adminId, onClose }: AdminMyAccountProps
         .toUpperCase()
     : '';
 
+  const avatarUrl = (user as AdminUserDetailsFull & { avatar_url?: string })?.avatar_url;
+
   return (
     <div className="space-y-4">
       {/* Back button */}
       <button
         type="button"
         onClick={onClose}
-        className="inline-flex items-center gap-2"
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: 'var(--adm-muted-fg)',
-          fontWeight: 500,
-          fontSize: 13,
-          padding: '6px 8px 6px 0',
-          cursor: 'pointer',
-        }}
+        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+        style={{ color: 'var(--adm-muted-fg)' }}
       >
         <ArrowLeft className="h-4 w-4" />
-        ← Back to panel
+        Back
       </button>
 
       {loading ? (
@@ -107,114 +102,125 @@ export default function AdminMyAccount({ adminId, onClose }: AdminMyAccountProps
         </div>
       ) : user ? (
         <div
+          className="rounded-[18px] border p-6 space-y-6"
           style={{
-            background: 'var(--adm-grad-card)',
-            border: '1px solid var(--adm-border)',
-            borderRadius: 16,
+            background: 'var(--adm-card)',
+            borderColor: 'var(--adm-border)',
             boxShadow: '0 4px 20px hsl(213 61% 5% / .5)',
-            padding: 18,
           }}
         >
-          {/* Avatar row */}
-          <div className="flex items-center gap-3">
-            {/* Avatar circle */}
-            <div
-              className="shrink-0 flex items-center justify-center text-white"
-              style={{
-                width: 84,
-                height: 84,
-                borderRadius: '50%',
-                background: 'var(--adm-grad)',
-                fontSize: 28,
-                fontWeight: 700,
-              }}
-            >
-              {initials}
-            </div>
-
-            {/* Name + badge + username */}
-            <div className="min-w-0 space-y-1">
-              <p
-                className="font-bold truncate"
-                style={{ fontSize: 18, color: 'var(--adm-fg)' }}
-              >
-                {user.full_name}
-              </p>
-              <span
-                className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+          {/* Top Profile Header */}
+          <div className="flex items-center gap-4">
+            {avatarUrl && !imgFailed ? (
+              <img
+                src={avatarUrl}
+                alt={user.full_name}
+                onError={() => setImgFailed(true)}
+                className="shrink-0 rounded-full object-cover"
                 style={{
-                  background: 'hsl(271 76% 53% / .2)',
-                  color: 'var(--adm-primary-text)',
-                  borderColor: 'hsl(271 76% 53% / .4)',
+                  width: 72,
+                  height: 72,
+                  boxShadow: 'var(--adm-shadow-glow)',
+                  border: '2px solid var(--adm-border)',
+                }}
+              />
+            ) : (
+              <div
+                className="flex shrink-0 items-center justify-center text-white"
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: '50%',
+                  background: 'var(--adm-grad)',
+                  fontSize: 24,
+                  fontWeight: 700,
+                  boxShadow: 'var(--adm-shadow-glow)',
                 }}
               >
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Admin
-              </span>
+                {initials}
+              </div>
+            )}
+
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h2 className="text-xl font-bold tracking-tight" style={{ color: 'var(--adm-fg)' }}>
+                  {user.full_name}
+                </h2>
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+                  style={{
+                    background: 'hsl(271 76% 53% / .18)',
+                    color: 'var(--adm-primary-text)',
+                    borderColor: 'hsl(271 76% 53% / .4)',
+                  }}
+                >
+                  <ShieldCheck className="h-3 w-3" />
+                  Admin
+                </span>
+              </div>
               {user.username && (
-                <p className="text-xs truncate" style={{ color: 'var(--adm-muted-fg)' }}>
+                <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
                   @{user.username}
                 </p>
               )}
             </div>
           </div>
 
-          {/* Divider */}
-          <div style={{ borderTop: '1px solid var(--adm-border)', margin: '14px 0' }} />
-
-          {/* Stat row 1 — Administrator since */}
-          <div
-            className="flex items-center gap-3"
-            style={{ paddingBottom: 10 }}
-          >
+          {/* Stat Cards Grid */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Administrator since card */}
             <div
-              className="flex items-center justify-center shrink-0"
+              className="flex items-center gap-4 rounded-xl border p-4"
               style={{
-                width: 24,
-                height: 24,
-                background: 'hsl(271 76% 53% / .16)',
-                borderRadius: 12,
+                background: 'hsl(213 50% 15% / .6)',
+                borderColor: 'var(--adm-border)',
               }}
             >
-              <Shield className="h-3.5 w-3.5" style={{ color: 'var(--adm-primary)' }} />
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                style={{
+                  background: 'hsl(271 76% 53% / .18)',
+                  color: 'var(--adm-primary)',
+                }}
+              >
+                <Shield className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-base font-bold tracking-tight" style={{ color: 'var(--adm-fg)' }}>
+                  {formatDate(user.created_at)}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                  Administrator since
+                </p>
+              </div>
             </div>
-            <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-              Administrator since {formatDate(user.created_at)}
-            </p>
-          </div>
 
-          {/* Stat row 2 — Reports closed */}
-          <div className="flex items-center gap-3">
+            {/* Reports closed card */}
             <div
-              className="flex items-center justify-center shrink-0"
+              className="flex items-center gap-4 rounded-xl border p-4"
               style={{
-                width: 24,
-                height: 24,
-                background: 'hsl(271 76% 53% / .16)',
-                borderRadius: 12,
+                background: 'hsl(213 50% 15% / .6)',
+                borderColor: 'var(--adm-border)',
               }}
             >
-              <Flag className="h-3.5 w-3.5" style={{ color: 'var(--adm-primary)' }} />
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                style={{
+                  background: 'hsl(271 76% 53% / .18)',
+                  color: 'var(--adm-primary)',
+                }}
+              >
+                <Flag className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-base font-bold tracking-tight" style={{ color: 'var(--adm-fg)' }}>
+                  0
+                </p>
+                <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                  Reports closed by you
+                </p>
+              </div>
             </div>
-            <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-              Reports closed by you · 0
-            </p>
-          </div>
-
-          {/* Info banner */}
-          <div
-            style={{
-              background: 'hsl(213 40% 20% / .7)',
-              border: '1px solid var(--adm-border)',
-              borderRadius: 12,
-              color: 'hsl(213 20% 82%)',
-              padding: '12px 14px',
-              marginTop: 14,
-              fontSize: 12,
-            }}
-          >
-            Administrator account. It cannot be changed in the panel; changes are made outside the
-            application.
           </div>
         </div>
       ) : null}

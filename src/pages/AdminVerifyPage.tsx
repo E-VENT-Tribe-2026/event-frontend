@@ -123,7 +123,7 @@ export default function AdminVerifyPage() {
       });
       window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
     }
-    const destination = destinationAfterSignIn(username);
+    const destination = destinationAfterSignIn(username, 'administrator');
     navigate(destination, { replace: true });
   };
 
