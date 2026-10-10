@@ -312,22 +312,24 @@ export default function AdminPanelPage() {
                   role="tab"
                   aria-selected={activeTab === tab.id}
                   onClick={() => switchTab(tab.id)}
-                  className="relative flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-semibold transition-all"
+                  className="relative flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-semibold transition-all"
                   style={
                     activeTab === tab.id
                       ? {
                           background: 'var(--adm-grad)',
                           color: 'white',
                           boxShadow: 'var(--adm-shadow-glow)',
+                          fontWeight: 600,
                         }
                       : {
                           background: 'transparent',
                           color: 'var(--adm-muted-fg)',
+                          fontWeight: 600,
                         }
                   }
                 >
                   {tab.icon}
-                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="inline">{tab.label}</span>
                   {/* Reports red badge */}
                   {tab.id === 'reports' && openReportCount !== null && openReportCount > 0 && (
                     <span

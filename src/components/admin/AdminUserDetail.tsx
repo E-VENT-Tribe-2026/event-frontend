@@ -173,6 +173,7 @@ export default function AdminUserDetail({
   const [dialogKind, setDialogKind] = useState<DialogKind>(null);
   const [reason, setReason] = useState<string>('');
   const [acting, setActing] = useState<boolean>(false);
+  const [hoveredBack, setHoveredBack] = useState(false);
 
   const [withdrawWarningId, setWithdrawWarningId] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<boolean>(false);
@@ -305,8 +306,19 @@ export default function AdminUserDetail({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
-          style={{ color: 'var(--adm-muted-fg)' }}
+          aria-label="Back to Users"
+          className="inline-flex items-center gap-2 transition-colors"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: hoveredBack ? 'var(--adm-fg)' : 'var(--adm-muted-fg)',
+            fontWeight: 500,
+            fontSize: 13,
+            padding: '6px 8px 6px 0',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={() => setHoveredBack(true)}
+          onMouseLeave={() => setHoveredBack(false)}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Users
@@ -580,11 +592,13 @@ export default function AdminUserDetail({
                   {user.warnings.map((w) => (
                     <div
                       key={w.id}
-                      className="flex items-start justify-between gap-3 rounded-xl p-3"
+                      className="flex items-start justify-between gap-3"
                       style={{
                         background: 'hsl(213 40% 20% / .45)',
                         border: '1px solid var(--adm-border)',
                         borderLeft: '3px solid var(--adm-warn)',
+                        borderRadius: 12,
+                        padding: '12px 14px',
                       }}
                     >
                       <div className="min-w-0 flex-1 space-y-0.5">

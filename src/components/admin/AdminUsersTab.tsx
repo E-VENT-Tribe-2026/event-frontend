@@ -238,7 +238,7 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
               key={chip}
               type="button"
               onClick={() => handleFilterChange(chip)}
-              className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 transition-all ${isActive ? 'text-[12.5px] font-semibold' : 'text-[12.5px] font-medium'}`}
               style={
                 isActive
                   ? {
@@ -326,7 +326,7 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
                     onMouseEnter={() => setHoveredRow(u.id)}
                     onMouseLeave={() => setHoveredRow(null)}
                     aria-label={`View details for ${u.full_name}`}
-                    className="w-full flex items-center justify-between gap-3 rounded-[12px] border p-3.5 text-left transition-all active:scale-[0.99]"
+                    className="w-full flex items-center justify-between gap-3 rounded-[12px] border px-3.5 py-3 text-left transition-all active:scale-[0.99]"
                     style={{
                       background: isHovered ? 'hsl(213 50% 17%)' : 'var(--adm-card)',
                       borderColor: isHovered ? 'hsl(271 76% 53% / .55)' : 'var(--adm-border)',

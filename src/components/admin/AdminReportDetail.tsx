@@ -213,6 +213,7 @@ export default function AdminReportDetail({
   const [note, setNote] = useState('');
   const [acting, setActing] = useState(false);
   const [resolved, setResolved] = useState(false);
+  const [hoveredBack, setHoveredBack] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -280,8 +281,19 @@ export default function AdminReportDetail({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
-          style={{ color: 'var(--adm-muted-fg)' }}
+          aria-label="Back to Reports"
+          className="inline-flex items-center gap-2 transition-colors"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: hoveredBack ? 'var(--adm-fg)' : 'var(--adm-muted-fg)',
+            fontWeight: 500,
+            fontSize: 13,
+            padding: '6px 8px 6px 0',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={() => setHoveredBack(true)}
+          onMouseLeave={() => setHoveredBack(false)}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Reports
