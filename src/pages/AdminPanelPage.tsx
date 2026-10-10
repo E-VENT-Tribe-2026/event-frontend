@@ -10,6 +10,7 @@ import AdminAuditTab from '@/components/admin/AdminAuditTab';
 import AdminReportsTab from '@/components/admin/AdminReportsTab';
 import AdminReportDetail from '@/components/admin/AdminReportDetail';
 import AdminUserView, { type UserViewState } from '@/components/admin/AdminUserView';
+import AdminMyAccount from '@/components/admin/AdminMyAccount';
 import { clearAuthToken } from '@/lib/auth';
 import { logout } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
@@ -31,6 +32,10 @@ export default function AdminPanelPage() {
   const [stack, setStack] = useState<StackEntry[]>([]);
   const [adminName, setAdminName] = useState<string>('');
   const [openReportCount, setOpenReportCount] = useState<number | null>(null);
+
+  const [showAccount, setShowAccount] = useState(false);
+  const [adminId, setAdminId] = useState<string>('');
+  const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 
   const [userView, setUserView] = useState<UserViewState>({
     active: false,
@@ -67,6 +72,8 @@ export default function AdminPanelPage() {
           (profile.name as string | undefined) ||
           'Administrator';
         setAdminName(name);
+        const profileId = (profile.id as string | undefined) || (profile.user_id as string | undefined) || '';
+        setAdminId(profileId);
       })
       .catch(() => {});
     return () => {
@@ -109,6 +116,7 @@ export default function AdminPanelPage() {
   };
 
   const switchTab = (tab: AdminTab) => {
+    setShowAccount(false);
     setStack([]);
     setActiveTab(tab);
   };
@@ -185,6 +193,8 @@ export default function AdminPanelPage() {
                 type="button"
                 onClick={() => setUserView((v) => ({ ...v, active: !v.active }))}
                 aria-label="Toggle user view"
+                onMouseEnter={() => setHoveredBtn('userview')}
+                onMouseLeave={() => setHoveredBtn(null)}
                 className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all"
                 style={
                   userView.active
@@ -193,11 +203,15 @@ export default function AdminPanelPage() {
                         border: '1px solid var(--adm-primary)',
                         boxShadow: 'var(--adm-shadow-glow)',
                         color: 'white',
+                        height: 36,
+                        fontSize: 12.5,
                       }
                     : {
-                        background: 'var(--adm-secondary)',
-                        borderColor: 'var(--adm-border)',
+                        background: hoveredBtn === 'userview' ? 'hsl(213 50% 17%)' : 'var(--adm-card)',
+                        borderColor: hoveredBtn === 'userview' ? 'hsl(271 76% 53% / .6)' : 'var(--adm-border)',
                         color: 'var(--adm-muted-fg)',
+                        height: 36,
+                        fontSize: 12.5,
                       }
                 }
               >
@@ -205,16 +219,73 @@ export default function AdminPanelPage() {
                 User view
               </button>
 
+              {/* My Account button */}
+              {adminName && (
+                <button
+                  type="button"
+                  aria-label="My account"
+                  onClick={() => {
+                    setShowAccount((prev) => !prev);
+                    if (userView.active) setUserView((v) => ({ ...v, active: false }));
+                  }}
+                  onMouseEnter={() => setHoveredBtn('account')}
+                  onMouseLeave={() => setHoveredBtn(null)}
+                  className="inline-flex items-center gap-1.5 rounded-full border transition-all"
+                  style={{
+                    height: 36,
+                    paddingLeft: 6,
+                    paddingRight: 12,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    borderRadius: 999,
+                    background: 'var(--adm-card)',
+                    borderColor: showAccount
+                      ? 'var(--adm-primary)'
+                      : hoveredBtn === 'account'
+                        ? 'hsl(271 76% 53% / .6)'
+                        : 'var(--adm-border)',
+                    boxShadow: showAccount ? 'var(--adm-shadow-glow)' : 'none',
+                    color: showAccount ? 'var(--adm-fg)' : 'var(--adm-muted-fg)',
+                  }}
+                >
+                  {/* Initials avatar */}
+                  <span
+                    className="flex items-center justify-center text-white shrink-0"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      background: 'var(--adm-grad)',
+                      borderRadius: '50%',
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {adminName
+                      .trim()
+                      .split(/\s+/)
+                      .map((w) => w[0])
+                      .slice(0, 2)
+                      .join('')
+                      .toUpperCase()}
+                  </span>
+                  My account
+                </button>
+              )}
+
               {/* Sign Out */}
               <button
                 type="button"
                 onClick={handleSignOut}
                 aria-label="Sign out"
+                onMouseEnter={() => setHoveredBtn('signout')}
+                onMouseLeave={() => setHoveredBtn(null)}
                 className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all"
                 style={{
-                  borderColor: 'var(--adm-border)',
+                  borderColor: hoveredBtn === 'signout' ? 'hsl(271 76% 53% / .6)' : 'var(--adm-border)',
                   background: 'var(--adm-card)',
                   color: 'var(--adm-muted-fg)',
+                  height: 36,
+                  fontSize: 12.5,
                 }}
               >
                 <LogOut className="h-3.5 w-3.5" />
@@ -224,7 +295,7 @@ export default function AdminPanelPage() {
           </div>
 
           {/* 4-Tab segmented control — only visible when no stack AND not in user view */}
-          {showTabs && !userView.active && (
+          {showTabs && !userView.active && !showAccount && (
             <div
               role="tablist"
               aria-label="Admin sections"
@@ -275,6 +346,11 @@ export default function AdminPanelPage() {
 
       {/* Main Content */}
       <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
+        {/* My Account view */}
+        {showAccount && topOfStack === null && !userView.active && (
+          <AdminMyAccount adminId={adminId} onClose={() => setShowAccount(false)} />
+        )}
+
         {/* Stack: user detail */}
         {topOfStack?.type === 'user-detail' && (
           <AdminUserDetail
@@ -338,7 +414,7 @@ export default function AdminPanelPage() {
         )}
 
         {/* Tab content — only shown when stack is empty and not in user view */}
-        {showTabs && !userView.active && (
+        {showTabs && !userView.active && !showAccount && (
           <>
             {activeTab === 'users' && (
               <AdminUsersTab
