@@ -9,7 +9,7 @@ import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { useNotifications, invalidateNotifications } from '@/lib/queries';
-import { userProfilePath } from '@/lib/friendsApi';
+import { userProfilePath, fetchIncomingRequests, FRIEND_REQUESTS_PATH, FRIENDS_CHANGED_EVENT, type FriendRequestItem } from '@/lib/friendsApi';
 
 type NotificationKind =
   | 'user_joined'
@@ -129,6 +129,23 @@ export default function NotificationsPage() {
     if (token) { setAuthToken(token); return token; }
     return null;
   };
+
+  // Friend requests still waiting for an answer (the same ones the Friends > Requests tab lists).
+  const [pendingRequests, setPendingRequests] = useState<FriendRequestItem[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetchIncomingRequests(1, 5)
+        .then((page) => { if (!cancelled) setPendingRequests(Array.isArray(page.data) ? page.data : []); })
+        .catch(() => { /* the notification list still works without it */ });
+    };
+    load();
+    window.addEventListener(FRIENDS_CHANGED_EVENT, load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(FRIENDS_CHANGED_EVENT, load);
+    };
+  }, []);
 
   const { data: rawNotifications, isLoading: queryLoading } = useNotifications();
   const [usingFallback, setUsingFallback] = useState(false);
@@ -281,7 +298,11 @@ export default function NotificationsPage() {
     }
     if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
     else if ((n.kind === 'friend_request' || n.kind === 'friend_request_accepted') && n.relatedUserId) {
+      // The other person's profile, where the request can be answered.
       navigate(userProfilePath(n.relatedUserId, getCurrentUser()?.id));
+    } else if (n.kind === 'friend_request') {
+      // No person attached to the notification: fall back to the Requests list.
+      navigate(FRIEND_REQUESTS_PATH);
     }
   };
 
@@ -466,6 +487,31 @@ export default function NotificationsPage() {
             );
           })}
         </div>
+
+        {/* Safety net: a request is waiting but no notification for that person was received. */}
+        {!loading && (subFilter === 'all' || subFilter === 'activity') && pendingRequests
+          .filter((req) => !items.some((n) => n.kind === 'friend_request' && n.relatedUserId === req.user.id))
+          .map((req) => (
+            <button
+              key={`pending-${req.request_id}`}
+              type="button"
+              onClick={() => navigate(userProfilePath(req.user.id, getCurrentUser()?.id))}
+              className="flex w-full items-center gap-3 rounded-2xl glass-card px-4 py-3 text-left transition-colors hover:bg-secondary/60"
+            >
+              <div className="shrink-0 rounded-xl p-2.5 shadow-xs text-primary bg-primary/20">
+                <Contact className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-foreground">
+                  {(req.user.full_name || req.user.display_name || 'Someone')} sent you a friend request
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {req.user.username ? `@${req.user.username} · ` : ''}Open profile to accept or decline
+                </p>
+              </div>
+              <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          ))}
 
         {/* Selection Bar */}
         {!loading && filteredItems.length > 0 && (

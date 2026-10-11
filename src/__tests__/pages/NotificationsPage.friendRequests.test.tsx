@@ -113,6 +113,16 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     );
   });
 
+  it('falls back to the Requests tab when a received friend request has no person attached', async () => {
+    useNotificationsMock.mockReturnValue({
+      data: [{ ...EXAMPLE_ROWS[0], related_user_id: null }],
+      isLoading: false,
+    });
+    renderPage();
+    fireEvent.click(screen.getByText('john_42 sent you a friend request'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/friends?tab=incoming'));
+  });
+
   it('opens the other user\'s profile when an accepted friend request is selected', async () => {
     renderPage();
     fireEvent.click(screen.getByText('jane_doe accepted your friend request'));
