@@ -55,7 +55,7 @@ export interface AdminEventPerson {
   icon_id?: string | null;
 }
 
-/** One row of GET /api/admin/events. */
+/** One row of GET /api/admin/events (lightweight shape). */
 export interface AdminEventListItem {
   id: string;
   title: string;
@@ -65,17 +65,14 @@ export interface AdminEventListItem {
   organizer: AdminEventPerson | null;
 }
 
-export interface AdminEventsResponse {
-  items: AdminEventListItem[];
-  total: number;
-  page: number;
-  limit: number;
-  total_pages: number;
-}
-
+/**
+ * A participant of an event. Declared once here: it covers the fields used by the
+ * admin details page (status, created_at) and by the older detail view (joined_at).
+ */
 export interface AdminEventParticipant extends AdminEventPerson {
   status?: string;
   created_at?: string;
+  joined_at?: string;
 }
 
 /** GET /api/admin/events/{id}: full event (also cancelled or ended) plus participants. */
@@ -157,14 +154,6 @@ export interface AdminUserDetailsFull extends AdminUserDetails {
 
 // ---- Events ----
 
-export interface AdminEventParticipant {
-  id: string;
-  username: string | null;
-  full_name: string;
-  avatar_url?: string | null;
-  joined_at?: string;
-}
-
 export interface AdminEventDetail {
   id: string;
   title: string;
@@ -201,6 +190,7 @@ export interface AdminEventSummaryFull {
   category?: string;
 }
 
+/** Declared once: the previous duplicate declaration with a different `items` type is removed. */
 export interface AdminEventsResponse {
   items: AdminEventSummaryFull[];
   total: number;
@@ -498,13 +488,19 @@ export async function liftSuspension(userId: string): Promise<AdminActionRespons
  * Fetches paginated events for the admin panel.
  */
 export async function fetchAdminEvents(
-page = 1, limit = 20, search?: string, catParam?: string,
+  page = 1,
+  limit = 20,
+  search?: string,
+  catParam?: string,
 ): Promise<AdminEventsResponse> {
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(limit));
   if (search?.trim()) {
     params.set('search', search.trim());
+  }
+  if (catParam?.trim()) {
+    params.set('category', catParam.trim());
   }
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_EVENTS)}?${params.toString()}`;
   const res = await fetch(url, {
@@ -517,6 +513,7 @@ page = 1, limit = 20, search?: string, catParam?: string,
 
 /**
  * Fetches detailed info for a single event, including participants.
+ * (Older shape. The admin details page uses fetchAdminEventDetails below.)
  */
 export async function fetchAdminEventDetail(eventId: string): Promise<AdminEventDetail> {
   const url = getApiUrl(API_ENDPOINTS.ADMIN_EVENT_DETAIL(eventId));
@@ -526,6 +523,21 @@ export async function fetchAdminEventDetail(eventId: string): Promise<AdminEvent
     cache: 'no-store',
   });
   return handleAdminResponse<AdminEventDetail>(res);
+}
+
+/**
+ * Fetches the full event for the admin details page: the event itself
+ * (also cancelled or ended), its organizer and its participants.
+ * GET /api/admin/events/{id}
+ */
+export async function fetchAdminEventDetails(eventId: string): Promise<AdminEventDetails> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_EVENT_DETAIL(eventId));
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  return handleAdminResponse<AdminEventDetails>(res);
 }
 
 /**
