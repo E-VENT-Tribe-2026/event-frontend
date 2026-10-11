@@ -60,7 +60,13 @@ export function getFullNameValidationError(raw: string): string | null {
   return null;
 }
 
-/** Accounts without a username must pick one, and a full name, before the app. */
-export function destinationAfterSignIn(username?: string | null): '/home' | '/choose-username' {
-  return hasChosenUsername(username) ? '/home' : '/choose-username';
+/** Accounts without a username must pick one, and a full name, before the app.
+ *  Administrator accounts with a username go directly to the admin panel. */
+export function destinationAfterSignIn(
+  username?: string | null,
+  role?: string | null,
+): '/admin' | '/home' | '/choose-username' {
+  if (!hasChosenUsername(username)) return '/choose-username';
+  if (role === 'administrator') return '/admin';
+  return '/home';
 }

@@ -106,7 +106,7 @@ describe('AdminVerifyPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /verify and continue/i }));
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith('/admin', { replace: true });
     });
     expect(getPendingAdminVerification()).toBeNull();
   });

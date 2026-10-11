@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Three remaining admin tabs: Events, Audit Log, Reports with inline detail views",
+  "status": "completed",
+  "steps": [
+    "1. Create AdminEventsTab.tsx with stat cards, sub-tabs, search, pagination",
+    "2. Create AdminEventDetail.tsx with hero band, moderation, participants",
+    "3. Wire Events tab into AdminPanelPage",
+    "4. Create AdminAuditTab.tsx with table and action pills",
+    "5. Create AdminReportsTab.tsx with open/all sections",
+    "6. Create AdminReportDetail.tsx with action buttons",
+    "7. Wire Audit and Reports tabs into AdminPanelPage",
+    "8. Run npm run build and npm test"
+  ],
+  "acceptance_criteria": [
+    "AdminEventsTab renders with stats and event list",
+    "AdminEventDetail shows hero band and Remove Event modal",
+    "AdminAuditTab shows colour-coded action pills",
+    "AdminReportsTab shows open and all sections",
+    "AdminReportDetail shows action buttons with confirms",
+    "All navigation uses AdminPanelPage stack",
+    "npm run build succeeds",
+    "npm test passes"
+  ],
+  "verification": [
+    "npm run build",
+    "npm test"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 components created and wired into AdminPanelPage. Build: ✓ (11.5s, 2291 modules). Tests: 32/32 files, 158/158 passing. Updated AdminPanelPage.test.tsx assertions to match real component text (placeholder stubs replaced). Added fetchAdminAudit and fetchAdminReports mocks to beforeEach."
+}

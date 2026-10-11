@@ -142,7 +142,7 @@ export default function AuthCallbackPage() {
         interests,
       });
 
-      const dest = destinationAfterSignIn(username);
+      const dest = destinationAfterSignIn(username, mfaStatus?.role ?? null);
       navigate(dest === '/home' ? nextPath : dest, { replace: true });
     };
 
