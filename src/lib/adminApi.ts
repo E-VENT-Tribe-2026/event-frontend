@@ -42,6 +42,62 @@ export interface AdminEventSummary {
   is_cancelled?: boolean;
 }
 
+export type AdminEventStatusFilter = 'all' | 'upcoming' | 'past' | 'cancelled';
+
+/** Person shown on an event (organizer or participant). Picture, full name and username. */
+export interface AdminEventPerson {
+  id: string;
+  username: string | null;
+  full_name: string;
+  display_name?: string;
+  avatar_url?: string | null;
+  avatar_kind?: string;
+  icon_id?: string | null;
+}
+
+/** One row of GET /api/admin/events. */
+export interface AdminEventListItem {
+  id: string;
+  title: string;
+  date: string;
+  status: string;
+  is_cancelled?: boolean;
+  organizer: AdminEventPerson | null;
+}
+
+export interface AdminEventsResponse {
+  items: AdminEventListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export interface AdminEventParticipant extends AdminEventPerson {
+  status?: string;
+  created_at?: string;
+}
+
+/** GET /api/admin/events/{id}: full event (also cancelled or ended) plus participants. */
+export interface AdminEventDetails {
+  id: string;
+  title: string;
+  description?: string | null;
+  category?: string | null;
+  start_datetime: string;
+  end_datetime?: string | null;
+  location_name?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  cost?: number | null;
+  max_capacity?: number | null;
+  status: string;
+  is_cancelled?: boolean;
+  organizer: AdminEventPerson | null;
+  participant_count?: number;
+  participants?: AdminEventParticipant[];
+}
+
 export interface AdminUserDetails {
   id: string;
   username: string | null;
@@ -250,9 +306,15 @@ async function handleAdminResponse<T>(res: Response): Promise<T> {
  * Calls GET /api/admin/verify or GET /api/auth/mfa/status.
  */
 export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; role?: string; adminId?: string }> {
-  if (getPendingAdminVerification()) return { isVerifiedAdmin: false };
+  if (getPendingAdminVerification()) {
+    console.debug('[AdminAuth] Admin status check skipped: pending MFA verification is active');
+    return { isVerifiedAdmin: false };
+  }
   const token = getAuthToken();
-  if (!token) return { isVerifiedAdmin: false };
+  if (!token) {
+    console.debug('[AdminAuth] Admin status check skipped: no session token');
+    return { isVerifiedAdmin: false };
+  }
 
   try {
     const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_VERIFY), {
@@ -263,17 +325,18 @@ export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; 
 
     if (res.ok) {
       const data = (await res.json().catch(() => ({}))) as AdminVerifyResponse;
+      console.log('[AdminAuth] Verified administrator status confirmed (200 OK)');
       return { isVerifiedAdmin: true, role: 'administrator', adminId: data.admin_id };
     }
 
-    // If /api/admin/verify returns 403 or 404, optionally check MFA status endpoint
-    if (res.status === 404 || res.status === 403) {
+    // If /api/admin/verify returns 404 (endpoint not deployed on legacy backend), fallback to MFA status endpoint
+    if (res.status === 404) {
       const mfaRes = await fetch(getApiUrl(API_ENDPOINTS.MFA_STATUS), {
         method: 'GET',
         headers: getAdminHeaders(),
         cache: 'no-store',
       });
-      if (mfaRes.ok) {
+      if (mfaRes?.ok) {
         const mfaData = (await mfaRes.json().catch(() => ({}))) as {
           is_admin?: boolean;
           role?: string;
@@ -281,13 +344,16 @@ export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; 
         };
         const isVerifiedAdmin = Boolean(mfaData.is_admin && mfaData.is_verified);
         if (isVerifiedAdmin) {
+          console.log('[AdminAuth] Verified administrator confirmed via /api/auth/mfa/status');
           return { isVerifiedAdmin: true, role: mfaData.role || 'administrator' };
         }
       }
     }
 
+    console.debug(`[AdminAuth] User is not a verified administrator (verify endpoint status: ${res.status})`);
     return { isVerifiedAdmin: false };
-  } catch {
+  } catch (err) {
+    console.error('[AdminAuth] Error checking admin status:', err);
     return { isVerifiedAdmin: false };
   }
 }
