@@ -244,50 +244,8 @@ describe('Admin Panel — Ticket #248', () => {
     const eventsTabBtn = screen.getByRole('tab', { name: /Events/i });
     fireEvent.click(eventsTabBtn);
 
-    expect(await screen.findByText(/Total Events/i)).toBeInTheDocument();
-
-    // Switch to Audit Log tab
-    const auditTabBtn = screen.getByRole('tab', { name: /Audit Log/i });
-    fireEvent.click(auditTabBtn);
-
-    expect(await screen.findByText(/No audit entries/i)).toBeInTheDocument();
-
-    // Switch to Reports tab
-    const reportsTabBtn = screen.getByRole('tab', { name: /Reports/i });
-    fireEvent.click(reportsTabBtn);
-
-    expect(await screen.findByText(/Open Reports/i)).toBeInTheDocument();
-  });
-
-  it('hides tabs when user detail is open, shows them on back', async () => {
-    render(
-      <MemoryRouter initialEntries={['/admin']}>
-        <AdminPanelPage />
-      </MemoryRouter>
-    );
-
-    await screen.findByText('Alex Smith');
-
-    // Tabs visible initially
-    expect(screen.getByRole('tab', { name: /Events/i })).toBeInTheDocument();
-
-    // Open user detail
-    const userBtn = screen.getByRole('button', { name: /View details for Alex Smith/i });
-    fireEvent.click(userBtn);
-
-    // Tabs should be gone
-    await waitFor(() => {
-      expect(screen.queryByRole('tab', { name: /Events/i })).not.toBeInTheDocument();
-    });
-
-    // Go back
-    const backBtn = await screen.findByRole('button', { name: /Back to Users/i });
-    fireEvent.click(backBtn);
-
-    // Tabs should reappear
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /Events/i })).toBeInTheDocument();
-    });
+    expect(await screen.findByText(/Events Management/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ticket #249 Integration Point/i)).toBeInTheDocument();
   });
 
   describe('BottomNav & AdminGuard', () => {

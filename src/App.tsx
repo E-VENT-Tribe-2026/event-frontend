@@ -29,6 +29,7 @@ import TicketPage from "./pages/TicketPage";
 import NotFound from "./pages/NotFound";
 import RouteDocumentTitle from "./components/RouteDocumentTitle";
 import AdminPanelPage from "./pages/AdminPanelPage";
+import AdminEventDetailsPage from "./pages/AdminEventDetailsPage";
 import AdminGuard from "@/components/AdminGuard";
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
@@ -182,6 +183,7 @@ const App = () => (
             <Route path="/payment/:eventId" element={<RequireUsername><PaymentPage /></RequireUsername>} />
             <Route path="/dashboard" element={<RequireUsername><OrganizerDashboardPage /></RequireUsername>} />
             <Route path="/admin" element={<RequireUsername><AdminGuard><AdminPanelPage /></AdminGuard></RequireUsername>} />
+            <Route path="/admin/events/:eventId" element={<RequireUsername><AdminGuard><AdminEventDetailsPage /></AdminGuard></RequireUsername>} />
             <Route path="/ticket/:ticketId" element={<RequireUsername><TicketPage /></RequireUsername>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
