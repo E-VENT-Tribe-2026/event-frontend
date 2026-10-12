@@ -1,6 +1,6 @@
 // In-memory "database" helpers (no localStorage)
 
-export type UserRole = 'participant' | 'organizer';
+export type UserRole = 'participant' | 'organizer' | 'administrator';
 
 export interface User {
   id: string;

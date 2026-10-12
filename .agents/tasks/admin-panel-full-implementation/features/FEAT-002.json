@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Core admin panel UI: rebuild AdminPanelPage with 4-tab stack navigation, no BottomNav, AdminUserDetail inline component, admin redirect in RequireUsername",
+  "status": "completed",
+  "steps": [
+    "1. Rebuild AdminPanelPage with navigation state machine, sticky header, sign-out button, 4 tabs",
+    "2. Create AdminUserDetail.tsx with moderation actions and navigation",
+    "3. Refactor AdminUsersTab to call onOpenUser prop instead of modal",
+    "4. Update RequireUsername to redirect admins to /admin",
+    "5. Update AdminPanelPage.test.tsx for new structure"
+  ],
+  "acceptance_criteria": [
+    "AdminPanelPage has no BottomNav",
+    "Sticky header shows Shield icon, title, admin name, Sign Out button",
+    "4 tab buttons visible when stack empty",
+    "User detail shows inline with actions",
+    "RequireUsername redirects administrators",
+    "npm test passes"
+  ],
+  "verification": [
+    "npm run build",
+    "npm test"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 steps completed. Build: clean (vite 11.34s). Tests: 158/158 passed across 32 files. Two test fixes needed during implementation: (1) DialogTitle text matched 'Grant Administrator Role?' (with ?) per original modal; (2) Audit Log tab test used unique paragraph text to avoid multi-match on 'Audit Log'. RequireUsername now reads role from profile fetch and redirects administrators to /admin for non-exempt paths."
+}

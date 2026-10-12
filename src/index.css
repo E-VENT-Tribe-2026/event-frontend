@@ -254,3 +254,28 @@
 .dual-range-input::-moz-range-track {
   background: transparent;
 }
+
+.adm {
+  --adm-bg:           hsl(213 61% 11%);
+  --adm-bg-deep:      hsl(213 60% 8%);
+  --adm-card:         hsl(213 50% 15%);
+  --adm-card-2:       hsl(213 50% 13%);
+  --adm-secondary:    hsl(213 40% 20%);
+  --adm-muted:        hsl(213 30% 18%);
+  --adm-muted-fg:     hsl(213 20% 64%);
+  --adm-fg:           hsl(0 0% 95%);
+  --adm-border:       hsl(213 30% 22%);
+  --adm-primary:      hsl(271 76% 53%);
+  --adm-primary-text: hsl(271 92% 76%);
+  --adm-accent:       hsl(330 100% 59%);
+  --adm-danger:       hsl(0 84% 60%);
+  --adm-danger-text:  hsl(0 92% 74%);
+  --adm-warn:         hsl(38 92% 52%);
+  --adm-warn-text:    hsl(38 95% 66%);
+  --adm-ok:           hsl(152 60% 42%);
+  --adm-ok-text:      hsl(152 62% 62%);
+  --adm-info-text:    hsl(199 90% 70%);
+  --adm-grad:         linear-gradient(135deg, hsl(271 76% 53%), hsl(330 100% 59%));
+  --adm-grad-card:    linear-gradient(145deg, hsl(213 50% 17%), hsl(213 50% 13%));
+  --adm-shadow-glow:  0 0 20px hsl(271 76% 53% / .3);
+}

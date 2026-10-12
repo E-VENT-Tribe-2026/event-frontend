@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Foundation: fix UserRole type gap, extend apiUrls.ts, add all missing admin API functions",
+  "status": "completed",
+  "steps": [
+    "1. In src/lib/storage.ts line 4, change UserRole to include 'administrator'",
+    "2. In src/lib/apiUrls.ts, add 11 new endpoint constants after ADMIN_GRANT_ROLE",
+    "3. In src/lib/adminApi.ts, add TypeScript interfaces for full responses",
+    "4. In src/lib/adminApi.ts, add 11 new API functions",
+    "5. Run npm run build and fix TypeScript errors"
+  ],
+  "acceptance_criteria": [
+    "npm run build completes without errors",
+    "npm test passes",
+    "UserRole includes administrator",
+    "adminApi.ts exports warnUser suspendUser liftSuspension fetchAdminEvents etc"
+  ],
+  "verification": [
+    "npm run build",
+    "npm test"
+  ],
+  "blocked_reason": null,
+  "findings": "UserRole now includes 'administrator'. apiUrls.ts has 12 new endpoint constants: ADMIN_USER_WARN, ADMIN_USER_WITHDRAW_WARNING, ADMIN_USER_SUSPEND, ADMIN_USER_LIFT, ADMIN_EVENTS, ADMIN_EVENT_DETAIL, ADMIN_EVENT_REMOVE, ADMIN_AUDIT, ADMIN_REPORTS, ADMIN_REPORT_DETAIL, ADMIN_REPORT_DISMISS, ADMIN_REPORT_ACTION. adminApi.ts exports new interfaces: AdminUserDetailsFull (extends AdminUserDetails with is_suspended/suspension/warnings/email), AdminUserWarning, AdminUserSuspension, AdminEventParticipant, AdminEventDetail, AdminEventSummaryFull, AdminEventsResponse, AdminAuditEntry, AdminAuditResponse, AdminReportSummary, AdminReportsResponse, AdminReportDetail, AdminActionResponse, AdminWarnResponse. New exported functions: warnUser, withdrawWarning, suspendUser, liftSuspension, fetchAdminEvents, fetchAdminEventDetail, removeEvent, fetchAdminAudit, fetchAdminReports, fetchAdminReportDetail, dismissReport, actionReport. fetchAdminUserDetails return type updated to AdminUserDetailsFull. Build: 2286 modules transformed, no TS errors. Tests: 32 files / 157 tests all passed."
+}

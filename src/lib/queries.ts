@@ -9,7 +9,7 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient } from './queryClient';
 import { getApiUrl } from './api';
-import { getAuthToken } from './auth';
+import { getAuthToken, notifyAuthExpired } from './auth';
 import { mapApiEventToItem, parseEventsApiList } from './mapApiEvent';
 import { fetchNotifications, type ApiNotification } from './notificationsApi';
 import { fetchUserProfile } from './userProfileApi';
@@ -39,6 +39,10 @@ function authHeaders() {
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(getApiUrl(path), { headers: authHeaders(), ...init });
+  if (res.status === 401) {
+    notifyAuthExpired();
+    throw new Error(`API 401: ${path}`);
+  }
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
   return res.json() as Promise<T>;
 }

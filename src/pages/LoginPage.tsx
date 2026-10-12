@@ -117,9 +117,10 @@ export default function LoginPage() {
         avatar: avatarUrl,
         bio,
         interests,
+        role: typeof authStatus.role === 'string' ? authStatus.role : undefined,
       });
       setPassword('');
-      navigate(destinationAfterSignIn(username));
+      navigate(destinationAfterSignIn(username, typeof authStatus.role === 'string' ? authStatus.role : null));
     } catch {
       setToast({ show: true, message: 'Connection failed', type: 'error' });
       setIsSubmitting(false);

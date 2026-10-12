@@ -22,11 +22,19 @@ export default function AdminEventDetailsPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!eventId) return;
+    // No id in the URL: show an error instead of loading forever.
+    if (!eventId) {
+      setEvent(null);
+      setError('No event was specified.');
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError('');
     setEvent(null);
+
     fetchAdminEventDetails(eventId)
       .then((data) => {
         if (!cancelled) setEvent(data);
@@ -37,18 +45,20 @@ export default function AdminEventDetailsPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
   }, [eventId]);
 
   const goBack = () => {
-    // Come back to wherever the admin was (Events tab or a user's details).
+    // Come back to wherever the admin was (Events tab, a user's details, or the user view map).
     if (window.history.length > 1) navigate(-1);
     else navigate('/admin?tab=events', { replace: true });
   };
 
   const participants = event?.participants ?? [];
+  const participantTotal = event?.participant_count ?? participants.length;
   const cost = formatCost(event?.cost);
 
   return (
@@ -90,7 +100,7 @@ export default function AdminEventDetailsPage() {
           <>
             <section className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
-                <h2 className="text-xl font-extrabold text-foreground break-words">{event.title}</h2>
+                <h2 className="break-words text-xl font-extrabold text-foreground">{event.title}</h2>
                 {isEventCancelled(event) && (
                   <span className="shrink-0 rounded-full bg-destructive/15 px-2.5 py-1 text-[11px] font-semibold text-destructive">
                     Cancelled
@@ -142,12 +152,14 @@ export default function AdminEventDetailsPage() {
                     </div>
                   </div>
                 )}
-                {event.max_capacity != null && (
+                {event.max_capacity != null && event.max_capacity > 0 && (
                   <div className="flex items-start gap-2.5">
                     <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                     <div>
                       <dt className="sr-only">Capacity</dt>
-                      <dd className="text-foreground">Capacity: {event.max_capacity}</dd>
+                      <dd className="text-foreground">
+                        {participantTotal} of {event.max_capacity} spots taken
+                      </dd>
                     </div>
                   </div>
                 )}
@@ -165,7 +177,7 @@ export default function AdminEventDetailsPage() {
 
             <section className="space-y-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Participants ({event.participant_count ?? participants.length})
+                Participants ({participantTotal})
               </h3>
               {participants.length === 0 ? (
                 <p className="text-xs italic text-muted-foreground/70">No participants yet.</p>
