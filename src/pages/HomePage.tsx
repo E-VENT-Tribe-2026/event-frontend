@@ -388,13 +388,16 @@ export default function HomePage() {
     setVisibleAll(PAGE);
   }, [budgetMin, budgetMax, category, debouncedDate, selectedCity, debouncedSearch]);
 
-  // ---------- Derived data ----------
-  const events = useMemo(() => {
-    const local = getLocalEvents().filter((e) => !e.isDraft);
-    const byId = new Map<string, EventItem>();
-    [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
-    return Array.from(byId.values());
-  }, [apiEvents]);
+const events = useMemo(() => {
+  const local = getLocalEvents().filter((e) => !e.isDraft);
+  const byId = new Map<string, EventItem>();
+  
+  [...apiEvents, ...local]
+    .filter((e) => isEventUpcoming(e) && String(e.status || '').toLowerCase() !== 'cancelled')
+    .forEach((e) => byId.set(e.id, e));
+    
+  return Array.from(byId.values());
+}, [apiEvents]);
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
@@ -408,17 +411,18 @@ export default function HomePage() {
   }, [myEventsData, joinedEventsData]);
 
   const applyFilters = useCallback(
-    (list: EventItem[]) =>
-      list.filter((e) => {
-        if (!isEventUpcoming(e)) return false;
-        if (e.budget < budgetMin || e.budget > budgetMax) return false;
-        if (category !== 'All' && e.category !== category) return false;
-        if (debouncedDate && e.date !== debouncedDate) return false;
-        if (selectedCity && extractCityFromLocation(e.location || '') !== selectedCity) return false;
-        return true;
-      }),
-    [budgetMin, budgetMax, category, debouncedDate, selectedCity],
-  );
+  (list: EventItem[]) =>
+    list.filter((e) => {
+      if (!isEventUpcoming(e)) return false;
+      if (String(e.status || '').toLowerCase() === 'cancelled') return false;
+      if (e.budget < budgetMin || e.budget > budgetMax) return false;
+      if (category !== 'All' && e.category !== category) return false;
+      if (debouncedDate && e.date !== debouncedDate) return false;
+      if (selectedCity && extractCityFromLocation(e.location || '') !== selectedCity) return false;
+      return true;
+    }),
+  [budgetMin, budgetMax, category, debouncedDate, selectedCity],
+);
 
   const filtered = useMemo(() => applyFilters(events), [events, applyFilters]);
   const filteredRecommendations = useMemo(
