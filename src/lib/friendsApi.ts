@@ -69,6 +69,9 @@ export class FriendsApiError extends Error {
 
 export const FRIENDS_CHANGED_EVENT = 'eventapp:friends-changed';
 
+/** The Friends screen opened on its Requests tab (incoming requests with Accept / Decline). */
+export const FRIEND_REQUESTS_PATH = '/friends?tab=incoming';
+
 /** Path of a user's profile page; one's own account opens the Profile tab. */
 export function userProfilePath(userId: string, currentUserId?: string | null): string {
   return currentUserId && userId === currentUserId ? '/profile' : `/user/${userId}`;
