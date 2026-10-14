@@ -24,6 +24,10 @@ export const API_ENDPOINTS = {
   ADMIN_REPORT_DISMISS: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/dismiss`,
   ADMIN_REPORT_ACTION: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/action`,
   MFA_STATUS: '/api/auth/mfa/status',
+  ASSISTANT_CHAT: '/api/assistant/chat',
+  ASSISTANT_TOOL_SEARCH: '/api/assistant/tools/search-events',
+  ASSISTANT_TOOL_EVENT_DETAILS: '/api/assistant/tools/event-details',
+  ASSISTANT_TOOL_DRAFT_EVENT: '/api/assistant/tools/draft-event',
 } as const;
 
 

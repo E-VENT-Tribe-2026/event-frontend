@@ -37,6 +37,7 @@ import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
 import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
+import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
 import { logout, getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
@@ -199,6 +200,7 @@ const App = () => (
             <Route path="/ticket/:ticketId" element={<RequireUsername><TicketPage /></RequireUsername>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          <AIAssistantWidget />
         </SessionGuard>
       </BrowserRouter>
     </TooltipProvider>
