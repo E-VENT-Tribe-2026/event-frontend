@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { User } from '@/lib/storage';
 import ChatPage from '@/pages/ChatPage';
@@ -197,7 +197,9 @@ describe('ChatPage', () => {
     });
 
     renderChat();
-    await openChat(/Locked Event/i);
+    // The 403 is handled right after the click; keep those updates inside act().
+    const lockedChat = await screen.findByRole('button', { name: /Locked Event/i });
+    await act(async () => { fireEvent.click(lockedChat); });
 
     await waitFor(() => expect(screen.getByPlaceholderText(/Type a message/i)).toBeDisabled());
     expect(screen.getByText('Chat unavailable')).toBeInTheDocument();

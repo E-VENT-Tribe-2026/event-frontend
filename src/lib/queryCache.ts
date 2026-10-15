@@ -162,6 +162,16 @@ export function setCacheEntry<T>(
 }
 
 /**
+ * Read a cached value without fetching, even if it is stale. Returns null when nothing is cached.
+ */
+export function peekCache<T>(key: string): T | null {
+  const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
+  if (memEntry) return memEntry.data;
+  const sessEntry = PERSISTENT_KEYS.has(key) ? readFromSession<T>(key) : null;
+  return sessEntry?.data ?? null;
+}
+
+/**
  * Invalidate a specific cache key.
  */
 export function invalidate(key: string): void {
