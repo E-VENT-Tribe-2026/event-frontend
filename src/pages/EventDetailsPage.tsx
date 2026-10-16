@@ -19,6 +19,9 @@ import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { formatUserIdentity } from '@/lib/userIdentity';
+import InvitedByBanner from '@/components/InvitedByBanner';
+import InviteFriendsDialog from '@/components/InviteFriendsDialog';
+import type { EventInvitationSummary } from '@/lib/invitationsApi';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
@@ -51,6 +54,8 @@ export default function EventDetailsPage() {
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
   const [isCancellingEvent, setIsCancellingEvent] = useState(false);
   const [backendAuthUserId, setBackendAuthUserId] = useState<string | null>(null);
+  const [invitation, setInvitation] = useState<EventInvitationSummary | null>(null);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
   const user = getCurrentUser();
   const allUsers = getUsers();
 
@@ -93,6 +98,7 @@ export default function EventDetailsPage() {
         return false;
       }
       await syncParticipationFromBackend();
+      setInvitation(null); // joining removes the invitation
       setToast({ show: true, message: 'Successfully joined!', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
       invalidatePrefix('/api/events?');
@@ -221,6 +227,7 @@ export default function EventDetailsPage() {
         const mapped = mapApiEventToItem(data);
         setApiEvent(mapped);
         setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+        setInvitation((data?.invitation as EventInvitationSummary | null | undefined) ?? null);
         setParticipationKnown(false);
 
         const creatorId = data.created_by || data.organizer_id || mapped.organizerId;
@@ -383,6 +390,7 @@ export default function EventDetailsPage() {
   const isEventPassed = !isEventUpcoming(event);
   const isPastEvent = !isCancelledEvent && isEventPassed;
   const isUpcomingEvent = !isCancelledEvent && isEventUpcoming(event);
+  const canInviteFriends = Boolean(user && useApiParticipation && isUpcomingEvent && (isEventOwner || hasJoined));
   const isChatExpired = isEventPassed && (() => {
     const normalized = /[Zz]$\vert{}[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
     const ts = new Date(normalized).getTime();
@@ -707,6 +715,7 @@ export default function EventDetailsPage() {
       </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-10 relative z-10 space-y-6">
+        <InvitedByBanner invitation={invitation} />
         <div className="rounded-2xl glass-card p-5 space-y-4">
           <div className="flex items-start justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -793,10 +802,21 @@ export default function EventDetailsPage() {
 
         {/* Full attendee list */}
         <div className="rounded-2xl glass-card p-4 space-y-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Users className="h-4 w-4 text-primary" />
-            Attendees
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Users className="h-4 w-4 text-primary" />
+              Attendees
+            </h2>
+            {canInviteFriends && (
+              <button
+                type="button"
+                onClick={() => setShowInviteDialog(true)}
+                className="inline-flex items-center gap-1 rounded-full gradient-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow"
+              >
+                <UserPlus className="h-3.5 w-3.5" /> Invite friends
+              </button>
+            )}
+          </div>
           {canViewFullAttendeeList ? (
             (!participationKnown || (useApiParticipation && apiParticipants.length === 0 && !participationKnown)) && useApiParticipation ? (
               <div className="space-y-2">
@@ -854,6 +874,10 @@ export default function EventDetailsPage() {
             </p>
           )}
         </div>
+
+        {canInviteFriends && (
+          <InviteFriendsDialog open={showInviteDialog} onOpenChange={setShowInviteDialog} eventId={event.id} />
+        )}
 
         {/* Map */}
         <div className="rounded-2xl glass-card p-4 space-y-3">
