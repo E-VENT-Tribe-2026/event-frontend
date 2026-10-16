@@ -98,6 +98,7 @@ export function parseFriendsError(status: number, body: unknown): FriendsApiErro
   if (typeof detail === 'string' && detail.trim()) return new FriendsApiError(detail, status);
   if (status === 401) return new FriendsApiError('Your session has expired. Please sign in again.', status);
   if (status === 422) return new FriendsApiError('The request was not valid. Please try again.', status);
+  if (status === 429) return new FriendsApiError('You have sent too many friend requests. Please try again later.', status);
   return new FriendsApiError('Something went wrong. Please try again.', status);
 }
 

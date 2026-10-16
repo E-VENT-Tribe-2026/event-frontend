@@ -27,6 +27,7 @@ import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } f
 import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
 import { storageRefusalMessage } from '@/lib/profilePhoto';
 import { PROFILE_ICONS } from '@/lib/profileAssets';
+import { toProfileVisibility, type ProfileVisibility } from '@/lib/userProfileApi';
 import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
 import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
 import { 
@@ -55,6 +56,15 @@ const PROFILE_AVATARS = AVATAR_SEEDS.map((seed) => ({
   id: seed,
   url: getGeneratedAvatarUrl(seed),
 }));
+
+const PROFILE_VISIBILITY_OPTIONS: Array<{ value: ProfileVisibility; label: string; hint: string }> = [
+  { value: 'public', label: 'Public', hint: 'Everyone can see your profile. Only your friends see your upcoming events.' },
+  {
+    value: 'friends_only',
+    label: 'Friends only',
+    hint: 'People who are not your friends see only your username, full name, profile picture and banner.',
+  },
+];
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -89,6 +99,8 @@ export default function ProfilePage() {
   const photoRef = useRef<HTMLInputElement>(null);
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
+  const [visibility, setVisibility] = useState<ProfileVisibility>('public');
+  const [savedVisibility, setSavedVisibility] = useState<ProfileVisibility>('public');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   
   // Navigation Tabs: Main parent tabs ('events' | 'friends')
@@ -269,6 +281,8 @@ export default function ProfilePage() {
             setSavedName(loadedName);
             setSavedBio(String(data.bio || ''));
             setSavedInterests(Array.isArray(data.interests) ? data.interests : []);
+            setVisibility(toProfileVisibility(data.visibility));
+            setSavedVisibility(toProfileVisibility(data.visibility));
             setUsername(typeof data.username === 'string' ? data.username : '');
             
             setAvatarUrl(loadedAvatar);
@@ -359,6 +373,7 @@ export default function ProfilePage() {
     setName(savedName);
     setBio(savedBio);
     setInterests(savedInterests);
+    setVisibility(savedVisibility);
     setPreviewAvatarUrl(avatarUrl);
     setPreviewBannerUrl(bannerUrl);
     setPreviewAvatarKind(avatarKind);
@@ -463,6 +478,7 @@ export default function ProfilePage() {
           full_name: cleaned,
           bio,
           interests,
+          visibility,
           avatar_url: previewAvatarUrl,
           banner_url: previewBannerUrl || null,
           avatar_kind: previewAvatarKind,
@@ -487,6 +503,9 @@ export default function ProfilePage() {
         setSavedName(nextName);
         setSavedBio(bio);
         setSavedInterests(interests);
+        const nextVisibility = toProfileVisibility(savedProfile?.visibility ?? visibility);
+        setVisibility(nextVisibility);
+        setSavedVisibility(nextVisibility);
         
         setAvatarUrl(previewAvatarUrl);
         setBannerUrl(previewBannerUrl);
@@ -793,6 +812,37 @@ export default function ProfilePage() {
           ) : (
             <p className="text-xs text-muted-foreground text-center py-2">No interests selected yet.</p>
           )}
+        </div>
+
+        {/* Profile visibility */}
+        <div className="rounded-2xl glass-card p-4 space-y-2">
+          <h3 className="text-sm font-semibold">Profile visibility</h3>
+          {editing ? (
+            <div className="flex gap-1 rounded-xl bg-secondary/60 p-1" role="radiogroup" aria-label="Profile visibility">
+              {PROFILE_VISIBILITY_OPTIONS.map((option) => {
+                const selected = visibility === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setVisibility(option.value)}
+                    className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-all ${selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-testid="profile-visibility">
+              {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.label}
+            </p>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.hint}
+          </p>
         </div>
 
         {/* Save/Cancel Buttons */}
