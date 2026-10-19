@@ -3,6 +3,7 @@ import { AUTH_TOKEN_EVENT, getAuthToken } from '@/lib/auth';
 import type { EventItem } from '@/lib/storage';
 import { FRIENDS_CHANGED_EVENT, type UserSummary } from '@/lib/friendsApi';
 import { fetchAllFriends, fetchEventParticipants, friendsGoingToEvent, goingParticipantIds } from '@/lib/eventSocial';
+import { EVENTS_CHANGED_EVENT } from '@/lib/realtimeEvents';
 
 export function useFriendsGoing(eventId: string | undefined) {
   const [friends, setFriends] = useState<UserSummary[]>([]);
@@ -27,10 +28,12 @@ export function useFriendsGoing(eventId: string | undefined) {
     void load();
     const onChange = () => { void load(); };
     window.addEventListener(FRIENDS_CHANGED_EVENT, onChange);
+    window.addEventListener(EVENTS_CHANGED_EVENT, onChange);
     window.addEventListener(AUTH_TOKEN_EVENT, onChange);
     return () => {
       cancelled = true;
       window.removeEventListener(FRIENDS_CHANGED_EVENT, onChange);
+      window.removeEventListener(EVENTS_CHANGED_EVENT, onChange);
       window.removeEventListener(AUTH_TOKEN_EVENT, onChange);
     };
   }, [eventId]);
@@ -84,10 +87,12 @@ export function useFriendsGoingEvents(events: EventItem[], limit = 24) {
     void load();
     const onChange = () => { void load(); };
     window.addEventListener(FRIENDS_CHANGED_EVENT, onChange);
+    window.addEventListener(EVENTS_CHANGED_EVENT, onChange);
     window.addEventListener(AUTH_TOKEN_EVENT, onChange);
     return () => {
       cancelled = true;
       window.removeEventListener(FRIENDS_CHANGED_EVENT, onChange);
+      window.removeEventListener(EVENTS_CHANGED_EVENT, onChange);
       window.removeEventListener(AUTH_TOKEN_EVENT, onChange);
     };
   }, [key, eventById]);

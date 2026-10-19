@@ -14,7 +14,7 @@ import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
-import { invalidatePrefix } from '@/lib/queryCache';
+import { invalidateEvents } from '@/lib/queries';
 import { sanitizeText } from '@/lib/sanitize';
 
 function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
@@ -299,8 +299,7 @@ export default function CreateEventPage() {
 
       addEvent(localEvent);
       setToast({ show: true, message: 'Event Published Successfully!', type: 'success' });
-      invalidatePrefix('/api/events?');
-      invalidatePrefix('/api/events/my-events');
+      invalidateEvents();
       setTimeout(() => navigate('/home'), 1500);
     } catch (err: any) {
       clearTimeout(timeoutId);

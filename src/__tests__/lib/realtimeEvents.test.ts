@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { eventIdFromRealtimeRow } from '@/lib/realtimeEvents';
+import { describe, it, expect, vi } from 'vitest';
+import { eventIdFromRealtimeRow, EVENTS_CHANGED_EVENT, notifyEventsChanged } from '@/lib/realtimeEvents';
 
 describe('eventIdFromRealtimeRow', () => {
   it('reads event_id from an insert payload', () => {
@@ -12,5 +12,15 @@ describe('eventIdFromRealtimeRow', () => {
 
   it('returns null when neither row has an event id', () => {
     expect(eventIdFromRealtimeRow({ new: { id: 'm1' }, old: {} })).toBeNull();
+  });
+});
+
+describe('notifyEventsChanged', () => {
+  it('dispatches a window event for homepage listeners', () => {
+    const onChange = vi.fn();
+    window.addEventListener(EVENTS_CHANGED_EVENT, onChange);
+    notifyEventsChanged();
+    expect(onChange).toHaveBeenCalled();
+    window.removeEventListener(EVENTS_CHANGED_EVENT, onChange);
   });
 });

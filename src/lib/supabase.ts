@@ -29,9 +29,17 @@ export async function syncSupabaseSession(
   refreshToken?: string | null,
 ): Promise<void> {
   if (!supabase || !accessToken) return;
+  // Realtime RLS uses this JWT even when the backend omits a refresh token.
+  try {
+    supabase.realtime.setAuth(accessToken);
+  } catch {
+    /* ignore */
+  }
+  const refresh = typeof refreshToken === 'string' ? refreshToken : '';
+  if (!refresh) return;
   const { error } = await supabase.auth.setSession({
     access_token: accessToken,
-    refresh_token: typeof refreshToken === 'string' ? refreshToken : '',
+    refresh_token: refresh,
   });
   if (error) {
     console.warn('Supabase session sync failed:', error.message);
