@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Calendar, Clock, UserMinus, UserPlus, X, Check, Users, UserCheck } from 'lucide-react';
+import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users, UserCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -16,10 +16,12 @@ import { queryClient } from '@/lib/queryClient';
 import {
   FriendsApiError,
   acceptFriendRequest,
+  blockUser,
   cancelFriendRequest,
   declineFriendRequest,
   removeFriend,
   sendFriendRequest,
+  unblockUser,
   userAvatarUrl,
   userProfilePath,
   fetchFriends,
@@ -29,7 +31,7 @@ import { ProfileLoadError, type ProfileEventGroup, type UserProfile } from '@/li
 
 type MainTab = 'events' | 'friends';
 type EventTab = 'upcoming' | 'past';
-type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove';
+type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove' | 'block' | 'unblock';
 
 const EMPTY_GROUP: ProfileEventGroup = { upcoming: [], past: [] };
 
@@ -91,6 +93,10 @@ export default function UserProfilePage() {
   const [mainTab, setMainTab] = useState<MainTab>('events');
   const [eventTab, setEventTab] = useState<EventTab>('upcoming');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
+  const [blockedByMe, setBlockedByMe] = useState(false);
+  useEffect(() => {
+    setBlockedByMe(false);
+  }, [userId]);
 
   // Friends Data State for the viewed user
   const [userFriends, setUserFriends] = useState<FriendItem[]>([]);
@@ -120,9 +126,14 @@ export default function UserProfilePage() {
     userId,
   );
 
-  // Fetch friends list
+  // Fetch friends list (hidden when the viewer has blocked this user)
   useEffect(() => {
     if (!userId) return;
+    if (blockedByMe || profile?.blocked_by_me || profile?.friendship?.status === 'blocked') {
+      setUserFriends([]);
+      setFriendsLoading(false);
+      return;
+    }
     let cancelled = false;
     setFriendsLoading(true);
     fetchFriends(1, 50)
@@ -136,12 +147,12 @@ export default function UserProfilePage() {
         if (!cancelled) setFriendsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, blockedByMe, profile?.blocked_by_me, profile?.friendship?.status]);
 
   const action = useMutation({
     mutationFn: async (kind: FriendshipAction) => {
       if (!profile) return;
-      const requestId = profile.friendship.request_id;
+      const requestId = profile.friendship?.request_id;
       switch (kind) {
         case 'send':
           return sendFriendRequest(profile.id);
@@ -153,9 +164,15 @@ export default function UserProfilePage() {
           return declineFriendRequest(requestId as number);
         case 'remove':
           return removeFriend(profile.id);
+        case 'block':
+          return blockUser(profile.id);
+        case 'unblock':
+          return unblockUser(profile.id);
       }
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, kind) => {
+      if (kind === 'block') setBlockedByMe(true);
+      if (kind === 'unblock' || kind === 'send') setBlockedByMe(false);
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
       invalidateUserProfile(userId);
@@ -180,6 +197,9 @@ export default function UserProfilePage() {
 
   const run = (kind: FriendshipAction) => action.mutate(kind);
   const busy = action.isPending;
+  const isBlockedProfile = Boolean(
+    blockedByMe || profile?.blocked_by_me || profile?.friendship?.status === 'blocked',
+  );
 
   const renderAction = (p: UserProfile) => {
     const primary =
@@ -187,34 +207,59 @@ export default function UserProfilePage() {
     const gradient = `${primary} gradient-primary text-primary-foreground shadow-glow`;
     const outline = `${primary} border border-border bg-secondary text-foreground hover:bg-secondary/80`;
 
-    switch (p.friendship.status) {
+    const status =
+      blockedByMe || p.blocked_by_me || p.friendship?.status === 'blocked'
+        ? 'blocked'
+        : (p.friendship?.status ?? 'none');
+    const blockBtn = (
+      <button type="button" onClick={() => run('block')} disabled={busy} className={outline}>
+        <Ban className="h-3.5 w-3.5" /> Block
+      </button>
+    );
+    switch (status) {
       case 'none':
         return (
-          <button type="button" onClick={() => run('send')} disabled={busy} className={gradient}>
-            <UserPlus className="h-3.5 w-3.5" /> Send Friend Request
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => run('send')} disabled={busy} className={gradient}>
+              <UserPlus className="h-3.5 w-3.5" /> Send Friend Request
+            </button>
+            {blockBtn}
+          </div>
         );
       case 'request_sent':
         return (
-          <button type="button" onClick={() => run('cancel')} disabled={busy} className={outline}>
-            <X className="h-3.5 w-3.5" /> Cancel Friend Request
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => run('cancel')} disabled={busy} className={outline}>
+              <X className="h-3.5 w-3.5" /> Cancel Friend Request
+            </button>
+            {blockBtn}
+          </div>
         );
       case 'request_received':
         return (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => run('accept')} disabled={busy} className={gradient}>
               <Check className="h-3.5 w-3.5" /> Accept
             </button>
             <button type="button" onClick={() => run('decline')} disabled={busy} className={outline}>
               <X className="h-3.5 w-3.5" /> Decline
             </button>
+            {blockBtn}
           </div>
         );
       case 'friends':
         return (
-          <button type="button" onClick={() => run('remove')} disabled={busy} className={outline}>
-            <UserMinus className="h-3.5 w-3.5" /> Remove Friend
+          <div className="flex flex-wrap gap-2">
+            {blockBtn}
+            <button type="button" onClick={() => run('remove')} disabled={busy} className={outline}>
+              <UserMinus className="h-3.5 w-3.5" /> Remove Friend
+            </button>
+          </div>
+        );
+      case 'blocked':
+        return (
+          <button type="button" onClick={() => run('unblock')} disabled={busy} className={outline}>
+            Unblock
           </button>
         );
       default:
@@ -320,7 +365,8 @@ export default function UserProfilePage() {
             )}
           </div>
 
-          {/* Main Parent Tabs: Events vs Friends */}
+          {/* Main Parent Tabs: Events vs Friends (hidden for users you blocked) */}
+          {!isBlockedProfile && (
           <div className="mx-auto max-w-lg px-4 space-y-4">
             <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
               {[
@@ -411,6 +457,7 @@ export default function UserProfilePage() {
               </div>
             )}
           </div>
+          )}
         </main>
       )}
 

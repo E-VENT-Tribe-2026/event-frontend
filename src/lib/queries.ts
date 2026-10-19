@@ -11,7 +11,7 @@ import { queryClient } from './queryClient';
 import { getApiUrl } from './api';
 import { getAuthToken, notifyAuthExpired } from './auth';
 import { mapApiEventToItem, parseEventsApiList } from './mapApiEvent';
-import { fetchNotifications, type ApiNotification } from './notificationsApi';
+import { fetchNotifications, notifyNotificationsChanged, type ApiNotification } from './notificationsApi';
 import { fetchUserProfile } from './userProfileApi';
 import type { EventItem } from './storage';
 
@@ -214,6 +214,7 @@ export function invalidateFavorites(userId: string) {
 
 export function invalidateNotifications() {
   queryClient.invalidateQueries({ queryKey: QK.notifications() });
+  notifyNotificationsChanged();
 }
 
 export function invalidateProfile(userId: string) {

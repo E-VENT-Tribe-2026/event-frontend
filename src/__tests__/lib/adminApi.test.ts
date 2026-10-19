@@ -7,6 +7,7 @@ import {
   grantAdminRole,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
+import * as storageModule from '@/lib/storage';
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -49,6 +50,57 @@ describe('adminApi service', () => {
 
     const res = await checkAdminVerified();
     expect(res.isVerifiedAdmin).toBe(false);
+  });
+
+  it('does not call /api/admin/verify when the signed-in role is not administrator', async () => {
+    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue({
+      id: 'u-participant',
+      role: 'participant',
+      name: 'Pat',
+      username: 'pat',
+      email: 'pat@test.com',
+      password: '',
+      avatar: '',
+      profilePhoto: '',
+      coverPhoto: '',
+      interests: [],
+      dob: '',
+      gender: '',
+      isPremium: false,
+      friends: [],
+      createdAt: '',
+    });
+
+    const res = await checkAdminVerified();
+    expect(res.isVerifiedAdmin).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still calls /api/admin/verify when the signed-in role is administrator', async () => {
+    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue({
+      id: 'u-admin',
+      role: 'administrator',
+      name: 'Ada',
+      username: 'ada',
+      email: 'ada@test.com',
+      password: '',
+      avatar: '',
+      profilePhoto: '',
+      coverPhoto: '',
+      interests: [],
+      dob: '',
+      gender: '',
+      isPremium: false,
+      friends: [],
+      createdAt: '',
+    });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ status: 'ok', message: 'Administrative access verified.', admin_id: 'uuid-1' })
+    );
+
+    const res = await checkAdminVerified();
+    expect(res.isVerifiedAdmin).toBe(true);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/verify');
   });
 
   it('fetchAdminCounts fetches counts with no-store policy', async () => {

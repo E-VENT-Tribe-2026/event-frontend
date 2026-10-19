@@ -5,10 +5,11 @@ import { setAuthToken } from '@/lib/auth';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { destinationAfterSignIn } from '@/lib/username';
+import { destinationAfterSignIn, hasChosenUsername } from '@/lib/username';
 import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
 import { fetchMfaStatus, needsAdminVerification, setPendingAdminVerification } from '@/lib/adminAuth';
+import { consumeOAuthNextPath } from '@/lib/oauthRedirect';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -34,7 +35,7 @@ export default function AuthCallbackPage() {
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
       const queryParams = new URLSearchParams(window.location.search);
       const recoveryType = hashParams.get('type') || queryParams.get('type');
-      const nextPath = normalizeNextPath(queryParams.get('next'));
+      const nextPath = normalizeNextPath(queryParams.get('next') || consumeOAuthNextPath());
       const recoveryToken =
         hashParams.get('access_token') ||
         queryParams.get('access_token') ||
@@ -118,16 +119,18 @@ export default function AuthCallbackPage() {
 
         if (/googleusercontent|ggpht\.com/i.test(avatarUrl)) {
           const defaultIcon = pickDefaultIconUrl();
-          await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-            method: 'PUT',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({ avatar_url: defaultIcon }),
-          });
           avatarUrl = defaultIcon;
+          if (hasChosenUsername(username)) {
+            await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+              method: 'PUT',
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+              },
+              body: JSON.stringify({ avatar_url: defaultIcon }),
+            });
+          }
         }
       } catch {
         /* use metadata defaults */

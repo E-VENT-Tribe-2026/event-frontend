@@ -1,25 +1,32 @@
 import { Search, Bell, Settings, LogOut, User, ShieldCheck } from 'lucide-react';
+import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { Link, useNavigate } from 'react-router-dom';
 import { getCurrentUser, updateUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getAuthToken, clearAuthToken } from '@/lib/auth';
-import { fetchNotifications } from '@/lib/notificationsApi';
+import { fetchNotifications, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
 import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
 import { useEffect, useState, useRef } from 'react';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import AppLogo from '@/components/AppLogo';
+import TopNavProfile from '@/components/TopNavProfile';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TopBarProps {
-  search: string;
-  onSearchChange: (v: string) => void;
+  search?: string;
+  onSearchChange?: (v: string) => void;
+  searchPlaceholder?: string;
 }
 
-export default function TopBar({ search, onSearchChange }: TopBarProps) {
+export default function TopBar({
+  search = '',
+  onSearchChange,
+  searchPlaceholder = 'Search events...',
+}: TopBarProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState(getCurrentUser);
-  const [hasUnread, setHasUnread] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -72,22 +79,27 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
     const token = getAuthToken();
     if (!token) return;
 
-    // The bell lights up for an unread notification, or for a friend request waiting for an answer.
+    // Badge count is unread notifications; pending friend requests still light the
+    // bell when the notification list itself is empty.
     let cancelled = false;
     const check = () => {
       Promise.all([
-        fetchNotifications(token).then((rows) => rows.some((n) => !n.read)).catch(() => false),
-        fetchIncomingRequestCount().then((count) => count > 0).catch(() => false),
+        fetchNotifications(token).then((rows) => rows.filter((n) => !n.read).length).catch(() => 0),
+        fetchIncomingRequestCount().catch(() => 0),
       ]).then(([unread, pending]) => {
-        if (!cancelled) setHasUnread(unread || pending);
+        if (!cancelled) setUnreadCount(unread || pending);
       });
     };
 
     check();
     window.addEventListener(FRIENDS_CHANGED_EVENT, check);
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, check);
+    window.addEventListener('focus', check);
     return () => {
       cancelled = true;
       window.removeEventListener(FRIENDS_CHANGED_EVENT, check);
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, check);
+      window.removeEventListener('focus', check);
     };
   }, [user?.id]);
 
@@ -108,20 +120,30 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search events..."
+            placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
             value={search}
-            onChange={e => onSearchChange(e.target.value)}
+            onChange={e => onSearchChange?.(e.target.value)}
             className="w-full rounded-full border border-border/50 bg-secondary pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all"
           />
         </div>
 
         {/* Notifications */}
-        <Link to="/notifications" className="relative shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors" title="Notifications">
+        <Link
+          to="/notifications"
+          className="relative shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors"
+          title="Notifications"
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+        >
           <Bell className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
-          {hasUnread && (
-            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-accent shadow-accent animate-pulse" />
+          {unreadCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none text-accent-foreground shadow-accent animate-pulse">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
           )}
         </Link>
+
+        <TopNavProfile />
 
         {/* Settings Menu Dropdown */}
         <div className="relative" ref={menuRef}>
@@ -142,7 +164,7 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.95 }}
                 transition={{ duration: 0.15 }}
-                className="absolute right-0 mt-2 w-48 rounded-2xl glass-card bg-background border border-border p-1.5 shadow-xl z-50 space-y-1"
+                className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-xl z-50 space-y-1"
               >
                 <div className="px-3 py-2 border-b border-border/40 mb-1">
                   <p className="text-xs font-bold text-foreground truncate">{user?.name || 'My Account'}</p>
@@ -166,6 +188,10 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
                   <ShieldCheck className="h-4 w-4 text-accent" />
                   Manage Account
                 </button>
+
+                <div className="my-1 border-t border-border/40" />
+
+                <ColorSchemePicker compact />
 
                 <div className="my-1 border-t border-border/40" />
 

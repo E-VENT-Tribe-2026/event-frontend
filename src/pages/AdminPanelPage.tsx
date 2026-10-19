@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Shield, Users, Calendar, ClipboardList, Flag, LogOut, Eye } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AppToast from '@/components/AppToast';
 import AdminUsersTab from '@/components/admin/AdminUsersTab';
 import AdminUserDetail from '@/components/admin/AdminUserDetail';
@@ -20,6 +20,13 @@ import { fetchAdminCounts } from '@/lib/adminApi';
 
 type AdminTab = 'users' | 'events' | 'audit' | 'reports';
 
+const ADMIN_TABS: AdminTab[] = ['users', 'events', 'audit', 'reports'];
+
+function tabFromSearch(params: URLSearchParams): AdminTab {
+  const tab = params.get('tab');
+  return ADMIN_TABS.includes(tab as AdminTab) ? (tab as AdminTab) : 'users';
+}
+
 type StackEntry =
   | { type: 'user-detail'; userId: string }
   | { type: 'event-detail'; eventId: string }
@@ -27,8 +34,9 @@ type StackEntry =
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => tabFromSearch(searchParams));
   const [stack, setStack] = useState<StackEntry[]>([]);
   const [adminName, setAdminName] = useState<string>('');
   const [adminAvatar, setAdminAvatar] = useState<string | null>(null);

@@ -114,11 +114,11 @@ describe('NotificationsPage — pending friend requests (#296)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows a row for a waiting request when no notification arrived for that person', async () => {
+  it('shows a waiting request in the All list alongside other notifications', async () => {
     mockPending([JOHN]);
     renderPage();
-    expect(await screen.findByText('John Smith sent you a friend request')).toBeInTheDocument();
-    expect(screen.getByText(/@john_42/)).toBeInTheDocument();
+    expect(await screen.findByText("Event 'Summer Picnic' was updated by john_42")).toBeInTheDocument();
+    expect(screen.getByText('John Smith sent you a friend request')).toBeInTheDocument();
   });
 
   it('shows one row per waiting person, a person without a username by full name alone', async () => {
@@ -150,6 +150,7 @@ describe('NotificationsPage — pending friend requests (#296)', () => {
     mockPending([JOHN, JANE]);
     renderPage();
     expect(await screen.findByText('Jane Doe sent you a friend request')).toBeInTheDocument();
+    expect(screen.getByText('john_42 sent you a friend request')).toBeInTheDocument();
     expect(screen.queryByText('John Smith sent you a friend request')).not.toBeInTheDocument();
   });
 
@@ -174,5 +175,12 @@ describe('NotificationsPage — pending friend requests (#296)', () => {
     await screen.findByText('John Smith sent you a friend request');
     fireEvent.click(screen.getByText('Updates'));
     expect(screen.queryByText('John Smith sent you a friend request')).not.toBeInTheDocument();
+  });
+
+  it('keeps waiting requests visible on the Friends tab', async () => {
+    mockPending([JOHN]);
+    renderPage();
+    fireEvent.click(await screen.findByText('Friends'));
+    expect(await screen.findByText('John Smith sent you a friend request')).toBeInTheDocument();
   });
 });

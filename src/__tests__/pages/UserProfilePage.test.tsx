@@ -52,6 +52,21 @@ function mockBackend(initial: Friendship, overrides: { failWith?: { status: numb
       ({ ok: status < 400, status, json: async () => body }) as Response;
 
     if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
+      if (friendship.status === 'blocked') {
+        return json(200, {
+          id: OTHER_ID,
+          username: baseProfile.username,
+          full_name: baseProfile.full_name,
+          avatar_url: baseProfile.avatar_url,
+          avatar_kind: baseProfile.avatar_kind,
+          icon_id: baseProfile.icon_id,
+          banner_url: baseProfile.banner_url,
+          bio: baseProfile.bio,
+          interests: baseProfile.interests,
+          blocked_by_me: true,
+          friendship: { status: 'blocked', request_id: null },
+        });
+      }
       return json(200, { ...baseProfile, friendship });
     }
     if (overrides.failWith) return json(overrides.failWith.status, { detail: overrides.failWith.detail });
@@ -70,6 +85,14 @@ function mockBackend(initial: Friendship, overrides: { failWith?: { status: numb
     if (method === 'POST' && url.endsWith('/decline')) {
       friendship = { status: 'none', request_id: null };
       return json(200, { message: 'ok' });
+    }
+    if (method === 'POST' && url.endsWith('/api/blocks')) {
+      friendship = { status: 'blocked', request_id: null };
+      return json(201, { blocked_at: '2026-10-15T12:00:00Z', user: { id: OTHER_ID, username: 'jane_doe' } });
+    }
+    if (method === 'DELETE' && url.endsWith(`/api/blocks/${OTHER_ID}`)) {
+      friendship = { status: 'none', request_id: null };
+      return json(200, { message: 'User unblocked' });
     }
     if (method === 'DELETE' && url.includes(`/api/friends/${OTHER_ID}`)) {
       friendship = { status: 'none', request_id: null };
@@ -178,6 +201,54 @@ describe('UserProfilePage', () => {
     expect(calls.some((c) => c.url.endsWith('/api/friends/requests/9/decline'))).toBe(true);
   });
 
+  it('blocks a friend from their profile', async () => {
+    const calls = mockBackend({ status: 'friends', request_id: null });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^block$/i }));
+
+    expect(await screen.findByRole('button', { name: /^unblock$/i })).toBeInTheDocument();
+    const blockCall = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/blocks'));
+    expect(blockCall).toBeTruthy();
+    expect(JSON.parse(blockCall!.body!)).toEqual({ user_id: OTHER_ID });
+    expect(screen.queryByRole('button', { name: /remove friend/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Organized Upcoming')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /friends/i })).not.toBeInTheDocument();
+  });
+
+  it('unblocks from the limited blocked profile via DELETE /api/blocks/{id}', async () => {
+    const calls = mockBackend({ status: 'blocked', request_id: null });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^unblock$/i }));
+
+    expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith(`/api/blocks/${OTHER_ID}`))).toBe(true);
+  });
+
+  it('hides events and friends when the API marks the profile as blocked_by_me', async () => {
+    mockBackend({ status: 'blocked', request_id: null });
+    renderPage();
+
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
+    expect(screen.getByText('I love live music.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^unblock$/i })).toBeInTheDocument();
+    expect(screen.queryByText('Organized Upcoming')).not.toBeInTheDocument();
+    expect(screen.queryByText('Joined Upcoming')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^events$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^friends$/i })).not.toBeInTheDocument();
+  });
+
+  it('treats a blocked viewer as if the profile does not exist', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({ code: 'profile_unavailable' }),
+    }) as Response));
+    renderPage();
+    expect(await screen.findByText('This user could not be found.')).toBeInTheDocument();
+  });
+
   it('removes a friend, then offers "Send Friend Request" again', async () => {
     const calls = mockBackend({ status: 'friends', request_id: null });
     renderPage();
@@ -198,6 +269,18 @@ describe('UserProfilePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
 
     expect(await screen.findByText('This user has already sent you a friend request.')).toBeInTheDocument();
+  });
+
+  it('shows a friendly error when sending a request to a user you blocked', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      { failWith: { status: 403, detail: { code: 'user_blocked' } } },
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+
+    expect(await screen.findByText('You cannot send a friend request to this user.')).toBeInTheDocument();
   });
 
   it('shows a clear message for a private profile', async () => {

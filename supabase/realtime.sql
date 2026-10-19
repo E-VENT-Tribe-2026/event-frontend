@@ -1,0 +1,163 @@
+-- App-wide Realtime + RLS (run in the Supabase SQL editor).
+-- Safe to re-run. Policies use whichever user-id columns actually exist
+-- (this project's friend_requests table does not have sender_id).
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['friend_requests', 'messages', 'notifications', 'posts', 'events']
+  loop
+    if exists (
+      select 1 from information_schema.tables
+      where table_schema = 'public' and table_name = t
+    ) then
+      execute format('alter table public.%I enable row level security', t);
+      begin
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      exception
+        when duplicate_object then null;
+      end;
+    end if;
+  end loop;
+end $$;
+
+-- Resolve the first column on a table that exists from a candidate list.
+create or replace function public._evt_first_col(p_table text, p_candidates text[])
+returns text
+language plpgsql
+as $$
+declare
+  c text;
+begin
+  foreach c in array p_candidates
+  loop
+    if exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public' and table_name = p_table and column_name = c
+    ) then
+      return c;
+    end if;
+  end loop;
+  return null;
+end;
+$$;
+
+-- auth.uid() compared as text so uuid and text id columns both work.
+create or replace function public._evt_uid_eq(p_col text)
+returns text
+language sql
+immutable
+as $$
+  select format('auth.uid()::text = %I::text', p_col);
+$$;
+
+do $$
+declare
+  from_col text;
+  to_col text;
+  select_pred text;
+  insert_pred text;
+  cols text;
+begin
+  if not exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'friend_requests'
+  ) then
+    return;
+  end if;
+
+  -- Actual columns: initiator_id (sender), receiver_id (recipient).
+  from_col := public._evt_first_col(
+    'friend_requests',
+    array['initiator_id', 'from_user_id', 'requester_id', 'requestor_id', 'sender_id', 'from_id', 'user_id']
+  );
+  to_col := public._evt_first_col(
+    'friend_requests',
+    array['receiver_id', 'reciever_id', 'to_user_id', 'addressee_id', 'to_id', 'friend_id']
+  );
+
+  if from_col is null and to_col is null then
+    select string_agg(column_name, ', ' order by ordinal_position) into cols
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'friend_requests';
+    raise notice 'Skipping friend_requests policies; no user-id column matched. Columns: %', cols;
+  else
+    select_pred := concat_ws(
+      ' or ',
+      case when from_col is not null then public._evt_uid_eq(from_col) end,
+      case when to_col is not null then public._evt_uid_eq(to_col) end
+    );
+    insert_pred := public._evt_uid_eq(coalesce(from_col, to_col));
+
+    execute 'drop policy if exists "Users can view their own friend requests" on public.friend_requests';
+    execute format(
+      'create policy "Users can view their own friend requests" on public.friend_requests for select using (%s)',
+      select_pred
+    );
+
+    execute 'drop policy if exists "Users can send friend requests" on public.friend_requests';
+    execute format(
+      'create policy "Users can send friend requests" on public.friend_requests for insert with check (%s)',
+      insert_pred
+    );
+
+    raise notice 'friend_requests policies use from=% to=%', from_col, to_col;
+  end if;
+end $$;
+
+do $$
+declare
+  from_col text;
+  to_col text;
+  select_pred text;
+  insert_pred text;
+  cols text;
+begin
+  if not exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'messages'
+  ) then
+    return;
+  end if;
+
+  from_col := public._evt_first_col(
+    'messages',
+    array['sender_id', 'user_id', 'author_id', 'from_user_id', 'created_by']
+  );
+  to_col := public._evt_first_col(
+    'messages',
+    array['recipient_id', 'reciever_id', 'receiver_id', 'to_user_id', 'addressee_id']
+  );
+
+  if from_col is null and to_col is null then
+    select string_agg(column_name, ', ' order by ordinal_position) into cols
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'messages';
+    raise notice 'Skipping messages policies; no user-id column matched. Columns: %', cols;
+  else
+    select_pred := concat_ws(
+      ' or ',
+      case when from_col is not null then public._evt_uid_eq(from_col) end,
+      case when to_col is not null then public._evt_uid_eq(to_col) end
+    );
+    insert_pred := public._evt_uid_eq(coalesce(from_col, to_col));
+
+    execute 'drop policy if exists "Users can view their messages" on public.messages';
+    execute format(
+      'create policy "Users can view their messages" on public.messages for select using (%s)',
+      select_pred
+    );
+
+    execute 'drop policy if exists "Users can insert messages" on public.messages';
+    execute format(
+      'create policy "Users can insert messages" on public.messages for insert with check (%s)',
+      insert_pred
+    );
+
+    raise notice 'messages policies use from=% to=%', from_col, to_col;
+  end if;
+end $$;
+
+drop function if exists public._evt_first_col(text, text[]);
+drop function if exists public._evt_uid_eq(text);

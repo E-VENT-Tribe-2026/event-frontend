@@ -9,6 +9,7 @@ function renderGuarded(initialPath = '/home') {
   render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
+        <Route path="/login" element={<div>Login Screen</div>} />
         <Route path="/admin-verify" element={<div>Admin Verify Screen</div>} />
         <Route path="/choose-username" element={<div>Choose Username Screen</div>} />
         <Route
@@ -36,9 +37,9 @@ describe('RequireUsername — ticket #247 admin-verification gate', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('passes through when there is no token at all (pre-existing behavior, unaffected)', () => {
+  it('redirects to /login when there is no token at all', () => {
     renderGuarded();
-    expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
+    expect(screen.getByText('Login Screen')).toBeInTheDocument();
   });
 
   it('redirects to /admin-verify when an admin verification is pending, before checking anything else', async () => {
