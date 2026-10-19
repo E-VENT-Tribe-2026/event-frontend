@@ -6,7 +6,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['friend_requests', 'messages', 'notifications', 'posts', 'events']
+  foreach t in array array['friend_requests', 'messages', 'notifications', 'posts', 'events', 'participants']
   loop
     if exists (
       select 1 from information_schema.tables
@@ -161,3 +161,37 @@ end $$;
 
 drop function if exists public._evt_first_col(text, text[]);
 drop function if exists public._evt_uid_eq(text);
+
+-- Homepage live updates: Realtime only delivers rows the JWT can SELECT.
+-- Add a SELECT policy only when the table has none, so existing tighter
+-- policies are not OR'd with a public read.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['events', 'posts', 'participants']
+  loop
+    if not exists (
+      select 1 from information_schema.tables
+      where table_schema = 'public' and table_name = t
+    ) then
+      continue;
+    end if;
+
+    begin
+      execute format('alter table public.%I replica identity full', t);
+    exception
+      when others then null;
+    end;
+
+    if not exists (
+      select 1 from pg_policies
+      where schemaname = 'public' and tablename = t and cmd = 'SELECT'
+    ) then
+      execute format(
+        'create policy "Authenticated can read %I for realtime" on public.%I for select to authenticated using (true)',
+        t, t
+      );
+    end if;
+  end loop;
+end $$;

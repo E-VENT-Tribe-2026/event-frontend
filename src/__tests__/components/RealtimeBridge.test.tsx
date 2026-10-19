@@ -41,17 +41,18 @@ describe('RealtimeBridge', () => {
     render(<RealtimeBridge />);
 
     const tables = handlers.map((h) => h.table);
-    expect(tables).toEqual(expect.arrayContaining(['notifications', 'friend_requests', 'messages', 'events', 'posts']));
+    expect(tables).toEqual(expect.arrayContaining(['notifications', 'friend_requests', 'messages', 'events', 'posts', 'participants']));
 
     handlers.find((h) => h.table === 'notifications')?.onData({});
     handlers.find((h) => h.table === 'friend_requests')?.onData({});
     handlers.find((h) => h.table === 'messages')?.onData({ new: { event_id: 'evt-9' } });
     handlers.find((h) => h.table === 'events')?.onData({});
+    handlers.find((h) => h.table === 'participants')?.onData({});
 
     expect(invalidateNotificationsMock).toHaveBeenCalled();
     expect(friendsChanged).toHaveBeenCalled();
     expect(chatChanged).toHaveBeenCalled();
-    expect(invalidateEventsMock).toHaveBeenCalled();
+    expect(invalidateEventsMock).toHaveBeenCalledTimes(2);
 
     window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, chatChanged);
     window.removeEventListener(FRIENDS_CHANGED_EVENT, friendsChanged);

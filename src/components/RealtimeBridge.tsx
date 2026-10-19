@@ -63,5 +63,13 @@ export default function RealtimeBridge() {
     },
   });
 
+  useRealtimeTable({
+    table: 'participants',
+    enabled: hasSession,
+    onData: () => {
+      invalidateEvents();
+    },
+  });
+
   return null;
 }

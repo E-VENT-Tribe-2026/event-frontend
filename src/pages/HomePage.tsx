@@ -399,16 +399,16 @@ export default function HomePage() {
     setVisibleAll(PAGE);
   }, [budgetMin, budgetMax, category, debouncedDate, selectedCity, debouncedSearch]);
 
-const events = useMemo(() => {
-  const local = getLocalEvents().filter((e) => !e.isDraft);
-  const byId = new Map<string, EventItem>();
-  
-  [...apiEvents, ...local]
-    .filter((e) => isEventUpcoming(e) && String(e.status || '').toLowerCase() !== 'cancelled')
-    .forEach((e) => byId.set(e.id, e));
-    
-  return Array.from(byId.values());
-}, [apiEvents]);
+  const events = useMemo(() => {
+    const local = getLocalEvents().filter((e) => !e.isDraft);
+    const byId = new Map<string, EventItem>();
+    // API rows win over localStorage so realtime refreshes are not clobbered.
+    for (const e of [...local, ...apiEvents]) {
+      if (!isEventUpcoming(e) || String(e.status || '').toLowerCase() === 'cancelled') continue;
+      byId.set(e.id, e);
+    }
+    return Array.from(byId.values());
+  }, [apiEvents]);
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
