@@ -38,7 +38,9 @@ import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
+import RealtimeBridge from '@/components/RealtimeBridge';
 import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
+import { syncSupabaseSession } from '@/lib/supabase';
 import { logout, getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
 import { clearCache } from '@/lib/queryCache';
@@ -63,6 +65,7 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
+    void syncSupabaseSession(token);
     fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     })
@@ -174,6 +177,7 @@ const App = () => (
       <BrowserRouter>
         <RouteDocumentTitle />
         <SessionGuard>
+          <RealtimeBridge />
           <Routes>
             <Route path="/" element={<WelcomePage />} />
             <Route path="/login" element={<LoginPage />} />

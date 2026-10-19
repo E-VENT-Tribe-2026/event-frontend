@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Send, Smile, AlertTriangle, Calendar, Clock, Ban } from 'lucide-react';
+import { ArrowLeft, Send, Smile, AlertTriangle, Calendar, Clock, Ban, ListChecks, MapPinned } from 'lucide-react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentUser } from '@/lib/storage';
 import BottomNav from '@/components/BottomNav';
+import TopBar from '@/components/TopBar';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
@@ -13,6 +14,14 @@ import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
 import { userProfilePath } from '@/lib/friendsApi';
 import { cachedFetch, invalidate, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
+import { CHAT_MESSAGES_CHANGED_EVENT } from '@/lib/realtimeEvents';
+import EventPollCard from '@/components/EventPollCard';
+import { addCheckin, isCheckedIn } from '@/lib/checkin';
+import {
+  chatMessagesPath,
+  encodeChatPayload,
+  parseChatPayload,
+} from '@/lib/chatPayload';
 
 type ChatEvent = {
   id: string;
@@ -34,13 +43,17 @@ type ChatMessage = {
   time: string;
   dateKey: string;
   kind?: 'user' | 'system';
-  messageType?: 'text' | 'file' | 'voice' | 'notification';
+  messageType?: 'text' | 'file' | 'voice' | 'notification' | 'poll' | 'poll_vote' | 'checkin';
   fileName?: string;
   mimeType?: string;
   dataUrl?: string;
   senderName?: string;
   senderAvatar?: string;
   senderId?: string;
+  pollId?: string;
+  question?: string;
+  options?: string[];
+  optionIndex?: number;
 };
 
 function isExpiredOver48h(eventDate: string): boolean {
@@ -63,19 +76,6 @@ function formatDateSeparator(dateKey: string): string {
 
   const d = new Date(dateKey);
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-type EncodedChatPayload = {
-  v: 1;
-  type: 'text' | 'file' | 'voice';
-  text?: string;
-  fileName?: string;
-  mimeType?: string;
-  dataUrl?: string;
-};
-
-function chatMessagesPath(eventId: string) {
-  return `/api/chats/${eventId}/messages`;
 }
 
 /** Cache key for one user's saved copy of one event chat's messages. */
@@ -112,6 +112,10 @@ export default function ChatPage() {
   const [handledSelectedParam, setHandledSelectedParam] = useState(false);
   const [chatApiMissing, setChatApiMissing] = useState(false);
   const [chatTab, setChatTab] = useState<'active' | 'past' | 'cancelled'>('active');
+  const [search, setSearch] = useState('');
+  const [showPoll, setShowPoll] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Only the newest loadMessages call may update the screen, so a slow response
   // for a chat you already left cannot overwrite the chat you are looking at.
@@ -142,29 +146,31 @@ export default function ChatPage() {
 
   const resolveMeId = () => authUserId || user.id;
 
-  const parsePayload = (raw: string) => {
-    try {
-      const parsed = JSON.parse(raw) as EncodedChatPayload;
-      if (parsed && parsed.v === 1 && (parsed.type === 'text' || parsed.type === 'file' || parsed.type === 'voice')) return parsed;
-    } catch { /* plain text */ }
-    return null;
-  };
-
-  const encodePayload = (payload: EncodedChatPayload) => JSON.stringify(payload);
-
   const mapMessageRow = useCallback(
     (row: Record<string, unknown>): ChatMessage | null => {
       const rawContent = String(row.content || row.message || row.text || '').trim();
-      const parsed = rawContent ? parsePayload(rawContent) : null;
+      const parsed = rawContent ? parseChatPayload(rawContent) : null;
       const text = parsed
-        ? String(parsed.text || (parsed.type === 'voice' ? 'Voice message' : parsed.fileName || 'Attachment'))
+        ? String(
+            parsed.text ||
+              parsed.question ||
+              (parsed.type === 'voice'
+                ? 'Voice message'
+                : parsed.type === 'poll_vote'
+                  ? `vote:${parsed.optionIndex ?? 0}`
+                  : parsed.type === 'checkin'
+                    ? 'is here'
+                    : parsed.fileName || 'Attachment'),
+          )
         : rawContent;
-      if (!text) return null;
+      if (!text && parsed?.type !== 'poll') return null;
       const senderId = String(row.sender_id || row.user_id || row.created_by || '');
       const sentAtRaw = row.created_at || row.sent_at || row.timestamp;
       const sentAt = sentAtRaw ? new Date(String(sentAtRaw)) : new Date();
       const rawType = String(row.type || row.message_type || row.kind || '').toLowerCase();
+      const isCheckin = parsed?.type === 'checkin';
       const isSystem =
+        isCheckin ||
         Boolean(row.is_system) ||
         rawType === 'system' || rawType === 'notification' ||
         rawType === 'join' || rawType === 'leave' ||
@@ -184,7 +190,7 @@ export default function ChatPage() {
       return {
         id: String(row.id || crypto.randomUUID()),
         from: isMe ? 'me' : 'them',
-        text,
+        text: isCheckin ? `${senderName || 'Someone'} is here` : text,
         time: sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         dateKey: sentAt.toISOString().slice(0, 10),
         kind: isSystem ? 'system' : 'user',
@@ -195,6 +201,10 @@ export default function ChatPage() {
         senderName,
         senderAvatar,
         senderId: senderId || undefined,
+        pollId: parsed?.pollId,
+        question: parsed?.question,
+        options: parsed?.options,
+        optionIndex: parsed?.optionIndex,
       };
     },
     [authUserId, user.id],
@@ -202,6 +212,15 @@ export default function ChatPage() {
 
   const mapMessageRowRef = useRef(mapMessageRow);
   useEffect(() => { mapMessageRowRef.current = mapMessageRow; }, [mapMessageRow]);
+
+  useEffect(() => {
+    if (!activeChat) return;
+    for (const m of messages) {
+      if (m.messageType === 'checkin' && m.senderId && !isCheckedIn(activeChat, m.senderId)) {
+        addCheckin(activeChat, { userId: m.senderId, name: m.senderName || 'Someone' });
+      }
+    }
+  }, [messages, activeChat]);
 
   const activeChatObj = chats.find((entry) => entry.id === activeChat) || null;
 
@@ -383,11 +402,23 @@ export default function ChatPage() {
     void loadMessages(activeChat);
   }, [activeChat, loadMessages]);
 
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      const eventId = (event as CustomEvent<{ eventId?: string | null }>).detail?.eventId;
+      if (activeChat && (!eventId || eventId === activeChat)) {
+        void loadMessages(activeChat, true);
+      }
+      void loadChatList(true);
+    };
+    window.addEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
+  }, [activeChat, loadMessages, loadChatList]);
+
   const sendMessage = async (explicitContent?: string) => {
     const chat = activeChatObj;
     if (chat?.isCancelled || chat?.isPast) return; // Prevent sending on cancelled/past chats
 
-    const content = explicitContent ?? encodePayload({ v: 1, type: 'text', text: input.trim() });
+    const content = explicitContent ?? encodeChatPayload({ v: 1, type: 'text', text: input.trim() });
     const plainInput = input.trim();
     if (!content || !activeChat || !token || sending || chatUnavailable) return;
     if (!explicitContent && !plainInput) return;
@@ -423,8 +454,14 @@ export default function ChatPage() {
       <div className="flex min-h-screen flex-col bg-background pb-20">
         <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
 
-        <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-          <div className="flex items-center gap-3">
+        <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-lg">
+          <TopBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search chats..."
+          />
+          <header className="border-b border-border px-4 py-3">
+            <div className="flex items-center gap-3">
             <button
               type="button"
               aria-label="Back to chats"
@@ -443,10 +480,17 @@ export default function ChatPage() {
               <h1 className="truncate text-sm font-bold text-foreground">{chat.name}</h1>
               <p className={`text-[10px] ${chatUnavailable ? 'text-destructive' : chat.isCancelled ? 'text-amber-500 font-medium' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
                 {chatUnavailable ? 'Chat unavailable' : chat.isCancelled ? 'Cancelled event · read-only' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
+                {!chatUnavailable && messages.filter((m) => m.messageType === 'checkin').length > 0 && (
+                  <span className="ml-2 inline-flex items-center gap-0.5 text-primary">
+                    <MapPinned className="h-3 w-3" />
+                    {new Set(messages.filter((m) => m.messageType === 'checkin' && m.senderId).map((m) => m.senderId)).size} here
+                  </span>
+                )}
               </p>
             </div>
-          </div>
-        </header>
+            </div>
+          </header>
+        </div>
 
         {chat.isCancelled && !chatUnavailable && (
           <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
@@ -476,8 +520,8 @@ export default function ChatPage() {
                 <p className="text-xs text-muted-foreground">History is empty for this chat</p>
               </div>
             )}
-            {messages.map((m, i) => {
-              const showDateSep = i === 0 || messages[i - 1].dateKey !== m.dateKey;
+            {messages.filter((m) => m.messageType !== 'poll_vote').map((m, i, visible) => {
+              const showDateSep = i === 0 || visible[i - 1].dateKey !== m.dateKey;
               return (
                 <div key={m.id}>
                   {showDateSep && (
@@ -525,7 +569,30 @@ export default function ChatPage() {
                             ? 'gradient-primary text-primary-foreground rounded-br-sm'
                             : 'glass-card text-foreground rounded-bl-sm'
                         }`}>
-                          <p className="whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
+                          {m.messageType === 'poll' && m.pollId && (m.options?.length || 0) > 1 ? (
+                            <EventPollCard
+                              question={m.question || m.text}
+                              options={m.options || []}
+                              votesByUser={Object.fromEntries(
+                                messages
+                                  .filter((vote) => vote.messageType === 'poll_vote' && vote.pollId === m.pollId && vote.senderId && vote.optionIndex != null)
+                                  .map((vote) => [vote.senderId as string, vote.optionIndex as number]),
+                              )}
+                              myId={resolveMeId()}
+                              disabled={chatUnavailable || isReadOnly || sending}
+                              onVote={(optionIndex) => {
+                                void sendMessage(encodeChatPayload({
+                                  v: 1,
+                                  type: 'poll_vote',
+                                  pollId: m.pollId,
+                                  optionIndex,
+                                  text: `vote:${optionIndex}`,
+                                }));
+                              }}
+                            />
+                          ) : (
+                            <p className="whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
+                          )}
                           <p className={`mt-1 text-[10px] ${m.from === 'me' ? 'text-primary-foreground/60 text-right' : 'text-muted-foreground'}`}>{m.time}</p>
                         </div>
                       </div>
@@ -541,6 +608,59 @@ export default function ChatPage() {
           </div>
         </div>
 
+        {showPoll && !isReadOnly && !chatUnavailable && (
+          <div className="border-t border-border bg-background px-4 py-3 space-y-2">
+            <p className="text-xs font-semibold text-foreground">New poll</p>
+            <input
+              value={pollQuestion}
+              onChange={(e) => setPollQuestion(e.target.value)}
+              placeholder="Ask a question…"
+              aria-label="Poll question"
+              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            {pollOptions.map((opt, i) => (
+              <input
+                key={i}
+                value={opt}
+                onChange={(e) => setPollOptions((prev) => prev.map((item, idx) => (idx === i ? e.target.value : item)))}
+                placeholder={`Option ${i + 1}`}
+                aria-label={`Poll option ${i + 1}`}
+                className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            ))}
+            {pollOptions.length < 4 && (
+              <button
+                type="button"
+                onClick={() => setPollOptions((prev) => [...prev, ''])}
+                className="text-[11px] font-semibold text-primary"
+              >
+                Add option
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={sending || !pollQuestion.trim() || pollOptions.filter((o) => o.trim()).length < 2}
+              onClick={() => {
+                const options = pollOptions.map((o) => o.trim()).filter(Boolean);
+                void sendMessage(encodeChatPayload({
+                  v: 1,
+                  type: 'poll',
+                  pollId: crypto.randomUUID(),
+                  question: pollQuestion.trim(),
+                  options,
+                  text: pollQuestion.trim(),
+                }));
+                setPollQuestion('');
+                setPollOptions(['', '']);
+                setShowPoll(false);
+              }}
+              className="w-full rounded-xl gradient-primary py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40"
+            >
+              Post poll
+            </button>
+          </div>
+        )}
+
         <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3">
           <div className="flex items-center gap-2">
             <button
@@ -551,6 +671,15 @@ export default function ChatPage() {
               aria-label="Emoji"
             >
               <Smile className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              disabled={chatUnavailable || isReadOnly}
+              onClick={() => setShowPoll((v) => !v)}
+              className={`shrink-0 rounded-full p-2 transition-all disabled:opacity-40 ${showPoll ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:bg-secondary/80 hover:text-foreground'}`}
+              aria-label="Create poll"
+            >
+              <ListChecks className="h-5 w-5" />
             </button>
             <input
               value={input}
@@ -594,18 +723,30 @@ export default function ChatPage() {
       ? pastChats
       : cancelledChats;
 
+  const searchQuery = search.trim().toLowerCase();
+  const visibleChats = searchQuery
+    ? currentTabChats.filter(
+        (c) =>
+          c.name.toLowerCase().includes(searchQuery) ||
+          c.lastMsg.toLowerCase().includes(searchQuery),
+      )
+    : currentTabChats;
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
 
-      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gradient">Chats</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
-          </div>
-        </div>
-      </header>
+      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-lg">
+        <TopBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search chats..."
+        />
+        <header className="border-b border-border px-4 py-3">
+          <h1 className="text-xl font-bold text-gradient">Chats</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
+        </header>
+      </div>
 
       <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
         {/* Chat Tabs with Circular Badge Counters */}
@@ -658,21 +799,27 @@ export default function ChatPage() {
           </div>
         )}
 
-        {!chatListLoading && currentTabChats.length === 0 && (
+        {!chatListLoading && visibleChats.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
               <Send className="h-7 w-7 text-primary" />
             </div>
-            <p className="text-sm font-semibold text-foreground">No {chatTab} conversations</p>
+            <p className="text-sm font-semibold text-foreground">
+              {searchQuery ? 'No matching conversations' : `No ${chatTab} conversations`}
+            </p>
             <p className="text-xs text-muted-foreground max-w-xs">
-              {chatTab === 'active' ? "You don't have any active event chats right now." : `No ${chatTab} event chats found.`}
+              {searchQuery
+                ? 'Try a different search.'
+                : chatTab === 'active'
+                  ? "You don't have any active event chats right now."
+                  : `No ${chatTab} event chats found.`}
             </p>
           </div>
         )}
 
-        {!chatListLoading && currentTabChats.length > 0 && (
+        {!chatListLoading && visibleChats.length > 0 && (
           <div className="space-y-2.5">
-            {currentTabChats.map((chat) => (
+            {visibleChats.map((chat) => (
               <motion.button
                 key={chat.id}
                 type="button"

@@ -3,6 +3,7 @@ export const API_ENDPOINTS = {
   SIGNUP: '/api/auth/register',
   EVENTS: '/api/events',
   PROFILE_ME: '/api/profile/me',
+  CHOOSE_USERNAME: '/api/profile/choose-username',
   NOTIFICATIONS: '/api/notifications',
   ADMIN_VERIFY: '/api/admin/verify',
   ADMIN_COUNTS: '/api/admin/counts',
@@ -28,6 +29,8 @@ export const API_ENDPOINTS = {
   ASSISTANT_TOOL_SEARCH: '/api/assistant/tools/search-events',
   ASSISTANT_TOOL_EVENT_DETAILS: '/api/assistant/tools/event-details',
   ASSISTANT_TOOL_DRAFT_EVENT: '/api/assistant/tools/draft-event',
+  BLOCKS: '/api/blocks',
+  BLOCK_USER: (userId: string) => `/api/blocks/${encodeURIComponent(userId)}`,
 } as const;
 
 

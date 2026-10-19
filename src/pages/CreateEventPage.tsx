@@ -7,6 +7,7 @@ import { ALL_INTERESTS } from '@/lib/interests';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
+import TopNavProfile from '@/components/TopNavProfile';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
@@ -338,10 +339,11 @@ export default function CreateEventPage() {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold text-gradient leading-tight">Create Event</h1>
           <p className="text-[11px] text-muted-foreground leading-none">Fill in the details below</p>
         </div>
+        <TopNavProfile />
       </header>
 
       <motion.form

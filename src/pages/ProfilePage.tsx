@@ -11,11 +11,12 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus } from 'lucide-react';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette } from 'lucide-react';
+import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
-import { getAuthToken, clearAuthToken } from '@/lib/auth';
+import { getAuthToken, clearAuthToken, notifyAuthExpired } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
@@ -34,11 +35,15 @@ import {
   fetchIncomingRequests, 
   acceptFriendRequest, 
   declineFriendRequest, 
-  removeFriend, 
+  removeFriend,
+  blockUser,
+  unblockUser,
+  fetchBlockedUsers,
   userAvatarUrl, 
   userProfilePath,
   type FriendItem, 
-  type FriendRequestItem 
+  type FriendRequestItem,
+  type BlockedUserItem,
 } from '@/lib/friendsApi';
 
 const PROFILE_BANNERS = Object.entries(CATEGORY_BANNERS).map(([label, url]) => ({
@@ -59,6 +64,20 @@ const PROFILE_AVATARS = AVATAR_SEEDS.map((seed) => ({
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
   return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function profileSaveErrorMessage(body: unknown, fallback = 'Could not save profile'): string {
+  const detail = body && typeof body === 'object' ? (body as { detail?: unknown }).detail : undefined;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const first = detail[0] as { msg?: string } | undefined;
+    if (first && typeof first.msg === 'string' && first.msg.trim()) return first.msg;
+  }
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  return fallback;
 }
 
 export default function ProfilePage() {
@@ -86,6 +105,7 @@ export default function ProfilePage() {
   const [savedBio, setSavedBio] = useState(user?.bio || '');
   const [savedInterests, setSavedInterests] = useState<string[]>(user?.interests || []);
   const [nameError, setNameError] = useState('');
+  const [saving, setSaving] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
@@ -96,7 +116,7 @@ export default function ProfilePage() {
   // Events Sub-Tabs ('upcoming' | 'past' | 'cancelled' | 'favourites')
   const [eventSubTab, setEventSubTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites'>('upcoming');
   // Friends Sub-Tabs ('accepted' | 'requests')
-  const [friendSubTab, setFriendSubTab] = useState<'accepted' | 'requests'>('accepted');
+  const [friendSubTab, setFriendSubTab] = useState<'accepted' | 'requests' | 'blocked'>('accepted');
 
   const [visibleEvents, setVisibleEvents] = useState(4);
   const [visibleFavorites, setVisibleFavorites] = useState(4);
@@ -121,6 +141,7 @@ export default function ProfilePage() {
   // Friends & Requests Live Data States
   const [acceptedFriends, setAcceptedFriends] = useState<FriendItem[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<FriendRequestItem[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUserItem[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
@@ -199,11 +220,13 @@ export default function ProfilePage() {
 
     Promise.all([
       fetchFriends(1, 50).catch(() => ({ data: [], has_more: false })),
-      fetchIncomingRequests(1, 50).catch(() => ({ data: [], has_more: false }))
-    ]).then(([friendsRes, requestsRes]) => {
+      fetchIncomingRequests(1, 50).catch(() => ({ data: [], has_more: false })),
+      fetchBlockedUsers(1, 50).catch(() => ({ data: [], has_more: false })),
+    ]).then(([friendsRes, requestsRes, blockedRes]) => {
       if (cancelled) return;
       setAcceptedFriends(friendsRes.data || []);
       setIncomingRequests(requestsRes.data || []);
+      setBlockedUsers(blockedRes.data || []);
     }).finally(() => {
       if (!cancelled) setFriendsLoading(false);
     });
@@ -457,50 +480,92 @@ export default function ProfilePage() {
     }
     const cleaned = normalizeFullName(name);
     const token = getAuthToken();
-    if (token) {
-      try {
-        const payload = {
-          full_name: cleaned,
-          bio,
-          interests,
-          avatar_url: previewAvatarUrl,
-          banner_url: previewBannerUrl || null,
-          avatar_kind: previewAvatarKind,
-        };
-        const saveRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { 
-          method: 'PUT', 
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
-          body: JSON.stringify(payload) 
-        });
-        if (!saveRes.ok) {
-          const failed = await saveRes.json().catch(() => ({} as { detail?: string }));
-          const detail = String(failed.detail || 'Could not save profile');
-          setNameError(detail);
-          setToast({ show: true, message: detail, type: 'error' });
-          return;
-        }
-        const saved = await saveRes.json().catch(() => ({} as Record<string, unknown>));
-        const savedProfile = (saved as { data?: Record<string, unknown> }).data || saved;
-        
-        const nextName = savedProfile && typeof savedProfile.full_name === 'string' ? savedProfile.full_name : cleaned;
-        setName(nextName);
-        setSavedName(nextName);
-        setSavedBio(bio);
-        setSavedInterests(interests);
-        
-        setAvatarUrl(previewAvatarUrl);
-        setBannerUrl(previewBannerUrl);
-        setAvatarKind(previewAvatarKind);
-        setNameError('');
+    if (!token) {
+      setToast({ show: true, message: 'Your session expired. Please sign in again.', type: 'error' });
+      return;
+    }
 
-        updateUser({ name: nextName, bio, interests, avatar: previewAvatarUrl });
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
-        invalidate(`/api/profile/me:${user?.id ?? ''}`);
-        invalidate('/api/profile/me');
-        invalidatePrefix('/api/profile');
-        setEditing(false);
-        setToast({ show: true, message: 'Profile updated successfully!', type: 'success' });
-      } catch (err) { console.error(err); }
+    const textPayload = {
+      full_name: cleaned,
+      bio,
+      interests,
+    };
+    const payload: Record<string, unknown> = { ...textPayload };
+    if (previewAvatarUrl !== avatarUrl || previewAvatarKind !== avatarKind) {
+      payload.avatar_url = previewAvatarUrl || null;
+      payload.avatar_kind = previewAvatarKind;
+      payload.icon_id = previewAvatarKind === 'icon' ? iconId || null : null;
+    }
+    if (previewBannerUrl !== bannerUrl) {
+      payload.banner_url = previewBannerUrl || null;
+    }
+
+    const putProfile = (body: Record<string, unknown>) =>
+      fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+    setSaving(true);
+    try {
+      let saveRes = await putProfile(payload);
+      const hasMediaFields = payload !== textPayload && (
+        payload.avatar_url !== undefined ||
+        payload.avatar_kind !== undefined ||
+        payload.icon_id !== undefined ||
+        payload.banner_url !== undefined
+      );
+      if (!saveRes.ok && saveRes.status === 422 && hasMediaFields) {
+        const withoutKind: Record<string, unknown> = { ...textPayload };
+        if (payload.avatar_url !== undefined) withoutKind.avatar_url = payload.avatar_url;
+        if (payload.banner_url !== undefined) withoutKind.banner_url = payload.banner_url;
+        saveRes = await putProfile(withoutKind);
+      }
+      if (!saveRes.ok && saveRes.status === 422 && hasMediaFields) {
+        saveRes = await putProfile(textPayload);
+      }
+      if (!saveRes.ok && saveRes.status === 422) {
+        saveRes = await putProfile({ full_name: cleaned, bio });
+      }
+      if (!saveRes.ok) {
+        if (saveRes.status === 401) notifyAuthExpired();
+        const failed = await saveRes.json().catch(() => ({}));
+        const detail = profileSaveErrorMessage(failed);
+        setNameError(detail);
+        setToast({ show: true, message: detail, type: 'error' });
+        return;
+      }
+      const saved = await saveRes.json().catch(() => ({} as Record<string, unknown>));
+      const savedProfile = (saved as { data?: Record<string, unknown> }).data || saved;
+
+      const nextName = savedProfile && typeof savedProfile.full_name === 'string' ? savedProfile.full_name : cleaned;
+      setName(nextName);
+      setSavedName(nextName);
+      setSavedBio(bio);
+      setSavedInterests(interests);
+
+      setAvatarUrl(previewAvatarUrl);
+      setBannerUrl(previewBannerUrl);
+      setAvatarKind(previewAvatarKind);
+      setNameError('');
+
+      updateUser({ name: nextName, bio, interests, avatar: previewAvatarUrl });
+      window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+      invalidate(`/api/profile/me:${user?.id ?? ''}`);
+      invalidate('/api/profile/me');
+      invalidatePrefix('/api/profile');
+      setEditing(false);
+      setToast({ show: true, message: 'Profile updated successfully!', type: 'success' });
+    } catch (err) {
+      console.error(err);
+      setToast({ show: true, message: 'Could not save profile. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -607,6 +672,33 @@ export default function ProfilePage() {
     }
   };
 
+  const handleBlockFriend = async (friend: FriendItem) => {
+    setBusyKey(`block:${friend.user.id}`);
+    try {
+      await blockUser(friend.user.id);
+      setAcceptedFriends(prev => prev.filter(f => f.user.id !== friend.user.id));
+      setBlockedUsers(prev => [{ user: friend.user, blocked_at: new Date().toISOString() }, ...prev.filter(b => b.user.id !== friend.user.id)]);
+      setToast({ show: true, message: 'User blocked', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to block user', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleUnblockUser = async (userId: string) => {
+    setBusyKey(`unblock:${userId}`);
+    try {
+      await unblockUser(userId);
+      setBlockedUsers(prev => prev.filter(b => b.user.id !== userId));
+      setToast({ show: true, message: 'User unblocked', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to unblock user', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const openProfile = (userId: string) => navigate(userProfilePath(userId, user?.id ?? null));
 
   if (profileLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" /></div>;
@@ -684,7 +776,7 @@ export default function ProfilePage() {
                 {PROFILE_AVATARS.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => { setPreviewAvatarUrl(PROFILE_AVATARS[0].url); setPreviewAvatarKind('icon'); }}
+                    onClick={() => { setPreviewAvatarUrl(PROFILE_AVATARS[0].url); setPreviewAvatarKind('icon'); setIconId(PROFILE_AVATARS[0].id); }}
                     className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === PROFILE_AVATARS[0].url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
                   >
                     <img src={PROFILE_AVATARS[0].url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
@@ -711,7 +803,7 @@ export default function ProfilePage() {
                   <button
                     key={avatar.id}
                     type="button"
-                    onClick={() => { setPreviewAvatarUrl(avatar.url); setPreviewAvatarKind('icon'); }}
+                    onClick={() => { setPreviewAvatarUrl(avatar.url); setPreviewAvatarKind('icon'); setIconId(avatar.id); }}
                     className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === avatar.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
                   >
                     <img src={avatar.url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
@@ -798,14 +890,21 @@ export default function ProfilePage() {
         {/* Save/Cancel Buttons */}
         {editing && (
           <div className="flex items-center justify-end gap-2 pt-1">
-            <button onClick={handleCancelEditing} className="rounded-full border border-border bg-secondary px-5 py-2 text-xs font-semibold text-foreground hover:bg-secondary/80">
+            <button type="button" onClick={handleCancelEditing} disabled={saving} className="rounded-full border border-border bg-secondary px-5 py-2 text-xs font-semibold text-foreground hover:bg-secondary/80 disabled:opacity-50">
               Cancel
             </button>
-            <button onClick={handleSave} className="flex items-center gap-1.5 rounded-full gradient-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-glow">
-              <Check className="h-3.5 w-3.5" /> Save
+            <button type="button" onClick={() => void handleSave()} disabled={saving} className="flex items-center gap-1.5 rounded-full gradient-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-glow disabled:opacity-50">
+              <Check className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
         )}
+
+        <div className="rounded-2xl glass-card p-4 space-y-3">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <Palette className="h-4 w-4 text-primary" /> Appearance
+          </h3>
+          <ColorSchemePicker />
+        </div>
 
         {/* Change Password Modal Trigger */}
         <div className="rounded-2xl glass-card p-4">
@@ -1118,6 +1217,7 @@ export default function ProfilePage() {
                 {[
                   { id: 'accepted' as const, label: 'Accepted', icon: UserCheck, count: acceptedFriends.length },
                   { id: 'requests' as const, label: 'Requests', icon: UserPlus, count: incomingRequests.length },
+                  { id: 'blocked' as const, label: 'Blocked', icon: Ban, count: blockedUsers.length },
                 ].map((fSub) => {
                   const isFSubActive = friendSubTab === fSub.id;
                   return (
@@ -1147,6 +1247,45 @@ export default function ProfilePage() {
                 <div className="flex justify-center py-12">
                   <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-primary" />
                 </div>
+              ) : friendSubTab === 'blocked' ? (
+                <div className="space-y-2.5">
+                  {blockedUsers.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">You have not blocked anyone.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {blockedUsers.map((b) => {
+                        const label = b.user.username || b.user.display_name || b.user.full_name || 'User';
+                        return (
+                          <motion.li
+                            key={b.user.id}
+                            layout
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3"
+                          >
+                            <button type="button" onClick={() => openProfile(b.user.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                              <UserAvatar src={userAvatarUrl(b.user)} seed={b.user.id} name={label} size="md" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
+                                {b.user.full_name && <p className="truncate text-xs text-muted-foreground">{b.user.full_name}</p>}
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUnblockUser(b.user.id)}
+                              disabled={busyKey === `unblock:${b.user.id}`}
+                              className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 flex items-center gap-1 transition-colors disabled:opacity-50"
+                              aria-label={`Unblock ${label}`}
+                            >
+                              Unblock
+                            </button>
+                          </motion.li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               ) : friendSubTab === 'accepted' ? (
                 <div className="space-y-2.5">
                   {acceptedFriends.length === 0 ? (
@@ -1171,15 +1310,27 @@ export default function ProfilePage() {
                                 {f.user.full_name && <p className="truncate text-xs text-muted-foreground">{f.user.full_name}</p>}
                               </div>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveFriend(f.user.id)}
-                              disabled={busyKey === `friend:${f.user.id}`}
-                              className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-destructive/15 hover:text-destructive flex items-center gap-1 transition-colors disabled:opacity-50"
-                            >
-                              <UserMinus className="h-3.5 w-3.5" />
-                              Remove
-                            </button>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleBlockFriend(f)}
+                                disabled={busyKey === `block:${f.user.id}` || busyKey === `friend:${f.user.id}`}
+                                className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-destructive/15 hover:text-destructive flex items-center gap-1 transition-colors disabled:opacity-50"
+                                aria-label={`Block ${label}`}
+                              >
+                                <Ban className="h-3.5 w-3.5" />
+                                Block
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFriend(f.user.id)}
+                                disabled={busyKey === `friend:${f.user.id}` || busyKey === `block:${f.user.id}`}
+                                className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-destructive/15 hover:text-destructive flex items-center gap-1 transition-colors disabled:opacity-50"
+                              >
+                                <UserMinus className="h-3.5 w-3.5" />
+                                Remove
+                              </button>
+                            </div>
                           </motion.li>
                         );
                       })}

@@ -287,4 +287,36 @@ describe('ChatPage', () => {
     // System messages never get a sender label or an avatar bubble
     expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
   });
+
+  it('posts a poll as an encoded chat payload', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      const list = listRoutes(url, [joinedEvent('evt-poll', 'Poll Night')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-poll/messages')) {
+        if (init?.method === 'POST') return jsonResponse({ id: 9, sender_id: 'u-chat' }, 201);
+        return jsonResponse({ data: [] });
+      }
+      return undefined;
+    });
+
+    renderChat();
+    await openChat(/Poll Night/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Create poll' }));
+    fireEvent.change(screen.getByLabelText('Poll question'), { target: { value: 'Pizza or tacos?' } });
+    fireEvent.change(screen.getByLabelText('Poll option 1'), { target: { value: 'Pizza' } });
+    fireEvent.change(screen.getByLabelText('Poll option 2'), { target: { value: 'Tacos' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post poll' }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+      expect(post).toBeDefined();
+      const body = JSON.parse(String(post![1]!.body));
+      expect(JSON.parse(body.content)).toMatchObject({
+        v: 1,
+        type: 'poll',
+        question: 'Pizza or tacos?',
+        options: ['Pizza', 'Tacos'],
+      });
+    });
+  });
 });

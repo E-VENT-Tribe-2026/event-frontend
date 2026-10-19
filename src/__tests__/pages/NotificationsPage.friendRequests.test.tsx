@@ -131,11 +131,21 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     );
   });
 
-  it('counts both received and accepted friend requests on the Activity tab', () => {
+  it('counts received and accepted friend requests on the Friends tab', () => {
     renderPage();
-    // rows: 1 received + 1 accepted (Activity) and 1 event update (Updates)
-    expect(screen.getByText('Activity').closest('button')).toHaveTextContent('Activity2');
+    expect(screen.getByRole('textbox', { name: /search notifications/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^Profile$/i })).toBeInTheDocument();
+    expect(screen.getByText('Friends').closest('button')).toHaveTextContent('Friends2');
+    expect(screen.getByText('Activity').closest('button')).toHaveTextContent('Activity0');
     expect(screen.getByText('Updates').closest('button')).toHaveTextContent('Updates1');
+  });
+
+  it('shows only friend request notifications on the Friends tab', () => {
+    renderPage();
+    fireEvent.click(screen.getByText('Friends'));
+    expect(screen.getByText('john_42 sent you a friend request')).toBeInTheDocument();
+    expect(screen.getByText('jane_doe accepted your friend request')).toBeInTheDocument();
+    expect(screen.queryByText('Event: Summer Picnic')).not.toBeInTheDocument();
   });
 
   it('still opens the event page when an existing event notification is selected', async () => {
