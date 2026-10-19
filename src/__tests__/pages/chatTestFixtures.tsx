@@ -2,6 +2,7 @@ import { render } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { User } from '@/lib/storage';
 import ChatPage from '@/pages/ChatPage';
+import UserProfileProbe from './UserProfileProbe';
 
 /**
  * Shared fixtures for ChatPage tests, kept in one place to avoid duplicating
@@ -28,10 +29,12 @@ export const chatUser = {
 } satisfies User;
 
 export function renderChat() {
-  render(
+  return render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/chat']}>
       <Routes>
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/user/:userId" element={<UserProfileProbe />} />
+        <Route path="/profile" element={<div>Own profile page</div>} />
       </Routes>
     </MemoryRouter>,
   );

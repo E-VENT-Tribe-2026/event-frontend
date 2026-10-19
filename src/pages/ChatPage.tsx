@@ -11,7 +11,8 @@ import AppToast from '@/components/AppToast';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
-import { formatUserIdentity } from '@/lib/userIdentity';
+import { userProfilePath } from '@/lib/friendsApi';
+import { cachedFetch, invalidate, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
 
 type ChatEvent = {
   id: string;
@@ -38,7 +39,6 @@ type ChatMessage = {
   mimeType?: string;
   dataUrl?: string;
   senderName?: string;
-  senderUsername?: string;
   senderAvatar?: string;
   senderId?: string;
 };
@@ -78,6 +78,20 @@ function chatMessagesPath(eventId: string) {
   return `/api/chats/${eventId}/messages`;
 }
 
+/** Cache key for one user's saved copy of one event chat's messages. */
+function chatMessagesCacheKey(eventId: string, userId: string) {
+  return `${chatMessagesPath(eventId)}:${userId}`;
+}
+
+/** Thrown inside a cached fetcher so a failed response is never stored in the cache. */
+class ChatHttpError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`Chat request failed with status ${status}`);
+    this.status = status;
+  }
+}
+
 export default function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -99,6 +113,9 @@ export default function ChatPage() {
   const [chatApiMissing, setChatApiMissing] = useState(false);
   const [chatTab, setChatTab] = useState<'active' | 'past' | 'cancelled'>('active');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Only the newest loadMessages call may update the screen, so a slow response
+  // for a chat you already left cannot overwrite the chat you are looking at.
+  const messagesRequestRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,8 +178,6 @@ export default function ChatPage() {
       const senderObj = row.sender as Record<string, unknown> | undefined;
       const senderName =
         String(profiles?.full_name || senderObj?.full_name || senderObj?.name || row.sender_name || '').trim() || undefined;
-      const senderUsername =
-        String(profiles?.username || senderObj?.username || row.sender_username || '').trim() || undefined;
       const senderAvatar =
         String(profiles?.avatar_url || senderObj?.avatar_url || senderObj?.avatar || row.sender_avatar || '').trim() || undefined;
 
@@ -178,7 +193,6 @@ export default function ChatPage() {
         mimeType: parsed?.mimeType,
         dataUrl: parsed?.dataUrl,
         senderName,
-        senderUsername,
         senderAvatar,
         senderId: senderId || undefined,
       };
@@ -195,12 +209,28 @@ export default function ChatPage() {
     if (!token) { if (!silent) setChatListLoading(false); return; }
     if (!silent) setChatListLoading(true);
     try {
-      const [joinedRes, organizedRes] = await Promise.all([
-        fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(getApiUrl('/api/events/my-events'), { headers: { Authorization: `Bearer ${token}` } }),
+      // Cached for 30 s (TTL.SHORT): a joined or created event shows up quickly,
+      // and a failed request throws so it is never stored.
+      const [joinedBody, organizedBody] = await Promise.all([
+        cachedFetch(
+          `/api/participants/my/events:chat:${user.id}`,
+          async () => {
+            const res = await fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } });
+            if (!res.ok) throw new ChatHttpError(res.status);
+            return res.json(); // an unreadable body rejects, so it is not stored
+          },
+          TTL.SHORT,
+        ).catch(() => []),
+        cachedFetch(
+          `/api/events/my-events:chat:${user.id}`,
+          async () => {
+            const res = await fetch(getApiUrl('/api/events/my-events'), { headers: { Authorization: `Bearer ${token}` } });
+            if (!res.ok) throw new ChatHttpError(res.status);
+            return res.json(); // an unreadable body rejects, so it is not stored
+          },
+          TTL.SHORT,
+        ).catch(() => ({})),
       ]);
-      const joinedBody = joinedRes.ok ? await joinedRes.json().catch(() => []) : [];
-      const organizedBody = organizedRes.ok ? await organizedRes.json().catch(() => ({})) : {};
       const joinedRows = Array.isArray(joinedBody) ? joinedBody : Array.isArray(joinedBody?.data) ? joinedBody.data : [];
       const organizedRows = Array.isArray(organizedBody?.data) ? organizedBody.data : [];
       const joinedEvents = joinedRows.map((row: Record<string, unknown>) => row?.events as Record<string, unknown>).filter(Boolean);
@@ -280,7 +310,7 @@ export default function ChatPage() {
     } finally {
       if (!silent) setChatListLoading(false);
     }
-  }, [token, activeChat, selectedEventFromUrl, handledSelectedParam, navigate]);
+  }, [token, user.id, activeChat, selectedEventFromUrl, handledSelectedParam, navigate]);
 
   useEffect(() => { void loadChatList(); }, [loadChatList]);
 
@@ -295,35 +325,57 @@ export default function ChatPage() {
   const loadMessages = useCallback(
     async (eventId: string, silent = false) => {
       if (!token) return;
+      const requestId = ++messagesRequestRef.current;
+      const isCurrent = () => requestId === messagesRequestRef.current;
+      const cacheKey = chatMessagesCacheKey(eventId, user.id);
+      const showRows = (rows: Record<string, unknown>[]) =>
+        setMessages(rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[]);
+
+      // Show the saved copy at once (whatever its age), then always refresh from the server below.
+      const saved = peekCache<Record<string, unknown>[]>(cacheKey);
       if (!silent) {
-        setMessagesLoading(true);
-        setMessages([]); // Clears old messages immediately to prevent bleed-over
+        if (saved) {
+          showRows(saved);
+          setMessagesLoading(false);
+        } else {
+          setMessagesLoading(true);
+          setMessages([]); // Clears old messages immediately to prevent bleed-over
+        }
       }
       try {
         const primaryUrl = `${getApiUrl(chatMessagesPath(eventId))}?limit=100&page=1`;
-        let res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-        let rows: Record<string, unknown>[] = [];
-        let anyEndpointSupported = false;
-        if (res.ok) {
-          const body = await res.json().catch(() => ({}));
-          rows = normalizeMessageList(body);
-          anyEndpointSupported = true;
-        } else if (res.status === 403) {
+        const res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+        // Never keep messages from a chat you can no longer access, even if you have moved on.
+        if (res.status === 403) invalidate(cacheKey);
+        if (!isCurrent()) return;
+        if (res.status === 403) {
           setChatUnavailable(true);
           setMessages([]);
           setToast({ show: true, message: 'You can no longer access this chat.', type: 'error' });
           return;
         }
-        setMessages(rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[]);
+        // Failed or unreadable responses are never saved; keep the saved copy on screen if there is one.
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        if (!isCurrent()) return;
+        if (body === null) {
+          if (!saved) setMessages([]);
+          setChatUnavailable(false);
+          setChatApiMissing(true);
+          return;
+        }
+        const rows = normalizeMessageList(body);
+        setCacheEntry(cacheKey, rows, TTL.SHORT);
+        showRows(rows);
         setChatUnavailable(false);
-        setChatApiMissing(!anyEndpointSupported);
+        setChatApiMissing(false);
       } catch {
-        setMessages([]);
+        if (isCurrent() && !saved) setMessages([]); // network error
       } finally {
-        if (!silent) setMessagesLoading(false);
+        // The newest request ends loading, silent or not, so a send during a load cannot leave it stuck.
+        if (isCurrent()) setMessagesLoading(false);
       }
     },
-    [token],
+    [token, user.id],
   );
 
   useEffect(() => {
@@ -355,7 +407,7 @@ export default function ChatPage() {
         return;
       }
       setInput(''); setShowEmoji(false); setChatApiMissing(false);
-      await loadMessages(activeChat, true);
+      await loadMessages(activeChat, true); // always reads the server and replaces the saved copy
     } catch {
       setToast({ show: true, message: 'Unable to send message right now.', type: 'error' });
     } finally {
@@ -447,13 +499,24 @@ export default function ChatPage() {
                   ) : (
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex items-end gap-2 mb-1 ${m.from === 'me' ? 'justify-end' : 'justify-start'}`}>
                       {m.from === 'them' && (
-                        <UserAvatar src={m.senderAvatar} seed={m.senderId || m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
+                        m.senderId ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(userProfilePath(m.senderId as string, resolveMeId()))}
+                            aria-label={`Open ${m.senderName || 'this user'}'s profile`}
+                            className="shrink-0 mb-1 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
+                            <UserAvatar src={m.senderAvatar} seed={m.senderId} name={m.senderName || '?'} size="sm" />
+                          </button>
+                        ) : (
+                          <UserAvatar src={m.senderAvatar} seed={m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
+                        )
                       )}
                       <div className={`max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}>
                         {m.from === 'them' && (
                           <div className="flex items-center gap-1.5 px-1">
                             <span className="text-[11px] font-semibold text-foreground">
-                              {formatUserIdentity({ username: m.senderUsername, fullName: m.senderName || 'Unknown' })}
+                              {m.senderName || 'Unknown'}
                             </span>
                           </div>
                         )}
