@@ -96,6 +96,7 @@ export default function EventDetailsPage() {
       setToast({ show: true, message: 'Successfully joined!', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
       invalidatePrefix('/api/events?');
+      invalidatePrefix('/api/participants/my/events');
       return true;
     } catch {
       setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
@@ -479,6 +480,7 @@ export default function EventDetailsPage() {
           setToast({ show: true, message: 'You left the event.', type: 'success' });
           invalidatePrefix(`/api/participants/${event.id}`);
           invalidatePrefix('/api/events?');
+          invalidatePrefix('/api/participants/my/events');
         } catch {
           setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
         } finally {
@@ -491,6 +493,7 @@ export default function EventDetailsPage() {
       setToast({ show: true, message: 'You left the event.', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
       invalidatePrefix('/api/events?');
+      invalidatePrefix('/api/participants/my/events');
       setIsUpdatingParticipation(false);
       return;
     }

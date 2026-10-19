@@ -4,6 +4,7 @@ import { getCurrentUser, updateUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getAuthToken, clearAuthToken } from '@/lib/auth';
 import { fetchNotifications } from '@/lib/notificationsApi';
+import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
 import { useEffect, useState, useRef } from 'react';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
@@ -71,13 +72,23 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
     const token = getAuthToken();
     if (!token) return;
 
+    // The bell lights up for an unread notification, or for a friend request waiting for an answer.
+    let cancelled = false;
     const check = () => {
-      fetchNotifications(token)
-        .then((rows) => setHasUnread(rows.some((n) => !n.read)))
-        .catch(() => {});
+      Promise.all([
+        fetchNotifications(token).then((rows) => rows.some((n) => !n.read)).catch(() => false),
+        fetchIncomingRequestCount().then((count) => count > 0).catch(() => false),
+      ]).then(([unread, pending]) => {
+        if (!cancelled) setHasUnread(unread || pending);
+      });
     };
 
     check();
+    window.addEventListener(FRIENDS_CHANGED_EVENT, check);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(FRIENDS_CHANGED_EVENT, check);
+    };
   }, [user?.id]);
 
   const handleLogout = () => {

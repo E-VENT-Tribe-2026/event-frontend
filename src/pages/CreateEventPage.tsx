@@ -299,6 +299,7 @@ export default function CreateEventPage() {
       addEvent(localEvent);
       setToast({ show: true, message: 'Event Published Successfully!', type: 'success' });
       invalidatePrefix('/api/events?');
+      invalidatePrefix('/api/events/my-events');
       setTimeout(() => navigate('/home'), 1500);
     } catch (err: any) {
       clearTimeout(timeoutId);
