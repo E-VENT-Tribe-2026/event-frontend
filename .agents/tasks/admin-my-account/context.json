@@ -1,0 +1,25 @@
+{
+  "project_type": "Vite + React 18 + TypeScript SPA with Tailwind CSS and Radix UI",
+  "language": "TypeScript / TSX",
+  "build_system": "Vite 5 — `npm run build` (tsc then vite build). Path alias `@/` maps to `src/`. Tailwind 3 with JIT.",
+  "test_framework": "Vitest 3 + @testing-library/react 16 + jsdom. Config in vite.config or vitest.config. Run with `npm test` (vitest run).",
+  "build_command": "npm run build",
+  "test_command": "npm test",
+  "verification_instructions": "1) Run `npx tsc --noEmit` — must exit 0 with no errors. 2) Run `npm test` — all suites must pass. 3) Run `npm run build` — must exit 0.",
+  "snapshot_or_generated_files": null,
+  "environment_constraints": "Windows workspace. Do not start a dev server. All file edits should be within c:\\Users\\User\\Desktop\\event-frontend — never write outside this path.",
+  "contribution_requirements": "Preserve all aria-labels and role/text strings that the test suite queries: role='tab' with names Users/Events/Audit Log/Reports; aria-label='Back to Users' button in AdminUserDetail; aria-label='Sign out'; aria-label='Toggle user view'. Do not rename or remove these.",
+  "key_patterns": "All admin components use inline styles with `var(--adm-*)` CSS variables. CSS variables are defined in `src/index.css` inside `.adm {}` block. Components use Tailwind for layout classes and inline style for colors/dimensions. Hover states tracked with `useState<string|null>(null)` for row IDs or `useState<boolean>(false)` for single buttons. Admin API calls use `fetchAdminUserDetails(userId)` from `@/lib/adminApi` which returns `AdminUserDetailsFull`.",
+  "relevant_files": [
+    "src/pages/AdminPanelPage.tsx",
+    "src/components/admin/AdminMyAccount.tsx",
+    "src/components/admin/AdminUsersTab.tsx",
+    "src/components/admin/AdminUserDetail.tsx",
+    "src/components/admin/AdminReportDetail.tsx",
+    "src/components/admin/AdminEventsTab.tsx",
+    "src/lib/adminApi.ts",
+    "src/index.css",
+    "src/__tests__/pages/AdminPanelPage.test.tsx"
+  ],
+  "directory_structure": "src/pages/ — page-level components (AdminPanelPage.tsx). src/components/admin/ — all admin sub-components. src/lib/ — API helpers (adminApi.ts, auth.ts, api.ts). src/__tests__/ — vitest test files mirroring src structure. src/index.css — global styles including .adm {} CSS variable block."
+}

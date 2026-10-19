@@ -1,15 +1,18 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard } from 'lucide-react';
+import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard, Users, Shield } from 'lucide-react';
 import { getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getAuthToken } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { useEffect, useState } from 'react';
+import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 
 export default function BottomNav() {
   const location = useLocation();
   const [user, setUser] = useState(getCurrentUser);
+  const { isVerifiedAdmin } = useAdminAuth();
 
   useEffect(() => {
     const sync = () => setUser(getCurrentUser());
@@ -41,32 +44,57 @@ export default function BottomNav() {
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // once on mount
+
+  // Pending incoming friend requests, refreshed on every screen load and after friendship changes.
+  const [requestCount, setRequestCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      if (!getAuthToken()) return;
+      fetchIncomingRequestCount()
+        .then((count) => { if (!cancelled) setRequestCount(count); })
+        .catch(() => {});
+    };
+    refresh();
+    window.addEventListener(FRIENDS_CHANGED_EVENT, refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(FRIENDS_CHANGED_EVENT, refresh);
+    };
+  }, [location.pathname]);
 
   const isOrganizer = user?.role === 'organizer';
 
-  const navItems = isOrganizer
+  const baseItems = isOrganizer
     ? [
         { path: '/home', icon: Home, label: 'Home' },
         { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/create', icon: PlusCircle, label: 'Create' },
         { path: '/chat', icon: MessageCircle, label: 'Chat' },
-        { path: '/profile', icon: User, label: 'Profile' },
+        { path: '/friends', icon: Users, label: 'Friends' },
       ]
     : [
         { path: '/home', icon: Home, label: 'Home' },
         { path: '/map', icon: Map, label: 'Map' },
         { path: '/create', icon: PlusCircle, label: 'Create' },
         { path: '/chat', icon: MessageCircle, label: 'Chat' },
-        { path: '/profile', icon: User, label: 'Profile' },
+        { path: '/friends', icon: Users, label: 'Friends' },
       ];
+
+  const adminItem = isVerifiedAdmin
+    ? [{ path: '/admin', icon: Shield, label: 'Admin' }]
+    : [];
+
+  const profileItem = [{ path: '/profile', icon: User, label: 'Profile' }];
+
+  const navItems = [...baseItems, ...adminItem, ...profileItem];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-around px-4 py-2">
+      <div className="mx-auto flex w-full max-w-5xl items-center justify-around px-2 py-2">
         {navItems.map(({ path, icon: Icon, label }) => {
-          const active = location.pathname === path;
+          const active = location.pathname === path || (path === '/admin' && location.pathname.startsWith('/admin'));
           const isCreate = path === '/create';
           const baseText =
             active && !isCreate ? 'text-primary' : 'text-muted-foreground hover:text-foreground';
@@ -75,7 +103,8 @@ export default function BottomNav() {
             <Link
               key={path}
               to={path}
-              className={`flex flex-col items-center gap-1 px-3 py-1 transition-colors ${baseText}`}
+              className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors ${baseText}`}
+              aria-label={path === '/friends' && requestCount > 0 ? `Friends, ${requestCount} pending requests` : undefined}
             >
               {isCreate ? (
                 <div className="flex items-center justify-center rounded-full gradient-primary h-14 w-14 shadow-glow -mt-6 border-4 border-background">
@@ -91,6 +120,18 @@ export default function BottomNav() {
                   size="sm"
                   className={active ? 'ring-2 ring-primary' : ''}
                 />
+              ) : path === '/friends' ? (
+                <span className="relative">
+                  <Icon className="h-5 w-5" />
+                  {requestCount > 0 && (
+                    <span
+                      data-testid="friends-badge"
+                      className="absolute -right-2.5 -top-2 min-w-[18px] rounded-full gradient-primary px-1 text-center text-[10px] font-bold leading-[18px] text-primary-foreground"
+                    >
+                      {requestCount > 99 ? '99+' : requestCount}
+                    </span>
+                  )}
+                </span>
               ) : (
                 <Icon className="h-5 w-5" />
               )}

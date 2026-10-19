@@ -1,13 +1,14 @@
-import { Search, Bell } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { getCurrentUser, updateUser } from '@/lib/storage';
+import { Search, Bell, Settings, LogOut, User, ShieldCheck } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { getCurrentUser, updateUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
-import { getAuthToken } from '@/lib/auth';
+import { getAuthToken, clearAuthToken } from '@/lib/auth';
 import { fetchNotifications } from '@/lib/notificationsApi';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import AppLogo from '@/components/AppLogo';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface TopBarProps {
   search: string;
@@ -15,8 +16,11 @@ interface TopBarProps {
 }
 
 export default function TopBar({ search, onSearchChange }: TopBarProps) {
+  const navigate = useNavigate();
   const [user, setUser] = useState(getCurrentUser);
   const [hasUnread, setHasUnread] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const sync = () => setUser(getCurrentUser());
@@ -26,6 +30,17 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
       window.removeEventListener('eventapp:user-updated', sync);
       window.removeEventListener('focus', sync);
     };
+  }, []);
+
+  // Close settings menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowSettingsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Fetch profile on mount to ensure avatar is up to date after refresh
@@ -50,8 +65,7 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once on mount
+  }, []);
 
   useEffect(() => {
     const token = getAuthToken();
@@ -64,8 +78,13 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
     };
 
     check();
-    return () => {};
   }, [user?.id]);
+
+  const handleLogout = () => {
+    logout();
+    clearAuthToken();
+    navigate('/login');
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
@@ -86,26 +105,71 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
         </div>
 
         {/* Notifications */}
-        <Link to="/notifications" className="relative shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors">
+        <Link to="/notifications" className="relative shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors" title="Notifications">
           <Bell className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
           {hasUnread && (
             <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-accent shadow-accent animate-pulse" />
           )}
         </Link>
 
-        {/* Avatar */}
-        {user && (
-          <Link to="/profile" className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-primary/40 transition-all">
-            <UserAvatar
-              src={user.profilePhoto}
-              srcSecondary={user.avatar}
-              seed={user.id}
-              name={user.name}
-              email={user.email}
-              size="sm"
-            />
-          </Link>
-        )}
+        {/* Settings Menu Dropdown */}
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+            className="shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors"
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
+          </button>
+
+          <AnimatePresence>
+            {showSettingsMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+                className="absolute right-0 mt-2 w-48 rounded-2xl glass-card bg-background border border-border p-1.5 shadow-xl z-50 space-y-1"
+              >
+                <div className="px-3 py-2 border-b border-border/40 mb-1">
+                  <p className="text-xs font-bold text-foreground truncate">{user?.name || 'My Account'}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">Manage preferences</p>
+                </div>
+
+                <Link
+                  to="/profile"
+                  onClick={() => setShowSettingsMenu(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-foreground hover:bg-secondary transition-colors"
+                >
+                  <User className="h-4 w-4 text-primary" />
+                  Profile
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => { setShowSettingsMenu(false); navigate('/profile'); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-foreground hover:bg-secondary transition-colors text-left"
+                >
+                  <ShieldCheck className="h-4 w-4 text-accent" />
+                  Manage Account
+                </button>
+
+                <div className="my-1 border-t border-border/40" />
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors text-left"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </header>
   );

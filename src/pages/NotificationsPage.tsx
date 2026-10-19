@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { getCurrentUser, getNotifications, saveNotifications, type Notification } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { deleteNotification, deleteNotifications, fetchNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck } from 'lucide-react';
+import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
+import { ArrowLeft, CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
+import { useNotifications, invalidateNotifications } from '@/lib/queries';
+import { userProfilePath } from '@/lib/friendsApi';
 
 type NotificationKind =
   | 'user_joined'
@@ -17,6 +19,8 @@ type NotificationKind =
   | 'event_deleted'
   | 'event_cancelled'
   | 'reminder'
+  | 'friend_request'
+  | 'friend_request_accepted'
   | 'other';
 
 type UINotification = {
@@ -24,6 +28,7 @@ type UINotification = {
   kind: NotificationKind;
   message: string;
   relatedEventId: string | null;
+  relatedUserId: string | null;
   eventTitle: string;
   createdAt: string | null;
   read: boolean;
@@ -37,6 +42,8 @@ const iconMap: Record<NotificationKind, React.ElementType> = {
   event_deleted:   Trash2,
   event_cancelled: BellOff,
   reminder:        CalendarClock,
+  friend_request:  Contact,
+  friend_request_accepted: UserCheck,
   other:           Info,
 };
 
@@ -48,11 +55,15 @@ const colorMap: Record<NotificationKind, string> = {
   event_deleted:   'text-destructive bg-destructive/15',
   event_cancelled: 'text-destructive bg-destructive/15',
   reminder:        'text-accent bg-accent/20',
+  friend_request:  'text-primary bg-primary/20',
+  friend_request_accepted: 'text-green-500 bg-green-500/15',
   other:           'text-primary bg-primary/20',
 };
 
 function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
+  if (t === 'friend_request_accepted') return 'friend_request_accepted';
+  if (t.startsWith('friend_request')) return 'friend_request';
   if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
   if (t === 'user_left' || t.includes('left')) return 'user_left';
   if (t === 'event_created' || t.includes('creat')) return 'event_created';
@@ -69,6 +80,7 @@ function fromApi(n: ApiNotification): UINotification {
     kind: normalizeKind(n.type),
     message: n.message || 'Event update',
     relatedEventId: n.related_event_id ?? null,
+    relatedUserId: n.related_user_id ?? null,
     eventTitle: n.event_title ?? '',
     createdAt: n.created_at ?? null,
     read: Boolean(n.read),
@@ -81,6 +93,7 @@ function fromLocal(n: Notification): UINotification {
     kind: normalizeKind(n.type),
     message: n.description || n.title,
     relatedEventId: null,
+    relatedUserId: null,
     eventTitle: '',
     createdAt: null,
     read: n.read,
@@ -96,17 +109,16 @@ export default function NotificationsPage() {
     window.addEventListener('eventapp:user-updated', sync);
     return () => window.removeEventListener('eventapp:user-updated', sync);
   }, []);
-  const [items, setItems] = useState<UINotification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [usingFallback, setUsingFallback] = useState(false);
+
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
-  const [visibleCount, setVisibleCount] = useState(8);
-  const PAGE_SIZE = 8;
+  const [subFilter, setSubFilter] = useState<'all' | 'activity' | 'updates' | 'reminders'>('all');
+  const [visibleCount, setVisibleCount] = useState(10);
+  const PAGE_SIZE = 10;
 
   const resolveToken = async (): Promise<string | null> => {
     const existing = getAuthToken();
@@ -118,45 +130,71 @@ export default function NotificationsPage() {
     return null;
   };
 
-  const loadNotifications = async () => {
-    setLoading(true);
-    const token = await resolveToken();
-    if (!token && !user) {
-      setItems(getNotifications().map(fromLocal));
-      setUsingFallback(true);
-      setLoading(false);
-      return;
-    }
-    if (!token) {
-      setItems(getNotifications().map(fromLocal));
-      setUsingFallback(true);
-      setLoading(false);
-      return;
-    }
-    try {
-      const apiRows = await fetchNotifications(token);
-      const mapped = apiRows.map(fromApi).sort((a, b) => {
-        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return tb - ta;
-      });
-      setItems(mapped);
-      setSelectedIds(new Set());
-      setUsingFallback(false);
-    } catch {
-      setItems(getNotifications().map(fromLocal));
-      setSelectedIds(new Set());
-      setUsingFallback(true);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: rawNotifications, isLoading: queryLoading } = useNotifications();
+  const [usingFallback, setUsingFallback] = useState(false);
+  const loading = queryLoading;
 
-  useEffect(() => { loadNotifications(); }, [user?.id]);
+  const [items, setItems] = useState<UINotification[]>([]);
+  useEffect(() => {
+    if (rawNotifications && Array.isArray(rawNotifications)) {
+      const mapped = rawNotifications
+        .map(fromApi)
+        .sort((a, b) => {
+          const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tb - ta;
+        });
+      setItems(mapped);
+      setUsingFallback(false);
+    } else if (!queryLoading) {
+      setItems(getNotifications().map(fromLocal));
+      setUsingFallback(true);
+    }
+  }, [rawNotifications, queryLoading]);
+
+  const filteredItems = useMemo(() => {
+    if (subFilter === 'activity') {
+      return items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request' || n.kind === 'friend_request_accepted');
+    }
+    if (subFilter === 'updates') {
+      return items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted');
+    }
+    if (subFilter === 'reminders') {
+      return items.filter(n => n.kind === 'reminder');
+    }
+    return items;
+  }, [items, subFilter]);
+
+  const groupedItems = useMemo(() => {
+    const today: UINotification[] = [];
+    const yesterday: UINotification[] = [];
+    const earlier: UINotification[] = [];
+
+    const now = new Date();
+    const isToday = (d: Date) => d.toDateString() === now.toDateString();
+    const isYesterday = (d: Date) => {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      return d.toDateString() === y.toDateString();
+    };
+
+    filteredItems.forEach((n) => {
+      if (!n.createdAt) {
+        earlier.push(n);
+        return;
+      }
+      const d = new Date(n.createdAt);
+      if (isToday(d)) today.push(n);
+      else if (isYesterday(d)) yesterday.push(n);
+      else earlier.push(n);
+    });
+
+    return { today, yesterday, earlier };
+  }, [filteredItems]);
 
   const unreadCount = useMemo(() => items.filter((n) => !n.read).length, [items]);
   const selectedCount = selectedIds.size;
-  const allSelected = items.length > 0 && selectedCount === items.length;
+  const allSelected = filteredItems.length > 0 && selectedCount === filteredItems.length;
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -168,7 +206,7 @@ export default function NotificationsPage() {
   };
 
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(items.map((n) => n.id)));
+    setSelectedIds(allSelected ? new Set() : new Set(filteredItems.map((n) => n.id)));
   };
 
   const onDeleteSelected = async () => {
@@ -242,6 +280,9 @@ export default function NotificationsPage() {
       }
     }
     if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
+    else if ((n.kind === 'friend_request' || n.kind === 'friend_request_accepted') && n.relatedUserId) {
+      navigate(userProfilePath(n.relatedUserId, getCurrentUser()?.id));
+    }
   };
 
   const onDelete = async (id: string, e: React.MouseEvent) => {
@@ -251,6 +292,7 @@ export default function NotificationsPage() {
     try {
       if (token) await deleteNotification(token, id);
       setItems((prev) => prev.filter((x) => x.id !== id));
+      invalidateNotifications();
     } catch {
       setToast({ show: true, message: 'Could not delete notification.', type: 'error' });
     } finally {
@@ -278,169 +320,249 @@ export default function NotificationsPage() {
     }
   };
 
+  const renderCard = (n: UINotification, i: number) => {
+    const Icon = iconMap[n.kind];
+    const isDeleting = deletingIds.has(n.id);
+    return (
+      <motion.div
+        key={n.id}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: i * 0.02 }}
+        className={`flex items-center gap-3.5 rounded-2xl glass-card p-4 transition-all hover:border-border/80 shadow-sm cursor-pointer ${
+          n.read ? 'opacity-60 bg-secondary/20' : 'border-l-4 border-l-primary bg-primary/[0.04]'
+        }`}
+        onClick={() => void onOpenNotification(n)}
+      >
+        <input
+          type="checkbox"
+          checked={selectedIds.has(n.id)}
+          onChange={() => toggleSelected(n.id)}
+          onClick={(event) => event.stopPropagation()}
+          className="h-4 w-4 shrink-0 accent-primary cursor-pointer rounded"
+          aria-label="Select notification"
+        />
+        <div className={`shrink-0 rounded-xl p-2.5 shadow-xs ${colorMap[n.kind]}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            {!n.read && <span className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />}
+            <span className="text-[10px] font-bold uppercase tracking-wider text-primary">{n.kind.replace(/_/g, ' ')}</span>
+            <span className="text-[10px] text-muted-foreground">· {relativeTime(n.createdAt)}</span>
+          </div>
+          <p className="text-xs font-semibold text-foreground truncate mt-0.5">{n.message}</p>
+          {n.eventTitle && (
+            <p className="text-[11px] text-muted-foreground truncate mt-0.5">Event: {n.eventTitle}</p>
+          )}
+        </div>
+        <div className="shrink-0 flex items-center gap-1.5">
+          {n.relatedEventId && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); navigate(`/event/${n.relatedEventId}`); }}
+              className="hidden sm:inline-flex items-center gap-1 rounded-xl bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+            >
+              View <ExternalLink className="h-3 w-3" />
+            </button>
+          )}
+          {!n.read && (
+            <button
+              type="button"
+              disabled={markingId === n.id}
+              onClick={(e) => void onMarkRead(n, e)}
+              className="rounded-xl p-2 text-muted-foreground hover:bg-primary/15 hover:text-primary transition-colors"
+              aria-label="Mark as read"
+              title="Mark as read"
+            >
+              {markingId === n.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={(e) => void onDelete(n.id, e)}
+            className="rounded-xl p-2 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
+            aria-label="Delete notification"
+            title="Delete notification"
+          >
+            {isDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="min-h-screen bg-background pb-24">
       <AppToast
         message={toast.message}
         type={toast.type}
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-        <button
-          onClick={() => navigate(-1)}
-          className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
-          aria-label="Back"
-        >
-          <ArrowLeft className="h-5 w-5 text-foreground" />
-        </button>
-        <h1 className="text-lg font-bold text-foreground">Notifications</h1>
-        <div className="ml-auto flex items-center gap-2">
+
+      {/* Header */}
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-border/60 bg-background/95 backdrop-blur-lg px-4 py-3.5 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4 text-foreground" />
+          </button>
+          <h1 className="text-base font-bold text-foreground">Notifications</h1>
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => void onMarkAllRead()}
             disabled={loading || unreadCount === 0 || markingAll}
-            className="rounded-full bg-secondary px-3 py-1 text-[10px] font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full bg-secondary px-3.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
           >
-            {markingAll ? 'Marking...' : 'Mark All as Read'}
+            {markingAll ? 'Marking...' : 'Mark All Read'}
           </button>
           {unreadCount > 0 && (
-            <span className="rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">
-              {unreadCount} new
+            <span className="flex h-5 w-5 items-center justify-center rounded-full gradient-primary text-[10px] font-bold text-primary-foreground shadow-glow">
+              {unreadCount}
             </span>
           )}
-          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-            {items.length} total
-          </span>
         </div>
       </header>
 
-      <div className="mx-auto max-w-lg px-4 pt-3 space-y-2">
-        {!loading && items.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl glass-card px-3 py-2">
+      <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
+        {/* Sub-filter Tabs */}
+        <div className="flex rounded-2xl glass-card p-1 gap-1">
+          {[
+            { id: 'all' as const, label: 'All', count: items.length },
+            { id: 'activity' as const, label: 'Activity', count: items.filter(n => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'friend_request' || n.kind === 'friend_request_accepted').length },
+            { id: 'updates' as const, label: 'Updates', count: items.filter(n => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted').length },
+            { id: 'reminders' as const, label: 'Reminders', count: items.filter(n => n.kind === 'reminder').length },
+          ].map((tab) => {
+            const isActive = subFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => { setSubFilter(tab.id); setVisibleCount(PAGE_SIZE); }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isActive
+                    ? 'gradient-primary text-primary-foreground shadow-glow'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
+                    isActive
+                      ? 'bg-background/25 text-inherit'
+                      : 'bg-secondary text-muted-foreground'
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Selection Bar */}
+        {!loading && filteredItems.length > 0 && (
+          <div className="flex items-center justify-between rounded-2xl glass-card px-4 py-2.5 text-xs">
             <button
               type="button"
               onClick={toggleSelectAll}
-              className="rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary/80"
+              className="font-semibold text-foreground hover:text-primary transition-colors"
             >
-              {allSelected ? 'Clear Selection' : 'Select All'}
+              {allSelected ? 'Deselect All' : 'Select All'} ({selectedCount})
             </button>
-            <span className="text-xs text-muted-foreground">{selectedCount} selected</span>
             <button
               type="button"
               onClick={() => void onDeleteSelected()}
               disabled={selectedCount === 0 || deletingSelected}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-3 py-1.5 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/25 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 font-semibold text-destructive transition-colors hover:opacity-80 disabled:opacity-40"
             >
               <Trash2 className="h-3.5 w-3.5" />
               {deletingSelected ? 'Deleting...' : 'Delete Selected'}
             </button>
           </div>
         )}
+
         {usingFallback && (
-          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2 text-center text-xs text-amber-500">
+          <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-center text-xs text-amber-500 font-medium">
             Offline mode: showing local notifications only.
           </div>
         )}
+
         {loading && (
           <div className="py-16 text-center text-sm text-muted-foreground">
-            <RefreshCw className="mx-auto mb-2 h-4 w-4 animate-spin" />
+            <RefreshCw className="mx-auto mb-2.5 h-5 w-5 animate-spin text-primary" />
             Loading notifications...
           </div>
         )}
-        {!loading && items.slice(0, visibleCount).map((n, i) => {
-          const Icon = iconMap[n.kind];
-          const isDeleting = deletingIds.has(n.id);
-          return (
-            <motion.div
-              key={n.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.04 }}
-              className={`flex cursor-pointer items-start gap-3 rounded-2xl glass-card px-4 py-3.5 transition-all hover:border-border/60 ${n.read ? 'opacity-55' : 'border-l-2 border-l-primary/50'}`}
-              onClick={() => void onOpenNotification(n)}
-            >
-              <input
-                type="checkbox"
-                checked={selectedIds.has(n.id)}
-                onChange={() => toggleSelected(n.id)}
-                onClick={(event) => event.stopPropagation()}
-                className="mt-3 h-4 w-4 shrink-0 accent-primary"
-                aria-label={`Select notification ${i + 1}`}
-              />
-              <div className={`shrink-0 rounded-xl p-2.5 ${colorMap[n.kind]}`}>
-                <Icon className="h-4 w-4" />
+
+        {/* Grouped Time Buckets */}
+        {!loading && filteredItems.length > 0 && (
+          <div className="space-y-4">
+            {groupedItems.today.length > 0 && (
+              <div className="space-y-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1">Today</p>
+                {groupedItems.today.slice(0, visibleCount).map((n, i) => renderCard(n, i))}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{n.kind.replace(/_/g, ' ')}</p>
-                <p className="text-sm font-medium text-foreground leading-snug">{n.message}</p>
-                {n.eventTitle && (
-                  <p className="text-xs text-muted-foreground mt-0.5">Event: {n.eventTitle}</p>
-                )}
-                {n.relatedEventId && (
-                  <p className="text-[10px] text-primary mt-0.5 font-medium">Tap to open event →</p>
-                )}
+            )}
+
+            {groupedItems.yesterday.length > 0 && (
+              <div className="space-y-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1 pt-2">Yesterday</p>
+                {groupedItems.yesterday.slice(0, Math.max(0, visibleCount - groupedItems.today.length)).map((n, i) => renderCard(n, i))}
               </div>
-              <div className="shrink-0 flex flex-col items-end gap-2">
-                <span className="text-[10px] text-muted-foreground whitespace-nowrap">{relativeTime(n.createdAt)}</span>
-                {!n.read && (
-                  <button
-                    type="button"
-                    disabled={markingId === n.id}
-                    onClick={(e) => void onMarkRead(n, e)}
-                    className="rounded-lg p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-40 transition-colors"
-                    aria-label="Mark as read"
-                  >
-                    {markingId === n.id
-                      ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      : <CheckCheck className="h-3.5 w-3.5" />}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={isDeleting}
-                  onClick={(e) => void onDelete(n.id, e)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 transition-colors"
-                  aria-label="Delete notification"
-                >
-                  {isDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                </button>
+            )}
+
+            {groupedItems.earlier.length > 0 && (
+              <div className="space-y-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1 pt-2">Earlier</p>
+                {groupedItems.earlier.slice(0, Math.max(0, visibleCount - groupedItems.today.length - groupedItems.yesterday.length)).map((n, i) => renderCard(n, i))}
               </div>
-            </motion.div>
-          );
-        })}
-        {!loading && items.length === 0 && (
-          <div className="py-20 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60">
+            )}
+          </div>
+        )}
+
+        {!loading && filteredItems.length === 0 && (
+          <div className="py-24 text-center glass-card rounded-3xl p-8 space-y-3">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/60">
               <BellOff className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="text-sm font-medium text-foreground">No notifications yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">You're all caught up!</p>
+            <p className="text-sm font-semibold text-foreground">
+              {subFilter === 'reminders' ? 'No reminders right now' : subFilter === 'activity' ? 'No recent activity' : subFilter === 'updates' ? 'No recent updates' : 'No notifications found'}
+            </p>
+            <p className="text-xs text-muted-foreground">You're all caught up in this category!</p>
           </div>
         )}
       </div>
 
-      {!loading && items.length > 0 && (
-        <div className="mx-auto max-w-lg px-4 py-4">
-          {items.length > visibleCount ? (
+      {!loading && filteredItems.length > 0 && (
+        <div className="mx-auto max-w-lg px-4 pt-4 pb-6">
+          {filteredItems.length > visibleCount ? (
             <button
               type="button"
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-primary hover:bg-secondary/50 transition-colors"
+              className="w-full rounded-2xl border border-border/60 bg-secondary/50 py-3 text-xs font-semibold text-primary hover:bg-secondary transition-colors"
             >
-              Show more · {items.length - visibleCount} remaining
+              Show more · {filteredItems.length - visibleCount} remaining
             </button>
           ) : visibleCount > PAGE_SIZE ? (
             <button
               type="button"
               onClick={() => setVisibleCount(PAGE_SIZE)}
-              className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-primary hover:bg-secondary/50 transition-colors"
+              className="w-full rounded-2xl border border-border/60 bg-secondary/50 py-3 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
             >
               Show less
             </button>
           ) : null}
         </div>
       )}
+
       <BottomNav />
     </div>
   );

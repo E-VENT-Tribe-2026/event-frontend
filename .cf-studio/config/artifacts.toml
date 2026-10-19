@@ -1,0 +1,12 @@
+# Constructor Studio artifacts registry
+
+[[systems]]
+name = "EventFrontend"
+slug = "eventfrontend"
+kit = "sdlc"
+artifacts = []
+children = []
+
+[[systems.codebase]]
+path = "src"
+extensions = [".ts", ".tsx"]

@@ -1,4 +1,5 @@
 import { getApiUrl } from './api';
+import { notifyAuthExpired } from './auth';
 
 export class ApiError extends Error {
   status?: number;
@@ -15,6 +16,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
   const body = isJson ? await res.json().catch(() => undefined) : await res.text().catch(() => undefined);
 
   if (!res.ok) {
+    if (res.status === 401) notifyAuthExpired();
     const msg =
       (isJson && body && (body.detail || body.message || body.error)) ||
       (typeof body === 'string' && body) ||

@@ -9,7 +9,9 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
+import { destinationAfterSignIn } from '@/lib/username';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
+import { needsAdminVerification, setPendingAdminVerification, clearPendingAdminVerification, type AdminAuthStatus } from '@/lib/adminAuth';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -66,31 +68,47 @@ export default function LoginPage() {
         });
       }
 
+      // An administrator whose current sign-in isn't verified
+      // yet goes straight to the verification step — before any profile
+      // fetch or normal post-login setup.
+      const authStatus = data as unknown as AdminAuthStatus;
+      if (needsAdminVerification(authStatus)) {
+        setPendingAdminVerification({
+          accessToken,
+          hasMfaLinked: Boolean(authStatus.has_mfa_linked),
+          factorId: typeof authStatus.factor_id === 'string' ? authStatus.factor_id : undefined,
+        });
+        setIsSubmitting(false);
+        navigate('/admin-verify');
+        return;
+      }
+      clearPendingAdminVerification();
+
       const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {
         setToast({ show: true, message: 'Signed in but could not load your account. Try again.', type: 'error' });
         setIsSubmitting(false);
         return;
       }
-
-      // Fetch full profile to get avatar and other details
       let avatarUrl = '';
       let fullName = email.split('@')[0];
       let bio = '';
       let interests: string[] = [];
+      let username: string | undefined;
       try {
         const profileRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
           headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
         });
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
-          avatarUrl = String(p.avatar_url || '');
-          fullName = String(p.full_name || p.name || fullName);
-          bio = String(p.bio || '');
-          interests = Array.isArray(p.interests) ? p.interests as string[] : [];
-        }
-      } catch { /* use defaults */ }
+        const profileData = await profileRes.json().catch(() => ({} as Record<string, unknown>));
+        const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
+        avatarUrl = String(p.avatar_url || '');
+        fullName = String(p.full_name || p.name || fullName);
+        bio = String(p.bio || '');
+        interests = Array.isArray(p.interests) ? (p.interests as string[]) : [];
+        username = typeof p.username === 'string' ? p.username : undefined;
+      } catch {
+        /* use defaults */
+      }
 
       setCurrentUserFromOAuth({
         id: me.id,
@@ -99,9 +117,10 @@ export default function LoginPage() {
         avatar: avatarUrl,
         bio,
         interests,
+        role: typeof authStatus.role === 'string' ? authStatus.role : undefined,
       });
       setPassword('');
-      navigate('/home');
+      navigate(destinationAfterSignIn(username, typeof authStatus.role === 'string' ? authStatus.role : null));
     } catch {
       setToast({ show: true, message: 'Connection failed', type: 'error' });
       setIsSubmitting(false);

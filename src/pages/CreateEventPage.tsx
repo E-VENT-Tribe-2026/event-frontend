@@ -89,10 +89,27 @@ export default function CreateEventPage() {
     setPickedLng(prev => prev ?? null);
   };
 
-  const onMapLocationChange = (lat: number, lng: number) => {
+  // Reverse geocode coordinates when clicked on map to fill address edit box
+  const onMapLocationChange = async (lat: number, lng: number) => {
     setPickedLat(lat);
     setPickedLng(lng);
     setErrors(prev => { const n = { ...prev }; delete n.mapLocation; return n; });
+
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {
+        headers: { 'Accept-Language': 'en' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.display_name) {
+          update('location', data.display_name);
+        } else {
+          update('location', `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        }
+      }
+    } catch {
+      update('location', `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+    }
   };
 
   const todayIso = new Date().toISOString().split('T')[0];
@@ -387,7 +404,7 @@ export default function CreateEventPage() {
           <div className="rounded-2xl glass-card p-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor="create-event-budget" className="block text-xs font-semibold text-foreground">Budget (USD)</label>
+                <label htmlFor="create-event-budget" className="block text-xs font-semibold text-foreground">Budget (€)</label>
                 <input id="create-event-budget" type="number" min={0} step="1" placeholder="0 = free event" value={form.budget} onChange={e => update('budget', e.target.value)} className={inputCls('budget')} aria-describedby="create-event-budget-hint" />
                 <p id="create-event-budget-hint" className="text-[10px] text-muted-foreground px-0.5">Leave empty or enter 0 for free.</p>
                 {errors.budget && <span className="text-[10px] text-destructive px-1">{errors.budget}</span>}

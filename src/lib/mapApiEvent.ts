@@ -24,17 +24,26 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     rawCreator != null && String(rawCreator).trim() !== '' ? String(rawCreator).trim() : '';
 
   const profiles = api.profiles as Record<string, unknown> | undefined;
-  let organizerNameFromProfile = '';
-  let organizerPhoto = '';
-  if (profiles && typeof profiles === 'object') {
-    if (typeof profiles.full_name === 'string') organizerNameFromProfile = profiles.full_name;
-    if (typeof profiles.avatar_url === 'string') organizerPhoto = profiles.avatar_url;
-  }
-  const organizerFlat = typeof api.organizer_name === 'string' ? api.organizer_name : '';
-  const organizerName = organizerNameFromProfile || organizerFlat;
+  const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+  const organizerFullName =
+    text(api.organizer_name) || text(profiles?.full_name);
+
+  const organizerUsername =
+    text(api.organizer_username) || text(profiles?.username);
+
+  const organizerPhoto =
+    text(api.organizer_avatar) || text(profiles?.avatar_url);
+
+  const organizerName = organizerFullName || organizerUsername;
   const avatarSeed = createdBy || organizerName || (api.title as string) || 'organizer';
   const organizerAvatar =
     pickImageUrl(organizerPhoto) ?? getGeneratedAvatarUrl(avatarSeed);
+
+  const rawStatus = typeof api.status === 'string' ? api.status : undefined;
+  const isCancelled = rawStatus
+    ? rawStatus.toLowerCase() === 'cancelled' || rawStatus.toLowerCase() === 'canceled'
+    : Boolean(api.isCancelled);
 
   return {
     id: (api.id as string) ?? '',
@@ -53,6 +62,10 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizer: organizerName,
     organizerId: createdBy,
     organizerAvatar,
+    organizerUsername: organizerUsername || undefined,
+    organizerFullName: organizerFullName || undefined,
+    status: rawStatus,
+    isCancelled,
     isPrivate: false,
     isDraft: false,
     requiresApproval: false,

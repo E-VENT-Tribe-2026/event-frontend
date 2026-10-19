@@ -7,6 +7,8 @@ export type ApiNotification = {
   type: string;
   message: string;
   related_event_id?: string | null;
+  /** The other user, for friend request notifications. */
+  related_user_id?: string | null;
   event_title?: string | null;
   created_at?: string | null;
   read?: boolean;
@@ -69,6 +71,11 @@ export async function fetchNotifications(token: string): Promise<ApiNotification
             : typeof row.event_id === 'string'
               ? row.event_id
               : null,
+        // The related user object is the source of truth for opening the profile.
+        related_user_id:
+          typeof row.related_user?.id === 'string' ? row.related_user.id
+          : typeof row.related_user_id === 'string' ? row.related_user_id
+          : null,
         event_title:
           typeof row.event_title === 'string'
             ? row.event_title

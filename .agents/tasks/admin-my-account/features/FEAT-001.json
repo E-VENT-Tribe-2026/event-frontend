@@ -1,0 +1,36 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create AdminMyAccount component and wire it into AdminPanelPage with showAccount state, My Account header button, adminId capture from profile fetch, and switchTab/content-area gating.",
+  "status": "completed",
+  "steps": [
+    "Create src/components/admin/AdminMyAccount.tsx. Props: { adminId: string; onClose: () => void }. Imports: ArrowLeft, Shield, Flag, ShieldCheck, Loader2, AlertCircle from lucide-react; fetchAdminUserDetails from @/lib/adminApi; useState, useEffect from react; AdminUserDetailsFull type from @/lib/adminApi. State: user (AdminUserDetailsFull|null), loading (boolean, default true), error (string, default ''). useEffect: call fetchAdminUserDetails(adminId) → setUser on success, setError on failure, setLoading(false) in both. Render: (1) Back button — type=button, onClick=onClose, inline style: background transparent, border none, color var(--adm-muted-fg), fontWeight 500, fontSize 13, padding '6px 8px 6px 0', cursor pointer — className='inline-flex items-center gap-2', children: <ArrowLeft className='h-4 w-4'/> ← Back to panel. (2) Loading state: spinner card same as AdminUserDetail. (3) Error state: same error card as AdminUserDetail. (4) Loaded state: card div with style={background:'var(--adm-grad-card)', border:'1px solid var(--adm-border)', borderRadius:16, boxShadow:'0 4px 20px hsl(213 61% 5% / .5)', padding:18}. Inside card: avatar row (84px circle with var(--adm-grad) bg, white initials at 28px/700 font; name 18px/700; Admin pill badge matching AdminUserDetail admin badge style hsl(271 76% 53%/.2) bg; @username muted). Divider: div with borderTop '1px solid var(--adm-border)' margin '14px 0'. Stat row 1: flex, gap 12, paddingBottom 10 — 24x24 icon box (hsl(271 76% 53%/.16) bg, borderRadius 12) with Shield h-3.5 w-3.5 color var(--adm-primary); text 'Administrator since [formatDate long]'. Stat row 2: same icon box with Flag icon; text 'Reports closed by you · 0'. Info banner: div style={background:'hsl(213 40% 20% / .7)', border:'1px solid var(--adm-border)', borderRadius:12, color:'hsl(213 20% 82%)', padding:'12px 14px', marginTop:14, fontSize:12} — text: 'Administrator account. It cannot be changed in the panel; changes are made outside the application.' formatDate function uses toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' }) — produces e.g. 'November 5, 2025'. Initials computed from user.full_name: trim().split(/\\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase().",
+
+    "Modify src/pages/AdminPanelPage.tsx — add imports and state: (a) Add import at top: import AdminMyAccount from '@/components/admin/AdminMyAccount'; (b) After existing useState declarations add: const [showAccount, setShowAccount] = useState(false); const [adminId, setAdminId] = useState<string>(''); const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);",
+
+    "Modify src/pages/AdminPanelPage.tsx — profile useEffect: after the setAdminName(name) call, add: const profileId = (profile.id as string|undefined) || (profile.user_id as string|undefined) || ''; setAdminId(profileId);",
+
+    "Modify src/pages/AdminPanelPage.tsx — switchTab function: add setShowAccount(false) as first line inside switchTab body (before setStack([]) or after, either is fine).",
+
+    "Modify src/pages/AdminPanelPage.tsx — header My Account button: insert between the User-view toggle button and the Sign Out button inside the right-side controls div. Button: type=button, aria-label='My account', onClick toggles showAccount and sets userView.active false if active. Style: height 36, paddingLeft 6, paddingRight 12, fontSize 12.5, fontWeight 600, borderRadius 999, background 'var(--adm-card)', borderColor showAccount ? 'var(--adm-primary)' : hoveredBtn==='account' ? 'hsl(271 76% 53% / .6)' : 'var(--adm-border)', boxShadow showAccount ? 'var(--adm-shadow-glow)' : 'none', color showAccount ? 'var(--adm-fg)' : 'var(--adm-muted-fg)'. Add onMouseEnter={() => setHoveredBtn('account')} onMouseLeave={() => setHoveredBtn(null)}. Inside: 28px avatar circle (var(--adm-grad) bg, white, font 11/700, borderRadius 50%) showing initials from adminName; then text 'My account'. Only render when adminName is truthy.",
+
+    "Modify src/pages/AdminPanelPage.tsx — fix existing User-view and Sign Out button styles: (a) User-view inactive branch: change background from 'var(--adm-secondary)' to 'var(--adm-card)'; add height:36, fontSize:12.5 to both active and inactive style branches. Add hover via hoveredBtn==='userview': borderColor 'hsl(271 76% 53% / .6)', background 'hsl(213 50% 17%)'. Add onMouseEnter/Leave for 'userview'. (b) Sign Out: add height:36, fontSize:12.5. Add hover via hoveredBtn==='signout'. Keep all existing aria-labels unchanged: aria-label='Toggle user view' and aria-label='Sign out'.",
+
+    "Modify src/pages/AdminPanelPage.tsx — main content area: add showAccount branch BEFORE the topOfStack checks: { showAccount && topOfStack === null && !userView.active && ( <AdminMyAccount adminId={adminId} onClose={() => setShowAccount(false)} /> ) }. Then add && !showAccount to the tab-content condition: change {showTabs && !userView.active && ( to {showTabs && !userView.active && !showAccount && (. The stack entries (user-detail, event-detail, report-detail) remain unconditional on showAccount — if user navigated into a stack item, that takes precedence."
+  ],
+  "acceptance_criteria": [
+    "A 'My account' button appears in the admin panel header between User-view and Sign Out when adminName is set",
+    "Clicking 'My account' shows the AdminMyAccount component in the main content area and hides the tab content",
+    "Clicking any of the 4 tabs closes the account view (switchTab calls setShowAccount(false))",
+    "Clicking 'My account' while User-view is active turns off user view",
+    "The account view shows the admin's full name, initials avatar, Admin badge, username, 'Administrator since [date]', 'Reports closed by you · 0', and the info banner",
+    "← Back to panel button calls onClose and returns to normal tab view",
+    "All existing tests still pass — tab roles, aria-labels, and button texts unchanged"
+  ],
+  "verification": [
+    "npm run build — must exit 0",
+    "npm test — all suites pass including 'switches between tabs', 'hides tabs when user detail is open', 'navigates to inline user detail'"
+  ],
+  "blocked_reason": null,
+  "findings": "AdminMyAccount uses fetchAdminUserDetails(adminId) to load the admin's own profile — the same endpoint used for regular user detail pages. The adminId is captured from the profile fetch (profile.id || profile.user_id). The tab segmented control in the header is also gated with !showAccount so it disappears while account view is open, matching the same pattern used for stack items. The Back to panel button text in AdminMyAccount is '← Back to panel' (not 'Back to Users') so it does not conflict with the aria-label='Back to Users' used by AdminUserDetail. All 158 existing tests pass unchanged."
+}

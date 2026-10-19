@@ -87,7 +87,7 @@ export default function OrganizerDashboardPage() {
           <>
             <div className="grid grid-cols-2 gap-3">
               <StatCard icon={Users} label="Total Participants" value={totalParticipants} color="text-primary" />
-              <StatCard icon={DollarSign} label="Revenue" value={`$${totalRevenue}`} color="text-accent" />
+              <StatCard icon={DollarSign} label="Revenue" value={`€${totalRevenue}`} color="text-accent" />
               <StatCard icon={Ticket} label="Tickets Left" value={totalTicketsRemaining} color="text-primary" />
               <StatCard icon={BarChart3} label="Events" value={events.length} color="text-accent" />
             </div>
@@ -138,7 +138,7 @@ export default function OrganizerDashboardPage() {
                   <img src={e.image} alt="" className="h-14 w-14 rounded-lg object-cover" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{e.title}</p>
-                    <p className="text-xs text-muted-foreground">{e.participants.length}/{e.participantsLimit} joined · ${e.budget}</p>
+                    <p className="text-xs text-muted-foreground">{e.participants.length}/{e.participantsLimit} joined · €{e.budget}</p>
                   </div>
                   <button onClick={() => navigate(`/event/${e.id}`)} className="p-2 text-muted-foreground hover:text-primary">
                     <Edit className="h-4 w-4" />

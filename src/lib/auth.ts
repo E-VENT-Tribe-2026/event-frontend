@@ -24,7 +24,17 @@ export function clearAuthToken() {
   authToken = null;
   if (typeof window !== 'undefined') {
     window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    window.sessionStorage.removeItem('event_pending_admin_verification');
     clearSessionUserSnapshot();
+  }
+}
+
+/** Fired by any API layer that receives a 401. App.tsx listens and logs the user out. */
+export const AUTH_EXPIRED_EVENT = 'eventapp:auth-expired';
+
+export function notifyAuthExpired() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
   }
 }
 

@@ -1,0 +1,7 @@
+{
+  "task_id": "task-admin-my-account",
+  "task_description": "Add My Account view to admin panel header and fix styling to match HTML mockup across AdminPanelPage, AdminUsersTab, AdminUserDetail, and AdminReportDetail",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

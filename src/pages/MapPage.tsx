@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
 import BottomNav from '@/components/BottomNav';
-import { ArrowLeft, LocateFixed, RefreshCw } from 'lucide-react';
+import { ArrowLeft, LocateFixed, RefreshCw, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { getApiUrl } from '@/lib/api';
+import { getAuthToken } from '@/lib/auth';
 import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
+import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -74,11 +76,15 @@ export default function MapPage() {
   const [debouncedTitle, setDebouncedTitle] = useState('');
   const [debouncedFilterDate, setDebouncedFilterDate] = useState('');
   const [rawEvents, setRawEvents] = useState<EventItem[]>([]);
+  const [organizerProfiles, setOrganizerProfiles] = useState<Record<string, { full_name?: string; username?: string; avatar_url?: string }>>({});
   const [loading, setLoading] = useState(true);
   const [geoStatus, setGeoStatus] = useState<'idle' | 'pending' | 'granted' | 'denied' | 'unavailable'>('idle');
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
   const [mapReady, setMapReady] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Use `loading` flag to block and disable interactions across the map page when fetching data
+  const isAnyDataLoading = loading;
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedTitle(titleSearch.trim()), 350);
@@ -90,16 +96,21 @@ export default function MapPage() {
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
-  const loadEvents = useCallback(async () => {
+  const loadEvents = useCallback(async (currentCategory: string, currentTitle: string, currentDate: string) => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 12000);
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: '1', limit: '50' });
-      if (category !== 'All') params.set('category', category);
-      if (debouncedTitle) params.set('search', debouncedTitle);
-      if (debouncedFilterDate) params.set('date', debouncedFilterDate);
-      const res = await fetch(getApiUrl(`/api/events?${params}`), { signal: controller.signal });
+      if (currentCategory !== 'All') params.set('category', currentCategory);
+      if (currentTitle) params.set('search', currentTitle);
+      if (currentDate) params.set('date', currentDate);
+      
+      const token = getAuthToken();
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(getApiUrl(`/api/events?${params}`), { headers, signal: controller.signal });
       if (!res.ok) throw new Error('fetch failed');
       const body = await res.json();
       const rows = parseEventsApiList(body);
@@ -107,7 +118,34 @@ export default function MapPage() {
       const local = getLocalEvents().filter((e) => !e.isDraft);
       const byId = new Map<string, EventItem>();
       [...list, ...local].forEach((e) => byId.set(e.id, e));
-      setRawEvents(Array.from(byId.values()));
+      const combinedEvents = Array.from(byId.values());
+      setRawEvents(combinedEvents);
+
+      const profileMap: Record<string, { full_name?: string; username?: string; avatar_url?: string }> = {};
+      await Promise.all(
+        rows.map(async (row: any) => {
+          const creatorId = row.created_by || row.organizer_id;
+          if (creatorId && !profileMap[creatorId]) {
+            try {
+              const profRes = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
+              if (profRes.ok) {
+                const profData = await profRes.json().catch(() => null);
+                const prof = profData?.data || profData?.profile || profData;
+                if (prof) {
+                  profileMap[creatorId] = {
+                    full_name: prof.full_name || prof.name,
+                    username: prof.username,
+                    avatar_url: prof.avatar_url,
+                  };
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+        })
+      );
+      setOrganizerProfiles((prev) => ({ ...prev, ...profileMap }));
     } catch {
       const local = getLocalEvents().filter((e) => !e.isDraft);
       setRawEvents(local);
@@ -120,26 +158,17 @@ export default function MapPage() {
       window.clearTimeout(timeout);
       setLoading(false);
     }
-  }, [category, debouncedTitle, debouncedFilterDate, refreshKey]);
+  }, []);
 
   const availableCities = useMemo(() => getEventCities(rawEvents), [rawEvents]);
 
   useEffect(() => {
-    loadEvents();
-  }, [loadEvents]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setRefreshKey((k) => k + 1), 25000);
-    const onFocus = () => setRefreshKey((k) => k + 1);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
+    loadEvents(category, debouncedTitle, debouncedFilterDate);
+  }, [category, debouncedTitle, debouncedFilterDate, refreshKey, loadEvents]);
 
   const filteredEvents = useMemo(() => {
     return rawEvents.filter((e) => {
+      if (isEventCancelled(e) || !isEventUpcoming(e)) return false;
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedFilterDate && e.date !== debouncedFilterDate) return false;
       const city = extractCityFromLocation(e.location || '');
@@ -218,13 +247,18 @@ export default function MapPage() {
     spread.forEach(({ item: event, lat, lng }) => {
       const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
 
-      // Organizer display — name with avatar
-      const organizerName = event.organizer || '';
-      const organizerInitial = escapeHtml((organizerName || event.organizerId || 'O').charAt(0).toUpperCase());
-      const organizerLabel = escapeHtml(organizerName || 'Event Organizer');
+      const creatorId = event.organizerId || (event as any).created_by;
+      const prof = creatorId ? organizerProfiles[creatorId] : null;
 
-      const avatarHtml = event.organizerAvatar
-        ? `<img src="${escapeHtml(event.organizerAvatar)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #6d28d9;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'" /><span style="display:none;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`
+      const organizerFullName = prof?.full_name || event.organizerFullName || (event.organizer !== 'Organizer' ? event.organizer : '') || 'Organizer';
+      const rawUsername = prof?.username || event.organizerUsername;
+      const organizerUsername = rawUsername ? `@${rawUsername.replace(/^@/, '')}` : null;
+      const organizerAvatar = prof?.avatar_url || event.organizerAvatar;
+
+      const organizerInitial = escapeHtml((organizerFullName || 'O').charAt(0).toUpperCase());
+
+      const avatarHtml = organizerAvatar
+        ? `<img src="${escapeHtml(organizerAvatar)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #6d28d9;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'" /><span style="display:none;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`
         : `<span style="display:flex;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`;
 
       const costBadge = event.budget === 0
@@ -238,9 +272,9 @@ export default function MapPage() {
           <p style="margin:0 0 10px;font-size:11px;color:#64748b">${escapeHtml(event.location || '—')}</p>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f8fafc;border-radius:8px">
             ${avatarHtml}
-            <div style="min-width:0">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${organizerLabel}</p>
-              <p style="margin:0;font-size:10px;color:#94a3b8">Organizer</p>
+            <div style="min-width:0;line-height:1.2">
+              <p style="margin:0;font-size:11px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(organizerFullName)}</p>
+              ${organizerUsername ? `<p style="margin:0;font-size:10px;color:#64748b">${escapeHtml(organizerUsername)}</p>` : ''}
             </div>
             <div style="margin-left:auto">${costBadge}</div>
           </div>
@@ -257,7 +291,7 @@ export default function MapPage() {
       map.fitBounds(bounds.pad(0.15), { padding: [36, 36], maxZoom: 14 });
       map.panInsideBounds(WORLD_BOUNDS, { animate: false });
     }
-  }, [filteredEvents, mapReady]);
+  }, [filteredEvents, mapReady, organizerProfiles]);
 
   useEffect(() => {
     const map = mapInstance.current;
@@ -287,6 +321,7 @@ export default function MapPage() {
   }, [navigate, mapReady, filteredEvents]);
 
   const locateUser = () => {
+    if (isAnyDataLoading) return;
     const map = mapInstance.current;
     const L = leafletRef.current;
     if (!map || !L) return;
@@ -331,7 +366,17 @@ export default function MapPage() {
   const manualRefresh = () => setRefreshKey((k) => k + 1);
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className={`min-h-screen bg-background pb-20 relative ${isAnyDataLoading ? 'pointer-events-none select-none' : ''}`}>
+      {/* Loading Overlay State */}
+      {isAnyDataLoading && (
+        <div className="absolute inset-0 z-50 bg-background/60 backdrop-blur-xs flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2 p-6 rounded-2xl glass-card shadow-lg">
+            <Loader2 className="h-6 w-6 text-primary animate-spin" />
+            <p className="text-xs font-semibold text-foreground">Loading</p>
+          </div>
+        </div>
+      )}
+
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
 
       {/* Header */}
@@ -348,7 +393,7 @@ export default function MapPage() {
           <div>
             <h1 className="text-base font-bold text-foreground leading-none">Explore Map</h1>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {loading ? 'Loading…' : `${filteredEvents.length} event${filteredEvents.length !== 1 ? 's' : ''} nearby`}
+              {loading && rawEvents.length === 0 ? 'Loading…' : `${filteredEvents.length} event${filteredEvents.length !== 1 ? 's' : ''} nearby`}
             </p>
           </div>
         </div>
@@ -379,7 +424,6 @@ export default function MapPage() {
 
       {/* Filters */}
       <div className="border-b border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3 space-y-3">
-        {/* Category + Date row */}
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-semibold uppercase text-muted-foreground">Category</label>
@@ -406,7 +450,6 @@ export default function MapPage() {
           </div>
         </div>
 
-        {/* Location + Search row */}
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1">
             <label htmlFor="map-city-filter" className="text-[10px] font-semibold uppercase text-muted-foreground">Location</label>
@@ -436,9 +479,8 @@ export default function MapPage() {
           </div>
         </div>
 
-        {/* Status bar */}
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          {loading ? (
+          {loading && rawEvents.length === 0 ? (
             <><RefreshCw className="h-3 w-3 animate-spin" /> Loading events…</>
           ) : (
             <>
@@ -454,11 +496,11 @@ export default function MapPage() {
       {/* Map */}
       <div className="relative">
         <div ref={mapRef} className="h-[min(72vh,580px)] w-full z-0" />
-        {loading && (
+        {loading && rawEvents.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm z-10 pointer-events-none">
             <div className="flex flex-col items-center gap-2 rounded-2xl glass-card px-6 py-4">
               <RefreshCw className="h-5 w-5 animate-spin text-primary" />
-              <p className="text-xs text-muted-foreground">Loading events…</p>
+              <p className="text-xs text-muted-foreground">Loading events</p>
             </div>
           </div>
         )}

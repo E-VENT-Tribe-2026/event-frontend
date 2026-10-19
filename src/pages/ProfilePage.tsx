@@ -1,10 +1,9 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   getCurrentUser, 
   setCurrentUserFromOAuth,
   updateUser, 
   getEvents, 
-  getUsers, 
   getJoinRequests, 
   leaveEvent, 
   upsertEvent, 
@@ -12,7 +11,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, Star, UserPlus, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronDown } from 'lucide-react';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
@@ -21,9 +20,51 @@ import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
-import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
+import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
-import { invalidatePrefix, invalidate } from '@/lib/queryCache';
+import { invalidatePrefix, invalidate, cachedFetch, TTL } from '@/lib/queryCache';
+import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } from '@/lib/username';
+import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
+import { storageRefusalMessage } from '@/lib/profilePhoto';
+import { PROFILE_ICONS } from '@/lib/profileAssets';
+import { toProfileVisibility, type ProfileVisibility } from '@/lib/userProfileApi';
+import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
+import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
+import { 
+  fetchFriends, 
+  fetchIncomingRequests, 
+  acceptFriendRequest, 
+  declineFriendRequest, 
+  removeFriend, 
+  userAvatarUrl, 
+  userProfilePath,
+  type FriendItem, 
+  type FriendRequestItem 
+} from '@/lib/friendsApi';
+
+const PROFILE_BANNERS = Object.entries(CATEGORY_BANNERS).map(([label, url]) => ({
+  id: label.toLowerCase(),
+  label,
+  url: url.replace('w=600', 'w=1200'),
+}));
+
+const AVATAR_SEEDS = [
+  'alex', 'sam', 'jordan', 'taylor', 'casey', 'riley',
+  'morgan', 'jamie', 'avery', 'quinn', 'drew', 'robin',
+];
+const PROFILE_AVATARS = AVATAR_SEEDS.map((seed) => ({
+  id: seed,
+  url: getGeneratedAvatarUrl(seed),
+}));
+
+const PROFILE_VISIBILITY_OPTIONS: Array<{ value: ProfileVisibility; label: string; hint: string }> = [
+  { value: 'public', label: 'Public', hint: 'Everyone can see your profile. Only your friends see your upcoming events.' },
+  {
+    value: 'friends_only',
+    label: 'Friends only',
+    hint: 'People who are not your friends see only your username, full name, profile picture and banner.',
+  },
+];
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -38,17 +79,42 @@ export default function ProfilePage() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
+  const [username, setUsername] = useState('');
+  
+  // Saved database state
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
+  const [avatarKind, setAvatarKind] = useState<'photo' | 'icon'>('icon');
+  const [iconId, setIconId] = useState('');
+  const [bannerUrl, setBannerUrl] = useState('');
+  
+  // Staged preview state
+  const [previewAvatarUrl, setPreviewAvatarUrl] = useState(user?.avatar || '');
+  const [previewBannerUrl, setPreviewBannerUrl] = useState('');
+  const [previewAvatarKind, setPreviewAvatarKind] = useState<'photo' | 'icon'>('icon');
+  
+  const [savedName, setSavedName] = useState(user?.name || '');
+  const [savedBio, setSavedBio] = useState(user?.bio || '');
+  const [savedInterests, setSavedInterests] = useState<string[]>(user?.interests || []);
+  const [nameError, setNameError] = useState('');
+  const photoRef = useRef<HTMLInputElement>(null);
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
-  const [showInterests, setShowInterests] = useState(false);
+  const [visibility, setVisibility] = useState<ProfileVisibility>('public');
+  const [savedVisibility, setSavedVisibility] = useState<ProfileVisibility>('public');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [activeTab, setActiveTab] = useState<'events' | 'favorites'>('events');
-  const [visibleUpcoming, setVisibleUpcoming] = useState(3);
-  const [visiblePast, setVisiblePast] = useState(3);
-  const [visibleFavorites, setVisibleFavorites] = useState(3);
+  
+  // Navigation Tabs: Main parent tabs ('events' | 'friends')
+  const [mainTab, setMainTab] = useState<'events' | 'friends'>('events');
+  // Events Sub-Tabs ('upcoming' | 'past' | 'cancelled' | 'favourites')
+  const [eventSubTab, setEventSubTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites'>('upcoming');
+  // Friends Sub-Tabs ('accepted' | 'requests')
+  const [friendSubTab, setFriendSubTab] = useState<'accepted' | 'requests'>('accepted');
 
-  // Password State
-  const [showPasswordSection, setShowPasswordSection] = useState(false);
+  const [visibleEvents, setVisibleEvents] = useState(4);
+  const [visibleFavorites, setVisibleFavorites] = useState(4);
+
+  // Password Modal State
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -59,44 +125,74 @@ export default function ProfilePage() {
   
   // Data State
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
-  const [remoteCreatedUpcoming, setRemoteCreatedUpcoming] = useState<EventItem[]>([]);
-  const [remoteCreatedPast, setRemoteCreatedPast] = useState<EventItem[]>([]);
+  const [remoteOrganizedEvents, setRemoteOrganizedEvents] = useState<EventItem[]>([]);
   const [favorites, setFavorites] = useState<EventItem[]>([]);
-  const [loadingCreatedEvents, setLoadingCreatedEvents] = useState(false);
   const [localEventsEpoch, setLocalEventsEpoch] = useState(0);
   const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
 
-  // Memoized Data
+  // Friends & Requests Live Data States
+  const [acceptedFriends, setAcceptedFriends] = useState<FriendItem[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<FriendRequestItem[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  // Memoized Data Calculations
   const events = useMemo(() => getEvents(), [localEventsEpoch]);
-  const joinedEvents = useMemo(() => user ? events.filter(e => e.participants.includes(user.id)) : [], [events, user]);
   
-  const allJoinedEvents = useMemo(() => {
+  const allOrganizedEvents = useMemo(() => {
+    if (!user) return [];
     const byId = new Map<string, EventItem>();
-    [...joinedEvents, ...remoteJoinedEvents].forEach((e) => byId.set(e.id, e));
+    remoteOrganizedEvents.forEach((e) => byId.set(e.id, e));
+    events
+      .filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id))
+      .forEach((e) => byId.set(e.id, e));
     return Array.from(byId.values());
-  }, [joinedEvents, remoteJoinedEvents]);
+  }, [remoteOrganizedEvents, events, user]);
 
-  const displayCreatedUpcoming = useMemo(() => {
+  const allJoinedEvents = useMemo(() => {
     if (!user) return [];
-    const m = new Map<string, EventItem>();
-    remoteCreatedUpcoming.forEach((e) => m.set(e.id, e));
-    events.filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && isEventUpcoming(e)).forEach((e) => m.set(e.id, e));
-    return Array.from(m.values()).sort((a, b) => eventStartMs(a) - eventStartMs(b));
-  }, [remoteCreatedUpcoming, events, user]);
+    const byId = new Map<string, EventItem>();
+    remoteJoinedEvents.forEach((e) => byId.set(e.id, e));
+    events
+      .filter((e) => (e.participants || []).some((p) => sameUserId(p, user.id)))
+      .forEach((e) => byId.set(e.id, e));
+    return Array.from(byId.values());
+  }, [remoteJoinedEvents, events, user]);
 
-  const displayCreatedPast = useMemo(() => {
+  const unifiedAllEvents = useMemo(() => {
     if (!user) return [];
-    const m = new Map<string, EventItem>();
-    remoteCreatedPast.forEach((e) => m.set(e.id, e));
-    events.filter((e) => !e.isDraft && sameUserId(e.organizerId, user.id) && !isEventUpcoming(e)).forEach((e) => m.set(e.id, e));
-    return Array.from(m.values()).sort((a, b) => eventStartMs(b) - eventStartMs(a));
-  }, [remoteCreatedPast, events, user]);
+    const byId = new Map<string, { e: EventItem; isCreated: boolean }>();
 
-  const createdIds = useMemo(() => new Set([...displayCreatedUpcoming, ...displayCreatedPast].map(e => e.id)), [displayCreatedUpcoming, displayCreatedPast]);
-  const joinedEventsOnly = useMemo(() => allJoinedEvents.filter(e => !createdIds.has(e.id)), [allJoinedEvents, createdIds]);
+    allOrganizedEvents.forEach((e) => {
+      byId.set(e.id, { e, isCreated: true });
+    });
 
-  const displayJoinedUpcoming = useMemo(() => joinedEventsOnly.filter(isEventUpcoming).sort((a, b) => eventStartMs(a) - eventStartMs(b)), [joinedEventsOnly]);
-  const displayJoinedPast = useMemo(() => joinedEventsOnly.filter(e => !isEventUpcoming(e)).sort((a, b) => eventStartMs(b) - eventStartMs(a)), [joinedEventsOnly]);
+    allJoinedEvents.forEach((e) => {
+      if (!byId.has(e.id)) {
+        byId.set(e.id, { e, isCreated: false });
+      }
+    });
+
+    return Array.from(byId.values());
+  }, [allOrganizedEvents, allJoinedEvents, user]);
+
+  const unifiedCancelled = useMemo(() => {
+    return unifiedAllEvents
+      .filter(({ e }) => isEventCancelled(e))
+      .sort((a, b) => eventStartMs(b.e) - eventStartMs(a.e));
+  }, [unifiedAllEvents]);
+
+  const unifiedUpcoming = useMemo(() => {
+    return unifiedAllEvents
+      .filter(({ e }) => !isEventCancelled(e) && isEventUpcoming(e))
+      .sort((a, b) => eventStartMs(a.e) - eventStartMs(b.e));
+  }, [unifiedAllEvents]);
+
+  const unifiedPast = useMemo(() => {
+    return unifiedAllEvents
+      .filter(({ e }) => !isEventCancelled(e) && !isEventUpcoming(e))
+      .sort((a, b) => eventStartMs(b.e) - eventStartMs(a.e));
+  }, [unifiedAllEvents]);
 
   const approvedRequests = useMemo(() => {
     if (!user) return [];
@@ -106,7 +202,28 @@ export default function ProfilePage() {
     }).filter(Boolean);
   }, [user, events]);
 
-  // Initial Load: Profile & Favorites
+  // Fetch Friends and Incoming Requests
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    let cancelled = false;
+    setFriendsLoading(true);
+
+    Promise.all([
+      fetchFriends(1, 50).catch(() => ({ data: [], has_more: false })),
+      fetchIncomingRequests(1, 50).catch(() => ({ data: [], has_more: false }))
+    ]).then(([friendsRes, requestsRes]) => {
+      if (cancelled) return;
+      setAcceptedFriends(friendsRes.data || []);
+      setIncomingRequests(requestsRes.data || []);
+    }).finally(() => {
+      if (!cancelled) setFriendsLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Initial Load with client-side caching
   useEffect(() => {
     const token = getAuthToken();
     if (!token) { setProfileLoading(false); return; }
@@ -114,37 +231,83 @@ export default function ProfilePage() {
     let cancelled = false;
     (async () => {
       try {
-        const [resProf, resFavs] = await Promise.all([
-          fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }),
-          fetch(getApiUrl('/api/favorites/all'), { headers: { Authorization: `Bearer ${token}` } })
+        const [rawProf, favData] = await Promise.all([
+          cachedFetch(
+            `/api/profile/me:${user?.id ?? ''}`,
+            async () => {
+              const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+              });
+              if (!res.ok) throw new Error('Failed to fetch profile');
+              return res.json();
+            },
+            TTL.LONG,
+          ).catch((err) => {
+            console.error('Error fetching profile:', err);
+            return null;
+          }),
+          cachedFetch(
+            `/api/favorites/all:${user?.id ?? ''}`,
+            async () => {
+              const res = await fetch(getApiUrl('/api/favorites/all'), {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return [];
+              return res.json();
+            },
+            TTL.MEDIUM,
+          ).catch((err) => {
+            console.error('Error fetching favorites:', err);
+            return [];
+          }),
         ]);
-        
-        if (resProf.ok && !cancelled) {
-          const raw = await resProf.json();
-          const data = raw.data || raw.user || raw;
+
+        if (rawProf && !cancelled) {
+          const data = rawProf.data || rawProf.user || rawProf;
           if (data.id) {
             setCurrentUserFromOAuth({
               id: String(data.id),
               email: String(data.email || ""),
               name: String(data.full_name || data.name || ""),
+              username: String(data.username),
               bio: String(data.bio || ""),
               avatar: data.avatar_url,
               interests: Array.isArray(data.interests) ? data.interests : [],
             });
-            setName(data.full_name || data.name || "");
+            const loadedName = String(data.full_name || data.name || '');
+            const loadedAvatar = typeof data.avatar_url === 'string' ? data.avatar_url : '';
+            const loadedBanner = typeof data.banner_url === 'string' ? data.banner_url : '';
+            setName(loadedName);
+            setSavedName(loadedName);
+            setSavedBio(String(data.bio || ''));
+            setSavedInterests(Array.isArray(data.interests) ? data.interests : []);
+            setVisibility(toProfileVisibility(data.visibility));
+            setSavedVisibility(toProfileVisibility(data.visibility));
+            setUsername(typeof data.username === 'string' ? data.username : '');
+            
+            setAvatarUrl(loadedAvatar);
+            setPreviewAvatarUrl(loadedAvatar);
+            
+            setBannerUrl(loadedBanner);
+            setPreviewBannerUrl(loadedBanner);
+
+            const kind = data.avatar_kind === 'photo' ? 'photo' : 'icon';
+            setAvatarKind(kind);
+            setPreviewAvatarKind(kind);
+
+            setIconId(typeof data.icon_id === 'string' && data.icon_id ? data.icon_id : PROFILE_ICONS.find((i) => i.url === loadedAvatar)?.id ?? '');
             setBio(data.bio || "");
             setInterests(Array.isArray(data.interests) ? data.interests : []);
           }
         }
 
-        if (resFavs.ok && !cancelled) {
-          const favData = await resFavs.json();
-          setFavorites((favData || []).map(mapApiEventToItem));
+        if (Array.isArray(favData) && !cancelled) {
+          setFavorites(favData.map(mapApiEventToItem));
         }
       } catch (err) { console.error(err); } finally { if (!cancelled) setProfileLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [user?.id]);
 
   // Event Data Load
   useEffect(() => {
@@ -152,45 +315,233 @@ export default function ProfilePage() {
     const token = getAuthToken();
     if (!token) return;
 
+    let cancelled = false;
     (async () => {
-      setLoadingCreatedEvents(true);
       try {
-        const [resJoined, resCreated] = await Promise.all([
-          fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/my-events`), { headers: { Authorization: `Bearer ${token}` } })
+        const [joinedBody, createdBody] = await Promise.all([
+          cachedFetch(
+            `/api/participants/my/events:${user.id}`,
+            async () => {
+              const res = await fetch(getApiUrl('/api/participants/my/events'), {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return [];
+              return res.json();
+            },
+            TTL.SESSION,
+          ).catch(() => []),
+          cachedFetch(
+            `/api/events/my-events:${user.id}`,
+            async () => {
+              const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/my-events`), {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!res.ok) return { data: [] };
+              return res.json();
+            },
+            TTL.SESSION,
+          ).catch(() => ({ data: [] })),
         ]);
 
-        if (resJoined.ok) {
-          const joinedBody = await resJoined.json();
-          setRemoteJoinedEvents((joinedBody || []).map((row: any) => mapApiEventToItem(row.events)).filter(Boolean));
-        }
+        if (cancelled) return;
 
-        if (resCreated.ok) {
-          const createdBody = await resCreated.json();
-          const rows = createdBody.data || [];
-          setRemoteCreatedUpcoming(rows.map(mapApiEventToItem).filter(isEventUpcoming));
-          setRemoteCreatedPast(rows.map(mapApiEventToItem).filter((e: any) => !isEventUpcoming(e)));
-          rows.forEach((evt: any) => upsertEvent(mapApiEventToItem(evt)));
-        }
-        setLocalEventsEpoch(n => n + 1);
-      } catch (err) { console.error(err); } finally { setLoadingCreatedEvents(false); }
+        const joinedRows = Array.isArray(joinedBody?.data) ? joinedBody.data : Array.isArray(joinedBody) ? joinedBody : [];
+        const mappedJoined = joinedRows.map((row: any) => mapApiEventToItem(row.events || row)).filter(Boolean);
+        setRemoteJoinedEvents(mappedJoined);
+
+        const createdRows = Array.isArray(createdBody?.data) ? createdBody.data : Array.isArray(createdBody) ? createdBody : [];
+        const mappedCreated = createdRows.map(mapApiEventToItem).filter(Boolean);
+        setRemoteOrganizedEvents(mappedCreated);
+        mappedCreated.forEach((evt: EventItem) => upsertEvent(evt));
+
+        setLocalEventsEpoch((n) => n + 1);
+      } catch (err) {
+        console.error(err);
+      }
     })();
+    return () => { cancelled = true; };
   }, [user?.id]);
+
+  const handleStartEditing = () => {
+    setPreviewAvatarUrl(avatarUrl);
+    setPreviewBannerUrl(bannerUrl);
+    setPreviewAvatarKind(avatarKind);
+    setEditing(true);
+  };
+
+  const handleCancelEditing = () => {
+    setName(savedName);
+    setBio(savedBio);
+    setInterests(savedInterests);
+    setVisibility(savedVisibility);
+    setPreviewAvatarUrl(avatarUrl);
+    setPreviewBannerUrl(bannerUrl);
+    setPreviewAvatarKind(avatarKind);
+    setNameError('');
+    setEditing(false);
+  };
+
+  // Carousel Component Helper
+  const CarouselSection = ({ title, children }: { title: string; children: React.ReactNode }) => {
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [canScrollLeft, setCanScrollLeft] = useState(false);
+    const [canScrollRight, setCanScrollRight] = useState(true);
+
+    const checkScroll = () => {
+      if (scrollRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+        setCanScrollLeft(scrollLeft > 5);
+        setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 5);
+      }
+    };
+
+    useEffect(() => {
+      checkScroll();
+      const el = scrollRef.current;
+      if (el) {
+        el.addEventListener('scroll', checkScroll);
+        window.addEventListener('resize', checkScroll);
+        return () => {
+          el.removeEventListener('scroll', checkScroll);
+          window.removeEventListener('resize', checkScroll);
+        };
+      }
+    }, [children]);
+
+    const scroll = (direction: 'left' | 'right') => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollBy({ left: direction === 'left' ? -220 : 220, behavior: 'smooth' });
+      }
+    };
+
+    return (
+      <div className="space-y-2">
+        {title && <p className="text-xs font-semibold text-center">{title}</p>}
+        <div className="relative flex items-center">
+          {canScrollLeft && (
+            <button 
+              type="button" 
+              onClick={() => scroll('left')} 
+              className="absolute -left-3 z-10 h-7 w-7 rounded-full bg-secondary/90 border border-border flex items-center justify-center text-foreground shadow-md hover:bg-secondary transition-transform active:scale-95"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          )}
+
+          <div 
+            ref={scrollRef} 
+            className="flex gap-2 overflow-x-auto px-2 py-1 w-full scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x"
+          >
+            {children}
+          </div>
+
+          {canScrollRight && (
+            <button 
+              type="button" 
+              onClick={() => scroll('right')} 
+              className="absolute -right-3 z-10 h-7 w-7 rounded-full bg-secondary/90 border border-border flex items-center justify-center text-foreground shadow-md hover:bg-secondary transition-transform active:scale-95"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const handlePhotoUploadPreview = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !user) return;
+    try {
+      const url = await uploadProfilePhotoToStorage(user.id, file);
+      setPreviewAvatarUrl(url);
+      setPreviewAvatarKind('photo');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Photo upload failed.';
+      setToast({ show: true, message: storageRefusalMessage(message) || message, type: 'error' });
+    }
+  };
+
+  const handleSave = async () => {
+    const problem = getFullNameValidationError(name);
+    if (problem) {
+      setNameError(problem);
+      setToast({ show: true, message: problem, type: 'error' });
+      return;
+    }
+    const cleaned = normalizeFullName(name);
+    const token = getAuthToken();
+    if (token) {
+      try {
+        const payload = {
+          full_name: cleaned,
+          bio,
+          interests,
+          visibility,
+          avatar_url: previewAvatarUrl,
+          banner_url: previewBannerUrl || null,
+          avatar_kind: previewAvatarKind,
+        };
+        const saveRes = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { 
+          method: 'PUT', 
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+          body: JSON.stringify(payload) 
+        });
+        if (!saveRes.ok) {
+          const failed = await saveRes.json().catch(() => ({} as { detail?: string }));
+          const detail = String(failed.detail || 'Could not save profile');
+          setNameError(detail);
+          setToast({ show: true, message: detail, type: 'error' });
+          return;
+        }
+        const saved = await saveRes.json().catch(() => ({} as Record<string, unknown>));
+        const savedProfile = (saved as { data?: Record<string, unknown> }).data || saved;
+        
+        const nextName = savedProfile && typeof savedProfile.full_name === 'string' ? savedProfile.full_name : cleaned;
+        setName(nextName);
+        setSavedName(nextName);
+        setSavedBio(bio);
+        setSavedInterests(interests);
+        const nextVisibility = toProfileVisibility(savedProfile?.visibility ?? visibility);
+        setVisibility(nextVisibility);
+        setSavedVisibility(nextVisibility);
+        
+        setAvatarUrl(previewAvatarUrl);
+        setBannerUrl(previewBannerUrl);
+        setAvatarKind(previewAvatarKind);
+        setNameError('');
+
+        updateUser({ name: nextName, bio, interests, avatar: previewAvatarUrl });
+        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+        invalidate(`/api/profile/me:${user?.id ?? ''}`);
+        invalidate('/api/profile/me');
+        invalidatePrefix('/api/profile');
+        setEditing(false);
+        setToast({ show: true, message: 'Profile updated successfully!', type: 'success' });
+      } catch (err) { console.error(err); }
+    }
+  };
+
+  const toggleInterest = (interest: string) => {
+    setInterests((prev) => (
+      prev.includes(interest) ? prev.filter((entry) => entry !== interest) : [...prev, interest]
+    ));
+  };
 
   const handleLeaveFromProfile = async (eventId: string) => {
     const token = getAuthToken();
     setLeavingEventId(eventId);
     if (token) {
-      try {
-        await fetch(getApiUrl(`/api/participants/${eventId}/leave`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-      } catch (err) { console.error(err); }
+      try { await fetch(getApiUrl(`/api/participants/${eventId}/leave`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } }); } catch (err) { console.error(err); }
     }
     leaveEvent(eventId, user!.id);
     setRemoteJoinedEvents(prev => prev.filter(e => e.id !== eventId));
     setLeavingEventId(null);
     setToast({ show: true, message: 'Left event', type: 'success' });
-    invalidatePrefix('/api/events?');
-    invalidatePrefix(`/api/participants/${eventId}`);
+    invalidate(`/api/participants/my/events:${user?.id ?? ''}`);
+    invalidatePrefix('/api/participants');
+    invalidatePrefix('/api/events');
   };
 
   const handleRemoveFavorite = async (eventId: string) => {
@@ -202,128 +553,221 @@ export default function ProfilePage() {
         setFavorites(prev => prev.filter(e => e.id !== eventId));
         setToast({ show: true, message: 'Removed from favorites', type: 'success' });
         invalidate(`/api/favorites/all:${user?.id ?? ''}`);
+        invalidate('/api/favorites/all');
+        invalidatePrefix('/api/favorites');
       }
     } catch (err) { console.error(err); }
   };
 
-  const handleSave = async () => {
-    const token = getAuthToken();
-    if (token) {
-      try {
-        await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ full_name: name, bio, interests }) });
-        updateUser({ name, bio, interests });
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
-        setEditing(false);
-        setToast({ show: true, message: 'Profile updated!', type: 'success' });
-      } catch (err) { console.error(err); }
-    }
-  };
-
-  const toggleInterest = (interest: string) => {
-    setInterests((prev) => (
-      prev.includes(interest)
-        ? prev.filter((entry) => entry !== interest)
-        : [...prev, interest]
-    ));
-  };
-
   const handleChangePassword = async () => {
-    if (!currentPassword) {
-      setToast({ show: true, message: 'Please enter your current password.', type: 'error' });
-      return;
-    }
-    if (newPassword.length < 8) {
-      setToast({ show: true, message: 'Password must be at least 8 characters.', type: 'error' });
-      return;
-    }
-    if (newPassword === currentPassword) {
-      setToast({ show: true, message: 'New password must be different from current password.', type: 'error' });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setToast({ show: true, message: 'Passwords do not match.', type: 'error' });
-      return;
-    }
+    if (!currentPassword) { setToast({ show: true, message: 'Please enter current password.', type: 'error' }); return; }
+    if (newPassword.length < 8) { setToast({ show: true, message: 'Password must be at least 8 chars.', type: 'error' }); return; }
+    if (newPassword !== confirmPassword) { setToast({ show: true, message: 'Passwords do not match.', type: 'error' }); return; }
 
     const token = getAuthToken();
     if (!token) return;
-
     setPasswordLoading(true);
     try {
       const res = await fetch(getApiUrl('/api/auth/reset-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          access_token: token,
-          current_password: currentPassword,
-          new_password: newPassword,
-          confirm_password: confirmPassword,
-        }),
+        body: JSON.stringify({ access_token: token, current_password: currentPassword, new_password: newPassword, confirm_password: confirmPassword }),
       });
-
       const data = await res.json();
-
       if (res.ok) {
         setToast({ show: true, message: 'Password updated successfully.', type: 'success' });
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-        setShowPasswordSection(false);
+        setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setShowPasswordModal(false);
       } else {
         setToast({ show: true, message: data.detail || 'Failed to update password.', type: 'error' });
       }
-    } catch {
-      setToast({ show: true, message: 'Something went wrong. Please try again.', type: 'error' });
-    } finally {
-      setPasswordLoading(false);
-    }
+    } catch { setToast({ show: true, message: 'Something went wrong.', type: 'error' }); } finally { setPasswordLoading(false); }
   };
 
   const handleLogout = () => { logout(); clearAuthToken(); navigate('/login'); };
 
+  // Friend actions handling
+  const handleAcceptRequest = async (req: FriendRequestItem) => {
+    setBusyKey(`in:${req.request_id}`);
+    try {
+      const res = await acceptFriendRequest(req.request_id);
+      setIncomingRequests(prev => prev.filter(r => r.request_id !== req.request_id));
+      setAcceptedFriends(prev => [res, ...prev.filter(f => f.user.id !== res.user.id)]);
+      setToast({ show: true, message: 'Friend request accepted!', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to accept', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleDeclineRequest = async (req: FriendRequestItem) => {
+    setBusyKey(`in:${req.request_id}`);
+    try {
+      await declineFriendRequest(req.request_id);
+      setIncomingRequests(prev => prev.filter(r => r.request_id !== req.request_id));
+      setToast({ show: true, message: 'Friend request declined', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to decline', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleRemoveFriend = async (friendUserId: string) => {
+    setBusyKey(`friend:${friendUserId}`);
+    try {
+      await removeFriend(friendUserId);
+      setAcceptedFriends(prev => prev.filter(f => f.user.id !== friendUserId));
+      setToast({ show: true, message: 'Friend removed', type: 'success' });
+    } catch (err) {
+      setToast({ show: true, message: err instanceof Error ? err.message : 'Failed to remove friend', type: 'error' });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const openProfile = (userId: string) => navigate(userProfilePath(userId, user?.id ?? null));
+
   if (profileLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" /></div>;
   if (!user) { navigate('/login'); return null; }
+
+  const currentDisplayBanner = editing ? previewBannerUrl : bannerUrl;
+  const currentDisplayAvatar = editing ? previewAvatarUrl : avatarUrl;
+
+  const interestEmojiMap: Record<string, string> = {
+    Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
+    Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
+    Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
+  };
+
+  const currentEventList =
+    eventSubTab === 'upcoming'
+      ? unifiedUpcoming
+      : eventSubTab === 'past'
+      ? unifiedPast
+      : eventSubTab === 'cancelled'
+      ? unifiedCancelled
+      : [];
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
 
-      <div className="relative h-36 bg-gradient-to-r from-primary/30 to-accent/30">
+      <div
+        data-testid="profile-banner"
+        className={`relative h-36 bg-gradient-to-r from-primary/30 to-accent/30 ${currentDisplayBanner ? 'bg-cover bg-center' : ''}`}
+        style={currentDisplayBanner ? { backgroundImage: `url("${currentDisplayBanner}")` } : undefined}
+      >
         <button onClick={handleLogout} className="absolute top-3 right-3 z-10 flex items-center gap-1 text-xs text-foreground/80 glass-card rounded-full px-3 py-1.5 transition-transform active:scale-95"><LogOut className="h-3 w-3" /> Logout</button>
       </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-14 relative z-10 space-y-5">
         <div className="flex flex-col items-center gap-2">
-          <UserAvatar src={user.avatar} seed={user.id} name={name} size="xl" className="ring-4 ring-background shadow-glow" />
-          {editing ? <input value={name} onChange={e => setName(e.target.value)} className="rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" /> : <h2 className="text-xl font-bold">{name || 'User'}</h2>}
-          <p className="text-sm text-muted-foreground">{user.email}</p>
-          {editing ? (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setName(user.name || '');
-                  setBio(user.bio || '');
-                  setInterests(user.interests || []);
-                  setEditing(false);
-                }}
-                className="flex items-center gap-1.5 rounded-full border border-border bg-secondary px-4 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                className="flex items-center gap-1.5 rounded-full gradient-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow"
-              >
-                <Check className="h-3.5 w-3.5" /> Save
-              </button>
+          <span data-testid="profile-picture" data-avatar-kind={editing ? previewAvatarKind : avatarKind} data-icon-id={previewAvatarKind === 'photo' ? '' : iconId}>
+            <UserAvatar
+              src={resolveAvatarDisplayUrl({ photoUrl: currentDisplayAvatar, altUrl: user.avatar, seed: iconId || user.id })}
+              seed={iconId || user.id}
+              name={name}
+              size="xl"
+              className="ring-4 ring-background shadow-glow"
+            />
+          </span>
+
+          <div className="flex items-center gap-2">
+            {editing ? (
+              <div className="space-y-1">
+                <input value={name} onChange={e => { setName(e.target.value); setNameError(''); }} aria-label="Full name" className="w-full rounded-xl bg-secondary px-4 py-2 text-center outline-none focus:ring-2 focus:ring-primary/50 font-bold" />
+                <p className="text-[11px] text-muted-foreground text-center">{FULL_NAME_RULES_HINT} · Username cannot be changed</p>
+                {nameError && <p className="text-xs text-destructive text-center">{nameError}</p>}
+              </div>
+            ) : (
+              <div className="text-center space-y-0.5">
+                <h2 className="text-xl font-bold flex items-center justify-center gap-2" data-testid="profile-full-name">
+                  {name}
+                  <button onClick={handleStartEditing} className="p-1 rounded-full text-muted-foreground hover:text-foreground transition-colors" title="Edit Profile">
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                </h2>
+                <p className="text-sm text-muted-foreground" data-testid="profile-username">@{username}</p>
+              </div>
+            )}
+          </div>
+
+          {!editing && (
+            <p className="text-sm text-muted-foreground hidden" data-testid="profile-username">@{username}</p>
+          )}
+
+          {editing && (
+            <div className="w-full space-y-5 pt-3 border-t border-border/40 mt-2 px-4">
+              <CarouselSection title="Profile Picture">
+                {PROFILE_AVATARS.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { setPreviewAvatarUrl(PROFILE_AVATARS[0].url); setPreviewAvatarKind('icon'); }}
+                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === PROFILE_AVATARS[0].url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  >
+                    <img src={PROFILE_AVATARS[0].url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
+                  </button>
+                )}
+
+                <div className="relative group flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => photoRef.current?.click()}
+                    className={`h-12 w-12 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 ring-2 transition-transform active:scale-95 ${previewAvatarKind === 'photo' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                    title="Upload photo"
+                  >
+                    <Upload className="h-5 w-5 text-primary" />
+                  </button>
+                  <input ref={photoRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoUploadPreview} className="hidden" />
+                  
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-40 p-2 rounded-xl bg-popover text-popover-foreground text-[10px] text-center shadow-xl border border-border pointer-events-none z-50">
+                    Upload photo (JPEG, PNG, WebP · Max 5MB)
+                  </div>
+                </div>
+
+                {PROFILE_AVATARS.slice(1).map((avatar) => (
+                  <button
+                    key={avatar.id}
+                    type="button"
+                    onClick={() => { setPreviewAvatarUrl(avatar.url); setPreviewAvatarKind('icon'); }}
+                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === avatar.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  >
+                    <img src={avatar.url} alt="" className="h-12 w-12 rounded-full bg-secondary object-cover" />
+                  </button>
+                ))}
+
+                {PROFILE_ICONS.map((icon) => (
+                  <button
+                    key={icon.id}
+                    type="button"
+                    onClick={() => { setPreviewAvatarUrl(icon.url); setPreviewAvatarKind('icon'); setIconId(icon.id); }}
+                    className={`snap-start flex-shrink-0 p-1 rounded-full ring-2 transition-transform active:scale-95 ${previewAvatarUrl === icon.url && previewAvatarKind === 'icon' ? 'ring-primary bg-primary/10' : 'ring-border/40'}`}
+                  >
+                    <img src={icon.url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                  </button>
+                ))}
+              </CarouselSection>
+
+              <CarouselSection title="Banner">
+                <button
+                  type="button"
+                  onClick={() => setPreviewBannerUrl('')}
+                  className={`snap-start flex-shrink-0 flex items-center justify-center h-16 w-28 rounded-xl text-xs font-medium border bg-secondary ${!previewBannerUrl ? 'border-primary ring-2 ring-primary' : 'border-border'}`}
+                >
+                  None
+                </button>
+                {PROFILE_BANNERS.map((banner) => (
+                  <button
+                    key={banner.id}
+                    type="button"
+                    onClick={() => setPreviewBannerUrl(banner.url)}
+                    className={`snap-start flex-shrink-0 h-16 w-32 rounded-xl bg-cover bg-center ring-2 transition-transform active:scale-95 ${previewBannerUrl === banner.url ? 'ring-primary' : 'ring-border/40'}`}
+                    style={{ backgroundImage: `url("${banner.url}")` }}
+                  />
+                ))}
+              </CarouselSection>
             </div>
-          ) : (
-            <button
-              onClick={() => setEditing(true)}
-              className="flex items-center gap-1.5 rounded-full glass-card border border-border px-4 py-1.5 text-xs font-semibold text-foreground hover:border-primary/50 transition-colors"
-            >
-              <Edit2 className="h-3.5 w-3.5" /> Edit Profile
-            </button>
           )}
         </div>
 
@@ -333,169 +777,141 @@ export default function ProfilePage() {
           {editing ? <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} className="w-full rounded-lg bg-secondary p-3 text-sm resize-none outline-none" /> : <p className="text-sm text-muted-foreground">{bio || 'No bio yet.'}</p>}
         </div>
 
-        {/* Interests */}
+        {/* Interests Carousel */}
         <div className="rounded-2xl glass-card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Interests</h3>
-            {interests.length > 0 && (
-              <span className="text-[10px] text-muted-foreground">{interests.length} selected</span>
-            )}
+            {interests.length > 0 && <span className="text-[10px] text-muted-foreground">{interests.length} selected</span>}
           </div>
 
           {editing ? (
-            <div className="grid grid-cols-3 gap-2">
+            <CarouselSection title="">
               {ALL_INTERESTS.map((interest) => {
-                const emoji: Record<string, string> = {
-                  Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
-                  Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
-                  Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
-                };
                 const selected = interests.includes(interest);
                 return (
                   <button
                     key={interest}
                     type="button"
                     onClick={() => toggleInterest(interest)}
-                    className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-3 text-center transition-all active:scale-95 ${
-                      selected
-                        ? 'bg-primary/20 border border-primary/50 shadow-sm'
-                        : 'bg-secondary/60 border border-transparent hover:border-border'
-                    }`}
+                    className={`snap-start flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all active:scale-95 border ${selected ? 'bg-primary/20 border-primary/50 text-primary shadow-sm' : 'bg-secondary/60 border-border/60 text-muted-foreground hover:border-border'}`}
                   >
-                    <span className="text-xl">{emoji[interest] ?? '✨'}</span>
-                    <span className={`text-[10px] font-medium leading-tight ${selected ? 'text-primary' : 'text-muted-foreground'}`}>
-                      {interest}
-                    </span>
-                    {selected && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                    <span>{interestEmojiMap[interest] ?? '✨'}</span>
+                    <span>{interest}</span>
                   </button>
                 );
               })}
-            </div>
+            </CarouselSection>
           ) : interests.length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {interests.map((interest) => {
-                const emoji: Record<string, string> = {
-                  Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬',
-                  Study: '📚', Travel: '✈️', Tech: '💻', Art: '🎨',
-                  Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
-                };
+              {interests.map((interest) => (
+                <span key={interest} className="flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-medium text-primary">
+                  <span>{interestEmojiMap[interest] ?? '✨'}</span>{interest}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center py-2">No interests selected yet.</p>
+          )}
+        </div>
+
+        {/* Profile visibility */}
+        <div className="rounded-2xl glass-card p-4 space-y-2">
+          <h3 className="text-sm font-semibold">Profile visibility</h3>
+          {editing ? (
+            <div className="flex gap-1 rounded-xl bg-secondary/60 p-1" role="radiogroup" aria-label="Profile visibility">
+              {PROFILE_VISIBILITY_OPTIONS.map((option) => {
+                const selected = visibility === option.value;
                 return (
-                  <span key={interest} className="flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-medium text-primary">
-                    <span>{emoji[interest] ?? '✨'}</span>
-                    {interest}
-                  </span>
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setVisibility(option.value)}
+                    className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-all ${selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {option.label}
+                  </button>
                 );
               })}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground text-center py-2">No interests selected yet. Tap Edit Profile to add some.</p>
+            <p className="text-sm text-muted-foreground" data-testid="profile-visibility">
+              {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.label}
+            </p>
           )}
+          <p className="text-[11px] text-muted-foreground">
+            {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.hint}
+          </p>
         </div>
 
-        {/* Change Password */}
-        <div className="rounded-2xl glass-card p-4 space-y-3">
-          <button
-            onClick={() => setShowPasswordSection(v => !v)}
-            className="flex w-full items-center justify-between"
-          >
-            <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <Lock className="h-4 w-4 text-primary" /> Change Password
-            </h3>
-            <span className="text-xs text-muted-foreground">{showPasswordSection ? 'Cancel' : 'Update'}</span>
+        {/* Save/Cancel Buttons */}
+        {editing && (
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button onClick={handleCancelEditing} className="rounded-full border border-border bg-secondary px-5 py-2 text-xs font-semibold text-foreground hover:bg-secondary/80">
+              Cancel
+            </button>
+            <button onClick={handleSave} className="flex items-center gap-1.5 rounded-full gradient-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-glow">
+              <Check className="h-3.5 w-3.5" /> Save
+            </button>
+          </div>
+        )}
+
+        {/* Change Password Modal Trigger */}
+        <div className="rounded-2xl glass-card p-4">
+          <button onClick={() => setShowPasswordModal(true)} className="flex w-full items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold"><Lock className="h-4 w-4 text-primary" /> Change Password</h3>
+            <span className="text-xs text-primary font-medium hover:underline">Update</span>
           </button>
-
-          {showPasswordSection && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="space-y-3 pt-1"
-            >
-              {/* Current Password */}
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-semibold uppercase text-muted-foreground">Current Password</span>
-                <div className="relative">
-                  <input
-                    type={showCurrentPassword ? 'text' : 'password'}
-                    value={currentPassword}
-                    onChange={e => setCurrentPassword(e.target.value)}
-                    placeholder="Enter current password"
-                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  <button type="button" onClick={() => setShowCurrentPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    {showCurrentPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              </label>
-
-              {/* New Password */}
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-semibold uppercase text-muted-foreground">New Password</span>
-                <div className="relative">
-                  <input
-                    type={showNewPassword ? 'text' : 'password'}
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
-                    placeholder="Min. 8 characters"
-                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  <button type="button" onClick={() => setShowNewPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    {showNewPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              </label>
-
-              {/* Confirm Password */}
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-semibold uppercase text-muted-foreground">Confirm Password</span>
-                <div className="relative">
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={e => setConfirmPassword(e.target.value)}
-                    placeholder="Repeat new password"
-                    className="w-full rounded-lg bg-secondary/80 px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  <button type="button" onClick={() => setShowConfirmPassword(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    {showConfirmPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              </label>
-
-              {/* Strength indicator */}
-              {newPassword.length > 0 && (
-                <div className="space-y-1">
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4].map(level => (
-                      <div
-                        key={level}
-                        className={`h-1 flex-1 rounded-full transition-colors ${
-                          newPassword.length >= level * 3
-                            ? level <= 1 ? 'bg-destructive'
-                              : level === 2 ? 'bg-yellow-500'
-                              : level === 3 ? 'bg-blue-500'
-                              : 'bg-green-500'
-                            : 'bg-secondary'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">
-                    {newPassword.length < 4 ? 'Too short' : newPassword.length < 7 ? 'Weak' : newPassword.length < 10 ? 'Fair' : 'Strong'}
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={handleChangePassword}
-                disabled={passwordLoading || !currentPassword || !newPassword || !confirmPassword}
-                className="w-full gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-              >
-                {passwordLoading ? 'Updating…' : 'Update Password'}
-              </button>
-            </motion.div>
-          )}
         </div>
+
+        {/* Password Popup Modal */}
+        <AnimatePresence>
+          {showPasswordModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full max-w-sm rounded-3xl glass-card p-6 space-y-4 border border-border bg-background shadow-xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold">Change Password</h3>
+                  <button onClick={() => setShowPasswordModal(false)} className="p-1 text-muted-foreground hover:text-foreground">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                
+                <div className="space-y-3 pt-2">
+                  <div className="relative">
+                    <input type={showCurrentPassword ? 'text' : 'password'} value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Current password" className="w-full rounded-xl bg-secondary/80 px-4 py-3 pr-10 text-sm outline-none border border-border/50" />
+                    <button type="button" onClick={() => setShowCurrentPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <input type={showNewPassword ? 'text' : 'password'} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password (min 8 chars)" className="w-full rounded-xl bg-secondary/80 px-4 py-3 pr-10 text-sm outline-none border border-border/50" />
+                    <button type="button" onClick={() => setShowNewPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <input type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password" className="w-full rounded-xl bg-secondary/80 px-4 py-3 pr-10 text-sm outline-none border border-border/50" />
+                    <button type="button" onClick={() => setShowConfirmPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-3">
+                  <button onClick={() => setShowPasswordModal(false)} className="flex-1 rounded-xl border border-border bg-secondary py-3 text-xs font-semibold hover:bg-secondary/80">
+                    Cancel
+                  </button>
+                  <button onClick={handleChangePassword} disabled={passwordLoading} className="flex-1 gradient-primary rounded-xl py-3 text-xs font-semibold text-primary-foreground shadow-glow">
+                    {passwordLoading ? 'Updating...' : 'Update Password'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Pending Payments */}
         {approvedRequests.length > 0 && (
@@ -505,138 +921,371 @@ export default function ProfilePage() {
               <div key={item.request.id} className="flex items-center gap-3 rounded-xl bg-secondary/50 p-3">
                 <img src={item.event.image} className="h-10 w-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{item.event.title}</p><p className="text-[10px] text-accent">Approved — Pay to join</p></div>
-                <button onClick={() => navigate(`/payment/${item.event.id}`)} className="gradient-primary rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow">Pay ${item.event.budget}</button>
+                <button onClick={() => navigate(`/payment/${item.event.id}`)} className="gradient-primary rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow">Pay €{item.event.budget}</button>
               </div>
             ))}
           </div>
         )}
 
-        {/* Tabs */}
-        <div className="flex rounded-xl glass-card p-1">
-          {[{ id: 'events', label: 'Events', icon: Star }, { id: 'favorites', label: 'Favorites', icon: Heart }].map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex-1 flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-all ${activeTab === tab.id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground'}`}><tab.icon className="h-3.5 w-3.5" />{tab.label}</button>
-          ))}
+        {/* Main Parent Tabs: Events vs Friends */}
+        <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
+          {[
+            { id: 'events' as const, label: 'Events', icon: Calendar },
+            { id: 'friends' as const, label: 'Friends', icon: Users },
+          ].map((tab) => {
+            const isActive = mainTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={isActive}
+                data-testid={`main-tab-${tab.id}`}
+                onClick={() => setMainTab(tab.id)}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-semibold transition-all ${
+                  isActive
+                    ? 'gradient-primary text-primary-foreground shadow-glow'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                <tab.icon className="h-4 w-4" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
+        {/* Main Section Content */}
         <div className="space-y-4 min-h-[300px]">
-          {activeTab === 'events' && (
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold px-1">Upcoming</h3>
-                {[...displayCreatedUpcoming, ...displayJoinedUpcoming].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No upcoming events.</p>}
-                
-                {[...displayCreatedUpcoming.map(e => ({ e, isCreated: true })), ...displayJoinedUpcoming.map(e => ({ e, isCreated: false }))].slice(0, visibleUpcoming).map(({ e, isCreated }) =>
-                  isCreated ? (
-                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 border border-primary/20 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
-                      <div className="flex-1">
-                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-bold uppercase">Created</span>
-                      </div>
-                      <div className="text-right"><p className="text-[10px] text-muted-foreground">{e.date}</p></div>
-                    </div>
-                  ) : (
-                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
-                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
-                      <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent font-bold uppercase">Joined</span>
-                          <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                        </div>
-                      </div>
-                      <button onClick={() => handleLeaveFromProfile(e.id)} disabled={leavingEventId === e.id} className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-full transition-colors">{leavingEventId === e.id ? '...' : 'Leave'}</button>
-                    </div>
-                  )
-                )}
-                {(() => {
-                  const total = displayCreatedUpcoming.length + displayJoinedUpcoming.length;
+          {mainTab === 'events' ? (
+            <div className="space-y-3">
+              {/* Events Sub-Tabs with Colored Badge Circles */}
+              <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
+                {[
+                  { id: 'upcoming' as const, label: 'Upcoming', count: unifiedUpcoming.length, icon: Calendar },
+                  { id: 'past' as const, label: 'Past', count: unifiedPast.length, icon: Clock },
+                  { id: 'cancelled' as const, label: 'Cancelled', count: unifiedCancelled.length, icon: Ban },
+                  { id: 'favourites' as const, label: 'Favourites', count: favorites.length, icon: Heart },
+                ].map((sub) => {
+                  const isSubActive = eventSubTab === sub.id;
                   return (
-                    <div className="flex gap-2">
-                      {visibleUpcoming < total && (
-                        <button type="button" onClick={() => setVisibleUpcoming(v => v + 3)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
-                          View more · {total - visibleUpcoming} remaining
-                        </button>
-                      )}
-                      {visibleUpcoming > 3 && (
-                        <button type="button" onClick={() => setVisibleUpcoming(3)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                          Show less
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <div className="space-y-3 pt-2">
-                <h3 className="text-sm font-semibold opacity-70 px-1">Past Events</h3>
-                {[...displayCreatedPast, ...displayJoinedPast].length === 0 && <p className="text-center py-4 text-xs text-muted-foreground">No past events recorded.</p>}
-                {[...displayCreatedPast, ...displayJoinedPast].slice(0, visiblePast).map(e => {
-                  const isCreated = createdIds.has(e.id);
-                  return (
-                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3 opacity-60 grayscale-[0.5] cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover" />
-                      <div className="flex-1">
-                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${isCreated ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
-                          {isCreated ? 'Created' : 'Joined'}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-muted-foreground">{e.date}</p>
-                    </div>
+                    <button
+                      key={sub.id}
+                      data-testid={`tab-${sub.id}`}
+                      onClick={() => {
+                        setEventSubTab(sub.id);
+                        setVisibleEvents(4);
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                        isSubActive
+                          ? sub.id === 'cancelled'
+                            ? 'bg-destructive text-destructive-foreground shadow-sm'
+                            : 'bg-primary text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <sub.icon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{sub.label}</span>
+                      <span
+                        className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
+                          isSubActive
+                            ? 'bg-background/25 text-inherit'
+                            : 'bg-secondary text-muted-foreground'
+                        }`}
+                      >
+                        {sub.count}
+                      </span>
+                    </button>
                   );
                 })}
-                {(() => {
-                  const total = displayCreatedPast.length + displayJoinedPast.length;
-                  return (
-                    <div className="flex gap-2">
-                      {visiblePast < total && (
-                        <button type="button" onClick={() => setVisiblePast(v => v + 3)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
-                          View more · {total - visiblePast} remaining
+              </div>
+
+              {/* Events Sub-Content */}
+              {eventSubTab !== 'favourites' ? (
+                <div className="space-y-2.5">
+                  {currentEventList.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">
+                      No {eventSubTab} events found.
+                    </p>
+                  ) : (
+                    currentEventList.slice(0, visibleEvents).map(({ e, isCreated }) => {
+                      const isCancelled = eventSubTab === 'cancelled' || isEventCancelled(e);
+                      const isPast = eventSubTab === 'past';
+                      return (
+                        <div
+                          key={e.id}
+                          className={`flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all hover:border-primary/40 ${
+                            isCancelled ? 'opacity-60 bg-destructive/5' : isPast ? 'opacity-70' : ''
+                          }`}
+                        >
+                          <img src={e.image} alt="" className="h-12 w-12 rounded-xl object-cover flex-shrink-0" />
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
+                            <p className="text-xs font-bold line-clamp-1 text-foreground">{e.title}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span
+                                className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                  isCancelled
+                                    ? 'bg-destructive/10 text-destructive'
+                                    : isCreated
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'bg-accent/10 text-accent'
+                                }`}
+                              >
+                                {isCancelled ? 'Cancelled' : isCreated ? 'Created' : 'Joined'}
+                              </span>
+                              <p className="text-[10px] text-muted-foreground">{e.date}</p>
+                            </div>
+                          </div>
+
+                          {!isCancelled && !isPast && !isCreated && (
+                            <button
+                              onClick={() => handleLeaveFromProfile(e.id)}
+                              disabled={leavingEventId === e.id}
+                              className="text-[10px] text-muted-foreground hover:text-destructive bg-secondary/50 px-3 py-1 rounded-lg transition-colors"
+                            >
+                              {leavingEventId === e.id ? '...' : 'Leave'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {currentEventList.length > 4 && (
+                    <div className="flex gap-2 pt-2">
+                      {visibleEvents < currentEventList.length && (
+                        <button
+                          type="button"
+                          onClick={() => setVisibleEvents((v) => v + 4)}
+                          className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors"
+                        >
+                          View more · {currentEventList.length - visibleEvents} remaining
                         </button>
                       )}
-                      {visiblePast > 3 && (
-                        <button type="button" onClick={() => setVisiblePast(3)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                      {visibleEvents > 4 && (
+                        <button
+                          type="button"
+                          onClick={() => setVisibleEvents(4)}
+                          className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        >
                           Show less
                         </button>
                       )}
                     </div>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'favorites' && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold px-1">Saved Events</h3>
-              {favorites.length === 0 ? (
-                <p className="text-center py-8 text-xs text-muted-foreground">You haven't saved any events yet.</p>
+                  )}
+                </div>
               ) : (
-                <>
-                  {favorites.slice(0, visibleFavorites).map(e => (
-                    <div key={e.id} className="flex items-center gap-3 rounded-xl glass-card p-3">
-                      <img src={e.image} className="h-10 w-10 rounded-lg object-cover cursor-pointer" onClick={() => navigate(`/event/${e.id}`)} />
-                      <div className="flex-1 cursor-pointer" onClick={() => navigate(`/event/${e.id}`)}>
-                        <p className="text-xs font-bold line-clamp-1">{e.title}</p>
-                        <p className="text-[10px] text-muted-foreground">{e.date} · {e.location}</p>
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold px-1">Saved Events</h3>
+                  {favorites.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">You haven't saved any events yet.</p>
+                  ) : (
+                    <>
+                      <div className="space-y-2.5">
+                        {[...favorites].sort((a, b) => {
+                          const aUp = isEventUpcoming(a);
+                          const bUp = isEventUpcoming(b);
+                          if (aUp === bUp) return eventStartMs(b) - eventStartMs(a);
+                          return aUp ? -1 : 1;
+                        }).slice(0, visibleFavorites).map((e) => {
+                          const upcoming = isEventUpcoming(e);
+                          return (
+                            <div
+                              key={e.id}
+                              className={`flex items-center gap-3 rounded-2xl glass-card p-2.5 transition-all ${
+                                upcoming ? 'hover:border-primary/40 cursor-pointer' : 'opacity-60 cursor-not-allowed bg-muted/20'
+                              }`}
+                              onClick={() => {
+                                if (upcoming) navigate(`/event/${e.id}`);
+                              }}
+                            >
+                              <img
+                                src={e.image}
+                                alt=""
+                                className="h-12 w-12 rounded-xl object-cover flex-shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold line-clamp-1">{e.title}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span
+                                    className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                      upcoming
+                                        ? 'bg-primary/10 text-primary'
+                                        : 'bg-muted text-muted-foreground'
+                                    }`}
+                                  >
+                                    {upcoming ? 'Upcoming' : 'Expired'}
+                                  </span>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {e.date} · {e.location}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={(evt) => {
+                                  evt.stopPropagation();
+                                  handleRemoveFavorite(e.id);
+                                }}
+                                className="p-2 text-muted-foreground hover:text-destructive transition-colors"
+                                aria-label="Remove favorite"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <button onClick={() => handleRemoveFavorite(e.id)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    {visibleFavorites < favorites.length && (
-                      <button type="button" onClick={() => setVisibleFavorites(v => v + 3)} className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors">
-                        View more · {favorites.length - visibleFavorites} remaining
-                      </button>
-                    )}
-                    {visibleFavorites > 3 && (
-                      <button type="button" onClick={() => setVisibleFavorites(3)} className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                        Show less
-                      </button>
-                    )}
-                  </div>
-                </>
+                      {favorites.length > 4 && (
+                        <div className="flex gap-2 pt-2">
+                          {visibleFavorites < favorites.length && (
+                            <button
+                              type="button"
+                              onClick={() => setVisibleFavorites((v) => v + 4)}
+                              className="flex-1 rounded-xl border border-border py-2 text-xs font-medium text-primary hover:bg-secondary/50 transition-colors"
+                            >
+                              View more · {favorites.length - visibleFavorites} remaining
+                            </button>
+                          )}
+                          {visibleFavorites > 4 && (
+                            <button
+                              type="button"
+                              onClick={() => setVisibleFavorites(4)}
+                              className="flex-1 rounded-xl py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              Show less
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Friends Sub-Tabs with Icons */}
+              <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
+                {[
+                  { id: 'accepted' as const, label: 'Accepted', icon: UserCheck, count: acceptedFriends.length },
+                  { id: 'requests' as const, label: 'Requests', icon: UserPlus, count: incomingRequests.length },
+                ].map((fSub) => {
+                  const isFSubActive = friendSubTab === fSub.id;
+                  return (
+                    <button
+                      key={fSub.id}
+                      onClick={() => setFriendSubTab(fSub.id)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        isFSubActive
+                          ? 'bg-primary text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <fSub.icon className="h-3.5 w-3.5 shrink-0" />
+                      <span>{fSub.label}</span>
+                      <span className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
+                        isFSubActive ? 'bg-background/25 text-inherit' : 'bg-secondary text-muted-foreground'
+                      }`}>
+                        {fSub.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Friends Sub-Content */}
+              {friendsLoading ? (
+                <div className="flex justify-center py-12">
+                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-primary" />
+                </div>
+              ) : friendSubTab === 'accepted' ? (
+                <div className="space-y-2.5">
+                  {acceptedFriends.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">No friends connected yet.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {acceptedFriends.map((f) => {
+                        const label = f.user.username || f.user.display_name || f.user.full_name || 'User';
+                        return (
+                          <motion.li
+                            key={f.user.id}
+                            layout
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3"
+                          >
+                            <button type="button" onClick={() => openProfile(f.user.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                              <UserAvatar src={userAvatarUrl(f.user)} seed={f.user.id} name={label} size="md" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
+                                {f.user.full_name && <p className="truncate text-xs text-muted-foreground">{f.user.full_name}</p>}
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveFriend(f.user.id)}
+                              disabled={busyKey === `friend:${f.user.id}`}
+                              className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-destructive/15 hover:text-destructive flex items-center gap-1 transition-colors disabled:opacity-50"
+                            >
+                              <UserMinus className="h-3.5 w-3.5" />
+                              Remove
+                            </button>
+                          </motion.li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {incomingRequests.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">No pending friend requests.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {incomingRequests.map((r) => {
+                        const label = r.user.username || r.user.display_name || r.user.full_name || 'User';
+                        return (
+                          <motion.li
+                            key={r.request_id}
+                            layout
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3"
+                          >
+                            <button type="button" onClick={() => openProfile(r.user.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                              <UserAvatar src={userAvatarUrl(r.user)} seed={r.user.id} name={label} size="md" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
+                                {r.user.full_name && <p className="truncate text-xs text-muted-foreground">{r.user.full_name}</p>}
+                              </div>
+                            </button>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleAcceptRequest(r)}
+                                disabled={busyKey === `in:${r.request_id}`}
+                                className="rounded-full px-3 py-1.5 text-xs font-semibold gradient-primary text-primary-foreground flex items-center gap-1 transition-colors disabled:opacity-50"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                Accept
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeclineRequest(r)}
+                                disabled={busyKey === `in:${r.request_id}`}
+                                className="rounded-full px-3 py-1.5 text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 flex items-center gap-1 transition-colors disabled:opacity-50"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                                Decline
+                              </button>
+                            </div>
+                          </motion.li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
           )}

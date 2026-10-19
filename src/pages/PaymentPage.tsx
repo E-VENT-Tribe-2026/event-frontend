@@ -233,7 +233,7 @@ export default function PaymentPage() {
           </div>
           <div className="border-t border-border/50 pt-3 flex justify-between text-sm">
             <span className="text-muted-foreground">Total</span>
-            <span className="font-bold text-foreground">${event.budget}</span>
+            <span className="font-bold text-foreground">€{event.budget}</span>
           </div>
         </div>
 
@@ -276,7 +276,7 @@ export default function PaymentPage() {
               Processing...
             </span>
           ) : (
-            `Pay $${event.budget}`
+            `Pay €${event.budget}`
           )}
         </button>
       </motion.div>

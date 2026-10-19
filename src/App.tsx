@@ -3,6 +3,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { queryClient } from '@/lib/queryClient';
+import { clearAllQueries } from '@/lib/queries';
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import WelcomePage from "./pages/WelcomePage";
 import LoginPage from "./pages/LoginPage";
@@ -14,24 +19,38 @@ import EditEventPage from "./pages/EditEventPage";
 import CreateEventPage from "./pages/CreateEventPage";
 import MapPage from "./pages/MapPage";
 import ProfilePage from "./pages/ProfilePage";
+import UserProfilePage from "./pages/UserProfilePage";
 import ChatPage from "./pages/ChatPage";
+import FriendsPage from "./pages/FriendsPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import PaymentPage from "./pages/PaymentPage";
 import OrganizerDashboardPage from "./pages/OrganizerDashboardPage";
 import TicketPage from "./pages/TicketPage";
 import NotFound from "./pages/NotFound";
 import RouteDocumentTitle from "./components/RouteDocumentTitle";
+import AdminPanelPage from "./pages/AdminPanelPage";
+import AdminEventDetailsPage from "./pages/AdminEventDetailsPage";
+import AdminGuard from "@/components/AdminGuard";
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
 import ResetPasswordPage from '@/pages/ResetPasswordPage';
+import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
+import AdminVerifyPage from '@/pages/AdminVerifyPage';
+import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
-import { getAuthToken, clearAuthToken } from '@/lib/auth';
-import { logout, updateUser, getCurrentUser } from '@/lib/storage';
+import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
+import { logout, getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
 import { clearCache } from '@/lib/queryCache';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 
-const queryClient = new QueryClient();
+const persister = typeof window !== 'undefined'
+  ? createSyncStoragePersister({
+    storage: window.localStorage,
+    key: 'event-tribe-query-cache',
+  })
+  : undefined;
+
 
 // ── Session timeout wrapper (needs to be inside BrowserRouter for useNavigate) ──
 function SessionGuard({ children }: { children: React.ReactNode }) {
@@ -60,8 +79,8 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
         });
         window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
-      .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => { });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // once on app mount
 
   useEffect(() => {
@@ -109,8 +128,21 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     logout();
     clearAuthToken();
     clearCache();
+    clearAllQueries();
     navigate('/login', { replace: true });
   };
+
+  // Kick the user out immediately whenever any API call receives a 401 (expired token)
+  useEffect(() => {
+    const onExpired = () => {
+      setShowWarning(false);
+      handleLogout();
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  // handleLogout is stable within the component lifetime
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleStay = () => {
     setShowWarning(false);
@@ -131,7 +163,10 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
 }
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
+  <PersistQueryClientProvider
+    client={queryClient}
+    persistOptions={{ persister: persister! }}
+  >
     <TooltipProvider>
       <Toaster />
       <Sonner />
@@ -145,23 +180,30 @@ const App = () => (
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
-            <Route path="/home" element={<HomePage />} />
-            <Route path="/event/:id/edit" element={<EditEventPage />} />
-            <Route path="/event/:id" element={<EventDetailsPage />} />
-            <Route path="/create" element={<CreateEventPage />} />
-            <Route path="/map" element={<MapPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/payment/:eventId" element={<PaymentPage />} />
-            <Route path="/dashboard" element={<OrganizerDashboardPage />} />
-            <Route path="/ticket/:ticketId" element={<TicketPage />} />
+            <Route path="/choose-username" element={<ChooseUsernamePage />} />
+            <Route path="/admin-verify" element={<AdminVerifyPage />} />
+            <Route path="/home" element={<RequireUsername><HomePage /></RequireUsername>} />
+            <Route path="/event/:id/edit" element={<RequireUsername><EditEventPage /></RequireUsername>} />
+            <Route path="/event/:id" element={<RequireUsername><EventDetailsPage /></RequireUsername>} />
+            <Route path="/create" element={<RequireUsername><CreateEventPage /></RequireUsername>} />
+            <Route path="/map" element={<RequireUsername><MapPage /></RequireUsername>} />
+            <Route path="/profile" element={<RequireUsername><ProfilePage /></RequireUsername>} />
+            <Route path="/user/:userId" element={<RequireUsername><UserProfilePage /></RequireUsername>} />
+            <Route path="/chat" element={<RequireUsername><ChatPage /></RequireUsername>} />
+            <Route path="/friends" element={<RequireUsername><FriendsPage /></RequireUsername>} />
+            <Route path="/notifications" element={<RequireUsername><NotificationsPage /></RequireUsername>} />
+            <Route path="/payment/:eventId" element={<RequireUsername><PaymentPage /></RequireUsername>} />
+            <Route path="/dashboard" element={<RequireUsername><OrganizerDashboardPage /></RequireUsername>} />
+            <Route path="/admin" element={<RequireUsername><AdminGuard><AdminPanelPage /></AdminGuard></RequireUsername>} />
+            <Route path="/admin/events/:eventId" element={<RequireUsername><AdminGuard><AdminEventDetailsPage /></AdminGuard></RequireUsername>} />
+            <Route path="/ticket/:ticketId" element={<RequireUsername><TicketPage /></RequireUsername>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </SessionGuard>
       </BrowserRouter>
     </TooltipProvider>
-  </QueryClientProvider>
+    {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-left" />}
+  </PersistQueryClientProvider>
 );
 
 export default App;
