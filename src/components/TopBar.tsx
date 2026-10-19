@@ -164,7 +164,7 @@ export default function TopBar({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.95 }}
                 transition={{ duration: 0.15 }}
-                className="absolute right-0 mt-2 w-56 rounded-2xl glass-card bg-background border border-border p-1.5 shadow-xl z-50 space-y-1"
+                className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-xl z-50 space-y-1"
               >
                 <div className="px-3 py-2 border-b border-border/40 mb-1">
                   <p className="text-xs font-bold text-foreground truncate">{user?.name || 'My Account'}</p>
