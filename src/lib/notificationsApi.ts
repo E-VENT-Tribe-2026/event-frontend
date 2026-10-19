@@ -1,6 +1,19 @@
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
+import { cachedFetch, invalidate, invalidatePrefix, TTL } from '@/lib/queryCache';
+
+export const NOTIFICATIONS_CHANGED_EVENT = 'eventapp:notifications-changed';
+
+export function notifyNotificationsChanged() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT));
+}
+
+function bustNotificationCache(token: string) {
+  invalidate(`/api/notifications/all:${token.slice(-16)}`);
+  invalidatePrefix('/api/notifications');
+  notifyNotificationsChanged();
+}
 
 export type ApiNotification = {
   id: string;
@@ -109,8 +122,7 @@ export async function markNotificationRead(token: string, id: string): Promise<v
     });
   }
   if (!res.ok) throw new Error('Failed to mark notification read');
-  // Invalidate so next fetch gets fresh unread count
-  invalidate(`/api/notifications/all:${token.slice(-16)}`);
+  bustNotificationCache(token);
 }
 
 export async function deleteNotification(token: string, id: string): Promise<void> {
@@ -120,8 +132,7 @@ export async function deleteNotification(token: string, id: string): Promise<voi
     res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/delete/${id}`), { method: 'DELETE', headers });
   }
   if (!res.ok) throw new Error('Failed to delete notification');
-  // Invalidate so next fetch reflects deletion
-  invalidate(`/api/notifications/all:${token.slice(-16)}`);
+  bustNotificationCache(token);
 }
 
 export async function markAllNotificationsRead(token: string): Promise<void> {
@@ -131,6 +142,7 @@ export async function markAllNotificationsRead(token: string): Promise<void> {
     headers,
   });
   if (!res.ok) throw new Error('Failed to mark all notifications read');
+  bustNotificationCache(token);
 }
 
 export async function deleteNotifications(token: string, ids: string[]): Promise<void> {
@@ -145,4 +157,5 @@ export async function deleteNotifications(token: string, ids: string[]): Promise
     body: JSON.stringify({ notification_ids: ids }),
   });
   if (!res.ok) throw new Error('Failed to delete notifications');
+  bustNotificationCache(token);
 }

@@ -142,6 +142,7 @@ describe('HomePage', () => {
       expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
     });
     expect(screen.queryByText(/Loading the latest events/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Tonight with friends' })).toBeInTheDocument();
   });
 
   it('shows empty state when API returns no events and local storage is empty', async () => {

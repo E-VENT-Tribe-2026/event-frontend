@@ -258,6 +258,9 @@ describe('ProfilePage: Events / Friends tabs and event sub-tabs', () => {
     fireEvent.click(screen.getByRole('button', { name: /requests/i }));
     expect(screen.getByText('No pending friend requests.')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: /blocked/i }));
+    expect(screen.getByText('You have not blocked anyone.')).toBeInTheDocument();
+
     // Event sub-tabs are not rendered while on Friends
     expect(screen.queryByTestId('tab-upcoming')).not.toBeInTheDocument();
   });

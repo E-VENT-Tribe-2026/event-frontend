@@ -8,7 +8,7 @@ import { getApiUrl } from '@/lib/api';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
-import { supabase } from '@/lib/supabase';
+import { supabase, syncSupabaseSession } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { sanitizeEmail } from '@/lib/sanitize';
 import {
@@ -182,12 +182,7 @@ export default function SignupPage() {
       }
 
       setAuthToken(accessToken);
-      if (supabase && refreshToken) {
-        await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-      }
+      await syncSupabaseSession(accessToken, refreshToken);
 
       const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {

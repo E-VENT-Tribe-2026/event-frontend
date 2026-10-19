@@ -1,7 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard, Users, Shield } from 'lucide-react';
+import { Home, Map, PlusCircle, MessageCircle, LayoutDashboard, Users, Shield } from 'lucide-react';
 import { getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
-import { UserAvatar } from '@/components/UserAvatar';
 import { getAuthToken } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
@@ -86,9 +85,7 @@ export default function BottomNav() {
     ? [{ path: '/admin', icon: Shield, label: 'Admin' }]
     : [];
 
-  const profileItem = [{ path: '/profile', icon: User, label: 'Profile' }];
-
-  const navItems = [...baseItems, ...adminItem, ...profileItem];
+  const navItems = [...baseItems, ...adminItem];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg">
@@ -110,23 +107,13 @@ export default function BottomNav() {
                 <div className="flex items-center justify-center rounded-full gradient-primary h-14 w-14 shadow-glow -mt-6 border-4 border-background">
                   <Icon className="h-6 w-6 text-primary-foreground" />
                 </div>
-              ) : path === '/profile' && user ? (
-                <UserAvatar
-                  src={user.profilePhoto}
-                  srcSecondary={user.avatar}
-                  seed={user.id}
-                  name={user.name}
-                  email={user.email}
-                  size="sm"
-                  className={active ? 'ring-2 ring-primary' : ''}
-                />
               ) : path === '/friends' ? (
                 <span className="relative">
                   <Icon className="h-5 w-5" />
                   {requestCount > 0 && (
                     <span
                       data-testid="friends-badge"
-                      className="absolute -right-2.5 -top-2 min-w-[18px] rounded-full gradient-primary px-1 text-center text-[10px] font-bold leading-[18px] text-primary-foreground"
+                      className="absolute -right-2.5 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none text-accent-foreground shadow-accent animate-pulse"
                     >
                       {requestCount > 99 ? '99+' : requestCount}
                     </span>

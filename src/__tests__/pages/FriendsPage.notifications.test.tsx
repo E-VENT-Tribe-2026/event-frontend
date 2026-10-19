@@ -94,6 +94,7 @@ beforeEach(() => {
     route('GET', '/api/friends/requests/sent', () =>
       json(page([{ request_id: 42, created_at: '2026-09-30T09:00:00Z', user: user('s1', 'jane_doe', 'Jane Doe') }])),
     ),
+    route('GET', '/api/blocks', () => json(page([]))),
   ];
 });
 
