@@ -37,6 +37,7 @@ import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
 import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
+import WarningsGate from '@/components/WarningsGate';
 import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import RealtimeBridge from '@/components/RealtimeBridge';
 import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
@@ -156,6 +157,7 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
+      <WarningsGate yieldFocus={showWarning} />
       <SessionTimeoutModal
         show={showWarning}
         secondsLeft={secondsLeft}
