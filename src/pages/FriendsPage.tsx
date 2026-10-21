@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Check, Search, UserMinus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
+import { Ban, Check, Search, UserMinus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
@@ -35,13 +35,15 @@ import {
   type UserSearchResult,
   type UserSummary,
 } from '@/lib/friendsApi';
+import { fetchBlockedUsers, unblockUser, type BlockedUserItem } from '@/lib/userProfileApi';
 
-type Section = 'friends' | 'incoming' | 'sent';
+type Section = 'friends' | 'incoming' | 'sent' | 'blocked';
 
 const SECTIONS: Array<{ id: Section; label: string }> = [
   { id: 'friends', label: 'Friends' },
   { id: 'incoming', label: 'Requests' },
   { id: 'sent', label: 'Sent' },
+  { id: 'blocked', label: 'Blocked' },
 ];
 
 const PAGE_SIZE = 20;
@@ -85,12 +87,10 @@ function usePagedList<T>(fetchPage: (page: number, limit: number) => Promise<Pag
 
 function UserRow({
   user,
-  showFullName = true,
   onOpen,
   children,
 }: {
   user: Pick<UserSummary, 'id' | 'username' | 'full_name' | 'avatar_kind' | 'icon_id' | 'avatar_url'> & { display_name?: string };
-  showFullName?: boolean;
   onOpen: () => void;
   children?: React.ReactNode;
 }) {
@@ -107,7 +107,7 @@ function UserRow({
         <UserAvatar src={userAvatarUrl(user)} seed={user.id} name={label} size="md" alt={`${label}'s profile picture`} />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
-          {showFullName && user.full_name && (
+          {user.full_name && (
             <p className="truncate text-xs text-muted-foreground">{user.full_name}</p>
           )}
         </div>
@@ -191,14 +191,17 @@ export default function FriendsPage() {
   const friends = usePagedList<FriendItem>(fetchFriends);
   const incoming = usePagedList<FriendRequestItem>(fetchIncomingRequests);
   const sent = usePagedList<FriendRequestItem>(fetchSentRequests);
+  const blocked = usePagedList<BlockedUserItem>(fetchBlockedUsers);
 
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<UserSummary | null>(null);
+  const [pendingUnblock, setPendingUnblock] = useState<UserSummary | null>(null);
 
   useEffect(() => {
     void friends.load(1);
     void incoming.load(1);
     void sent.load(1);
+    void blocked.load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -314,10 +317,26 @@ export default function FriendsPage() {
     }
   };
 
-  const counts: Partial<Record<Section, number>> = {
-    friends: friends.state.loaded ? friends.state.items.length : undefined,
-    incoming: incoming.state.loaded ? incoming.state.items.length : undefined,
-    sent: sent.state.loaded ? sent.state.items.length : undefined,
+  const onConfirmUnblock = async () => {
+    const user = pendingUnblock;
+    setPendingUnblock(null);
+    if (!user) return;
+    setBusyKey(`blocked:${user.id}`);
+    try {
+      await unblockUser(user.id);
+      blocked.setState((s) => ({ ...s, items: s.items.filter((b) => b.user.id !== user.id) }));
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const lists: Record<Section, ListState<unknown>> = {
+    friends: friends.state,
+    incoming: incoming.state,
+    sent: sent.state,
+    blocked: blocked.state,
   };
 
   const hasActiveSearch = query.trim().length > 0;
@@ -363,7 +382,7 @@ export default function FriendsPage() {
             ) : (
               <ul className="space-y-2">
                 {results.map((u) => (
-                  <UserRow key={u.id} user={u} showFullName={false} onOpen={() => openProfile(u.id)} />
+                  <UserRow key={u.id} user={u} onOpen={() => openProfile(u.id)} />
                 ))}
               </ul>
             )}
@@ -375,7 +394,8 @@ export default function FriendsPage() {
             <div role="tablist" aria-label="Friends sections" className="flex gap-1 rounded-2xl glass-card p-1">
               {SECTIONS.map(({ id, label }) => {
                 const active = section === id;
-                const count = counts[id];
+                const list = lists[id];
+                const count = list.loaded ? list.items.length : undefined;
                 return (
                   <button
                     key={id}
@@ -394,7 +414,7 @@ export default function FriendsPage() {
                       <span className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
                         active ? 'bg-background/25 text-inherit' : 'bg-secondary text-muted-foreground'
                       }`}>
-                        {count}{(id === 'incoming' ? incoming : id === 'sent' ? sent : friends).state.hasMore ? '+' : ''}
+                        {count}{list.hasMore ? '+' : ''}
                       </span>
                     )}
                   </button>
@@ -486,6 +506,32 @@ export default function FriendsPage() {
                 </ListBody>
               </section>
             )}
+
+            {section === 'blocked' && (
+              <section aria-label="Blocked users" className="pt-1">
+                <ListBody
+                  list={blocked.state}
+                  emptyIcon={Ban}
+                  emptyText="You have not blocked anyone."
+                  onLoadMore={() => void blocked.load(blocked.state.page + 1)}
+                >
+                  {blocked.state.items.map((b) => (
+                    <UserRow key={b.user.id} user={b.user} onOpen={() => openProfile(b.user.id)}>
+                      <button
+                        type="button"
+                        onClick={() => setPendingUnblock(b.user)}
+                        disabled={busyKey === `blocked:${b.user.id}`}
+                        className={`${actionBtn} bg-secondary text-foreground hover:bg-secondary/80`}
+                        aria-label={`Unblock ${b.user.username || b.user.display_name}`}
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                        Unblock
+                      </button>
+                    </UserRow>
+                  ))}
+                </ListBody>
+              </section>
+            )}
           </>
         )}
       </div>
@@ -501,6 +547,21 @@ export default function FriendsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel className="rounded-2xl">Keep</AlertDialogCancel>
             <AlertDialogAction onClick={() => void onConfirmRemove()} className="rounded-2xl bg-destructive text-destructive-foreground">Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={pendingUnblock !== null} onOpenChange={(open) => !open && setPendingUnblock(null)}>
+        <AlertDialogContent className="rounded-3xl glass-card border border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unblock @{pendingUnblock?.username || pendingUnblock?.display_name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your previous friendship will not be restored. To be friends again, one of you will need to send a new friend request.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-2xl">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void onConfirmUnblock()} className="rounded-2xl">Unblock</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

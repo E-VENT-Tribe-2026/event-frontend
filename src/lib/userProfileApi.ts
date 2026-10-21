@@ -9,8 +9,9 @@
  * - GET    /api/profile/{user_id}                  profile with the allowed parts only;
  *          403/404 when the profile is unavailable (owner blocked the viewer, account
  *          suspended, administrator, or no such user)
- * - GET    /api/profile/{user_id}/friends?page&limit  that user's friends, in pages
- * - POST   /api/blocks  { blocked_id }             block a user
+ * - GET    /api/profile/{user_id}/friends?page&limit  that user's friends (UserSummary), in pages
+ * - GET    /api/blocks?page&limit                  users the signed-in user blocked, in pages
+ * - POST   /api/blocks  { user_id }                block a user
  * - DELETE /api/blocks/{user_id}                   unblock a user
  * - PUT    /api/profile/me  { visibility }         'public' | 'friends_only'
  *
@@ -19,7 +20,7 @@
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { cachedFetch, invalidatePrefix, TTL } from '@/lib/queryCache';
-import { FRIENDS_CHANGED_EVENT, parseFriendsError, type FriendItem, type Page } from '@/lib/friendsApi';
+import { FRIENDS_CHANGED_EVENT, parseFriendsError, type Page, type UserSummary } from '@/lib/friendsApi';
 
 export type FriendshipStatus = 'none' | 'friends' | 'request_sent' | 'request_received' | 'self';
 
@@ -50,11 +51,14 @@ export type UserProfile = {
   /** Left out when the viewer may not see any events. */
   events?: { organized?: ProfileEventGroup; joined?: ProfileEventGroup };
   /** First page of this user's friends; left out when the viewer may not see them. */
-  friends?: Page<FriendItem>;
+  friends?: UserSummary[];
   /** True when the viewer has blocked this user. */
-  is_blocked?: boolean;
+  blocked_by_me?: boolean;
   friendship?: Friendship;
 };
+
+/** A user the signed-in user blocked. */
+export type BlockedUserItem = { blocked_at: string; user: UserSummary };
 
 export const PROFILE_UNAVAILABLE_MESSAGE = 'This profile is unavailable';
 
@@ -105,7 +109,7 @@ function cacheScope(): string {
  * A page of another user's friends. Cached per signed-in user under the friends
  * prefix, so any friendship change (which clears '/api/friends') refreshes it.
  */
-export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<Page<FriendItem>> {
+export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<Page<UserSummary>> {
   const path = `/api/profile/${encodeURIComponent(userId)}/friends?page=${page}&limit=${limit}`;
   return cachedFetch(
     `/api/friends:${cacheScope()}:${path}`,
@@ -113,7 +117,7 @@ export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<
       const res = await fetch(getApiUrl(path), { headers: authHeaders() });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw parseFriendsError(res.status, body);
-      const p = (body ?? {}) as Partial<Page<FriendItem>>;
+      const p = (body ?? {}) as Partial<Page<UserSummary>>;
       return {
         page: p.page ?? page,
         limit: p.limit ?? limit,
@@ -125,8 +129,30 @@ export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<
   );
 }
 
-/** Blocking ends friendships and requests, so the friends and profile caches are cleared. */
+/** Users the signed-in user blocked, cached per signed-in user until a block or unblock. */
+export function fetchBlockedUsers(page = 1, limit = 20): Promise<Page<BlockedUserItem>> {
+  const path = `/api/blocks?page=${page}&limit=${limit}`;
+  return cachedFetch(
+    `/api/blocks:${cacheScope()}:${path}`,
+    async () => {
+      const res = await fetch(getApiUrl(path), { headers: authHeaders() });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw parseFriendsError(res.status, body);
+      const p = (body ?? {}) as Partial<Page<BlockedUserItem>>;
+      return {
+        page: p.page ?? page,
+        limit: p.limit ?? limit,
+        has_more: Boolean(p.has_more),
+        data: Array.isArray(p.data) ? p.data : [],
+      };
+    },
+    TTL.MEDIUM,
+  );
+}
+
+/** Blocking ends friendships and requests, so the blocks, friends and profile caches are cleared. */
 function onBlockChanged(): void {
+  invalidatePrefix('/api/blocks');
   invalidatePrefix('/api/friends');
   invalidatePrefix('/api/profile');
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FRIENDS_CHANGED_EVENT));
@@ -136,7 +162,7 @@ export async function blockUser(userId: string): Promise<void> {
   const res = await fetch(getApiUrl('/api/blocks'), {
     method: 'POST',
     headers: authHeaders(true),
-    body: JSON.stringify({ blocked_id: userId }),
+    body: JSON.stringify({ user_id: userId }),
   });
   if (!res.ok) throw parseFriendsError(res.status, await res.json().catch(() => null));
   onBlockChanged();

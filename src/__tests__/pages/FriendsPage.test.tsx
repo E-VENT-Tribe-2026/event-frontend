@@ -76,6 +76,11 @@ beforeEach(() => {
     route('GET', '/api/friends/requests/sent', () =>
       json(page([{ request_id: 42, created_at: '2026-09-30T09:00:00Z', user: user('s1', 'jane_doe', 'Jane Doe') }])),
     ),
+    route('GET', '/api/blocks', (url) =>
+      url.searchParams.get('page') === '2'
+        ? json({ page: 2, limit: 20, has_more: false, data: [{ blocked_at: '2026-10-01T09:00:00Z', user: user('b2', 'blocked_two', 'Bea Two') }] })
+        : json(page([{ blocked_at: '2026-10-02T09:00:00Z', user: user('b1', 'blocked_one', 'Ben One') }], true)),
+    ),
   ];
 });
 
@@ -88,7 +93,7 @@ afterEach(() => {
 describe('FriendsPage', () => {
   it('shows the four sections and lists friends with picture, username and full name', async () => {
     renderFriends();
-    for (const name of ['Friends', 'Requests', 'Sent']) {
+    for (const name of ['Friends', 'Requests', 'Sent', 'Blocked']) {
       expect(screen.getAllByRole('tab', { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
     expect(await screen.findByText('@friend_one')).toBeInTheDocument();
@@ -144,6 +149,54 @@ describe('FriendsPage', () => {
     expect(screen.getByText('@jane_doe')).toBeInTheDocument();
   });
 
+  it('lists blocked users page by page with picture, full name and username', async () => {
+    renderFriends('/friends?tab=blocked');
+    expect(await screen.findByText('@blocked_one')).toBeInTheDocument();
+    expect(screen.getByText('Ben One')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Load more/ }));
+    expect(await screen.findByText('@blocked_two')).toBeInTheDocument();
+    expect(screen.getByText('@blocked_one')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Load more/ })).not.toBeInTheDocument();
+  });
+
+  it('opens a blocked user profile when selected', async () => {
+    renderFriends('/friends?tab=blocked');
+    fireEvent.click(await screen.findByText('@blocked_one'));
+    expect(await screen.findByText('OTHER PROFILE')).toBeInTheDocument();
+  });
+
+  it('unblocks after a confirmation that says the friendship is not restored, then removes the user', async () => {
+    const unblocked: string[] = [];
+    handlers.unshift(
+      route('DELETE', '/api/blocks/b1', (url) => {
+        unblocked.push(url.pathname);
+        return json({ message: 'User unblocked' });
+      }),
+    );
+    renderFriends('/friends?tab=blocked');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Unblock blocked_one' }));
+    expect(await screen.findByText(/previous friendship will not be restored/i)).toBeInTheDocument();
+    expect(unblocked).toEqual([]);
+
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Unblock' }));
+    await waitFor(() => expect(screen.queryByText('@blocked_one')).not.toBeInTheDocument());
+    expect(unblocked).toEqual(['/api/blocks/b1']);
+  });
+
+  it('shows the limit message when a friend request action is refused by the request limit', async () => {
+    handlers.unshift(
+      route('POST', '/api/friends/requests/57/accept', () =>
+        json({ detail: 'Too many requests. Try again in a minute.' }, 429),
+      ),
+    );
+    renderFriends('/friends?tab=incoming');
+    const row = (await screen.findByText('@john_42')).closest('li')!;
+    fireEvent.click(within(row).getByRole('button', { name: /Accept/ }));
+    expect(await screen.findByText('Too many requests. Try again in a minute.')).toBeInTheDocument();
+  });
+
   it('opens a user profile when selected', async () => {
     renderFriends('/friends?tab=incoming');
     fireEvent.click(await screen.findByText('@john_42'));
@@ -152,7 +205,7 @@ describe('FriendsPage', () => {
 });
 
 describe('FriendsPage search', () => {
-  it('searches once after typing stops, shows only the latest results without full names, and loads more', async () => {
+  it('searches once after typing stops, shows only the latest results with full names, and loads more', async () => {
     const searchCalls: string[] = [];
     handlers.unshift(
       route('GET', '/api/profile/search', (url) => {
@@ -172,11 +225,41 @@ describe('FriendsPage search', () => {
 
     expect(await screen.findByText('@john_42')).toBeInTheDocument();
     expect(searchCalls).toEqual(['JOHN:1']);
-    expect(screen.queryByText('John Smith')).not.toBeInTheDocument();
+    expect(screen.getByText('John Smith')).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search by username' })).toHaveAttribute('placeholder', 'Search by username...');
 
     fireEvent.click(screen.getByRole('button', { name: /Load more/ }));
     expect(await screen.findByText('@johnny_b')).toBeInTheDocument();
     expect(searchCalls).toEqual(['JOHN:1', 'JOHN:2']);
+  });
+
+  it('typing letter by letter with pauses sends one search per pause and reuses cached results', async () => {
+    const searchCalls: string[] = [];
+    handlers.unshift(
+      route('GET', '/api/profile/search', (url) => {
+        searchCalls.push(url.searchParams.get('q')!);
+        return json(page([user(`u-${url.searchParams.get('q')}`, `user_${url.searchParams.get('q')}`)]));
+      }),
+    );
+    renderFriends('/friends?tab=search');
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const input = screen.getByRole('searchbox', { name: 'Search by username' });
+
+    for (const text of ['pa', 'pau', 'pa', 'pau']) {
+      fireEvent.change(input, { target: { value: text } });
+      await act(async () => { vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS + 10); });
+      expect(await screen.findByText(`@user_${text}`)).toBeInTheDocument();
+    }
+    expect(searchCalls).toEqual(['pa', 'pau']);
+  });
+
+  it('shows the limit message when a search is refused by the request limit', async () => {
+    handlers.unshift(
+      route('GET', '/api/profile/search', () => json({ detail: 'You are searching too often. Please wait a moment.' }, 429)),
+    );
+    renderFriends('/friends?tab=search');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search by username' }), { target: { value: 'limit' } });
+    expect(await screen.findByText('You are searching too often. Please wait a moment.', {}, { timeout: 2000 })).toBeInTheDocument();
   });
 
   it('ignores a slow response for older text', async () => {

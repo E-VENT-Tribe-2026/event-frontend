@@ -32,7 +32,7 @@ import {
   sendFriendRequest,
   userAvatarUrl,
   userProfilePath,
-  type FriendItem,
+  type UserSummary,
 } from '@/lib/friendsApi';
 import {
   PROFILE_UNAVAILABLE_MESSAGE,
@@ -50,7 +50,8 @@ type EventTab = 'upcoming' | 'past';
 type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove';
 type BlockAction = 'block' | 'unblock';
 
-const FRIENDS_PAGE_SIZE = 20;
+// The profile carries the first 10 friends; later pages use the same size so offsets line up.
+const FRIENDS_PAGE_SIZE = 10;
 
 function errorMessage(error: unknown): string {
   if (error instanceof FriendsApiError) return error.message;
@@ -114,7 +115,7 @@ export default function UserProfilePage() {
   const [confirmBlock, setConfirmBlock] = useState<BlockAction | null>(null);
 
   // Friends of the viewed user beyond the first page, which comes with the profile.
-  const [moreFriends, setMoreFriends] = useState<FriendItem[]>([]);
+  const [moreFriends, setMoreFriends] = useState<UserSummary[]>([]);
   const [friendsPage, setFriendsPage] = useState(1);
   const [friendsHasMore, setFriendsHasMore] = useState(false);
   const [friendsLoadingMore, setFriendsLoadingMore] = useState(false);
@@ -148,7 +149,8 @@ export default function UserProfilePage() {
   useEffect(() => {
     setMoreFriends([]);
     setFriendsPage(1);
-    setFriendsHasMore(Boolean(firstFriendsPage?.has_more));
+    // A full first page may have more behind it; an empty next page then hides "Load more".
+    setFriendsHasMore((firstFriendsPage?.length ?? 0) >= FRIENDS_PAGE_SIZE);
   }, [firstFriendsPage]);
 
   const refreshProfile = async () => {
@@ -223,7 +225,7 @@ export default function UserProfilePage() {
   const run = (kind: FriendshipAction) => action.mutate(kind);
   const busy = action.isPending || block.isPending;
 
-  const friends = [...(profile?.friends?.data ?? []), ...moreFriends];
+  const friends = [...(profile?.friends ?? []), ...moreFriends];
 
   const loadMoreFriends = async () => {
     const next = friendsPage + 1;
@@ -282,7 +284,7 @@ export default function UserProfilePage() {
   };
 
   const renderActions = (p: UserProfile) => {
-    if (p.is_blocked) {
+    if (p.blocked_by_me) {
       return (
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setConfirmBlock('unblock')} disabled={busy} className={outline}>
@@ -468,22 +470,22 @@ export default function UserProfilePage() {
                   ) : (
                     <ul className="space-y-2">
                       {friends.map((f) => {
-                        const name = f.user.full_name || f.user.display_name || f.user.username || 'User';
+                        const name = f.full_name || f.display_name || f.username || 'User';
                         return (
                           <motion.li
-                            key={f.user.id}
+                            key={f.id}
                             layout
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0 }}
                             className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3 cursor-pointer hover:border-primary/40 transition-all"
-                            onClick={() => navigate(userProfilePath(f.user.id, viewer?.id ?? null))}
+                            onClick={() => navigate(userProfilePath(f.id, viewer?.id ?? null))}
                           >
-                            <UserAvatar src={userAvatarUrl(f.user)} seed={f.user.id} name={name} size="md" />
+                            <UserAvatar src={userAvatarUrl(f)} seed={f.id} name={name} size="md" />
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-semibold text-foreground">{name}</p>
-                              {f.user.username && (
-                                <p className="truncate text-xs text-muted-foreground">@{f.user.username}</p>
+                              {f.username && (
+                                <p className="truncate text-xs text-muted-foreground">@{f.username}</p>
                               )}
                             </div>
                           </motion.li>
