@@ -22,6 +22,7 @@ type NotificationKind =
   | 'reminder'
   | 'friend_request'
   | 'friend_request_accepted'
+  | 'event_invitation'
   | 'other';
 
 type UINotification = {
@@ -45,6 +46,7 @@ const iconMap: Record<NotificationKind, React.ElementType> = {
   reminder:        CalendarClock,
   friend_request:  Contact,
   friend_request_accepted: UserCheck,
+  event_invitation: CalendarClock,
   other:           Info,
 };
 
@@ -58,6 +60,7 @@ const colorMap: Record<NotificationKind, string> = {
   reminder:        'text-accent bg-accent/20',
   friend_request:  'text-primary bg-primary/20',
   friend_request_accepted: 'text-green-500 bg-green-500/15',
+  event_invitation: 'text-primary bg-primary/20',
   other:           'text-primary bg-primary/20',
 };
 
@@ -68,6 +71,7 @@ function isFriendKind(kind: NotificationKind): boolean {
 function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
   if (t === 'friend_request_accepted') return 'friend_request_accepted';
+  if (t === 'event_invitation') return 'event_invitation';
   if (t.startsWith('friend_request')) return 'friend_request';
   if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
   if (t === 'user_left' || t.includes('left')) return 'user_left';
@@ -222,7 +226,7 @@ export default function NotificationsPage() {
     if (subFilter === 'friends') {
       next = feedItems.filter((n) => isFriendKind(n.kind));
     } else if (subFilter === 'activity') {
-      next = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created');
+      next = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'event_invitation');
     } else if (subFilter === 'updates') {
       next = feedItems.filter((n) => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted');
     } else if (subFilter === 'reminders') {

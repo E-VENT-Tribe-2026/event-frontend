@@ -12,6 +12,12 @@ function parseEventStart(raw: unknown): Date {
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
+/** The backend sends friends_attending_count with each event; anything else counts as 0. */
+export function friendsAttendingCountFrom(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
 /** Map backend event row to frontend EventItem */
 export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
   const start = parseEventStart(api.start_datetime);
@@ -66,6 +72,7 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizerFullName: organizerFullName || undefined,
     status: rawStatus,
     isCancelled,
+    friendsAttendingCount: friendsAttendingCountFrom(api.friends_attending_count),
     isPrivate: false,
     isDraft: false,
     requiresApproval: false,

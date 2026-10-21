@@ -92,12 +92,10 @@ function usePagedList<T>(fetchPage: (page: number, limit: number) => Promise<Pag
 
 function UserRow({
   user,
-  showFullName = true,
   onOpen,
   children,
 }: {
   user: Pick<UserSummary, 'id' | 'username' | 'full_name' | 'avatar_kind' | 'icon_id' | 'avatar_url'> & { display_name?: string };
-  showFullName?: boolean;
   onOpen: () => void;
   children?: React.ReactNode;
 }) {
@@ -114,7 +112,7 @@ function UserRow({
         <UserAvatar src={userAvatarUrl(user)} seed={user.id} name={label} size="md" alt={`${label}'s profile picture`} />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
-          {showFullName && user.full_name && (
+          {user.full_name && (
             <p className="truncate text-xs text-muted-foreground">{user.full_name}</p>
           )}
         </div>
@@ -413,7 +411,7 @@ export default function FriendsPage() {
             ) : (
               <ul className="space-y-2">
                 {results.map((u) => (
-                  <UserRow key={u.id} user={u} showFullName={false} onOpen={() => openProfile(u.id)} />
+                  <UserRow key={u.id} user={u} onOpen={() => openProfile(u.id)} />
                 ))}
               </ul>
             )}
@@ -610,7 +608,7 @@ export default function FriendsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Unblock this person?</AlertDialogTitle>
             <AlertDialogDescription>
-              @{pendingUnblock?.display_name} will be able to send you friend requests again.
+              Your previous friendship with @{pendingUnblock?.display_name} will not be restored. To be friends again, one of you will need to send a new friend request.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
