@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchFriendsAttending, fetchParticipantCount, fetchParticipantList } from '@/lib/eventAttendeesApi';
+import {
+  fetchFriendsAttending,
+  fetchParticipantCount,
+  fetchParticipantList,
+  participantRowToSummary,
+} from '@/lib/eventAttendeesApi';
 import { clearCache, invalidatePrefix } from '@/lib/queryCache';
 
 function mockFetch(body: unknown, ok = true) {
@@ -23,6 +28,17 @@ describe('eventAttendeesApi (attendees through the client-side cache)', () => {
     const fn = mockFetch([{ user_id: 'f1', is_friend: true }]);
     expect(await fetchFriendsAttending('e1', 'tok-a-aaaaaaaaaaaa')).toEqual([{ user_id: 'f1', is_friend: true }]);
     expect(urlOf(fn)).toContain('/api/participants/e1/participants/friends');
+  });
+
+  it('unwraps a wrapped friends payload', async () => {
+    mockFetch({ data: [{ user_id: 'f2', is_friend: true }] });
+    expect(await fetchFriendsAttending('e2', 'tok-a-aaaaaaaaaaaa')).toEqual([{ user_id: 'f2', is_friend: true }]);
+  });
+
+  it('turns participant and user-summary shapes into a friend card', () => {
+    expect(participantRowToSummary({ user_id: 'f1', profiles: { full_name: 'Maya', username: 'maya' } })?.display_name).toBe('Maya');
+    expect(participantRowToSummary({ user_id: '', user: { id: 'f2', username: 'ann', full_name: 'Ann', display_name: 'Ann', avatar_kind: null, icon_id: null, avatar_url: null } } as never)?.id).toBe('f2');
+    expect(participantRowToSummary({ id: 'f3', full_name: 'Sam', display_name: 'Sam', username: 'sam', avatar_kind: null, icon_id: null, avatar_url: null } as never)?.id).toBe('f3');
   });
 
   it('reads the full list from the participants endpoint', async () => {

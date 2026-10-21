@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
+import PlanBadge from '@/components/PlanBadge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,7 +21,7 @@ import { getCurrentUser } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
-import { useUserProfile, invalidateUserProfile, invalidateNotifications } from '@/lib/queries';
+import { useUserProfile, invalidateUserProfile, invalidateNotifications, QK } from '@/lib/queries';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { queryClient } from '@/lib/queryClient';
 import {
@@ -29,6 +30,8 @@ import {
   blockUser,
   cancelFriendRequest,
   declineFriendRequest,
+  findSentRequestId,
+  readRequestId,
   removeFriend,
   sendFriendRequest,
   unblockUser,
@@ -161,12 +164,17 @@ export default function UserProfilePage() {
   const action = useMutation({
     mutationFn: async (kind: FriendshipAction) => {
       if (!profile) return;
-      const requestId = profile.friendship?.request_id ?? null;
+      const requestId = readRequestId(profile.friendship) ?? profile.friendship?.request_id ?? null;
       switch (kind) {
         case 'send':
           return sendFriendRequest(profile.id);
-        case 'cancel':
-          return cancelFriendRequest(requestId as number);
+        case 'cancel': {
+          const id = typeof requestId === 'number' ? requestId : await findSentRequestId(profile.id);
+          if (typeof id !== 'number') {
+            throw new FriendsApiError('Friend request not found.', 404, 'request_not_found');
+          }
+          return cancelFriendRequest(id);
+        }
         case 'accept':
           return acceptFriendRequest(requestId as number);
         case 'decline':
@@ -175,7 +183,15 @@ export default function UserProfilePage() {
           return removeFriend(profile.id);
       }
     },
-    onSuccess: async () => {
+    onSuccess: async (data, kind) => {
+      if (kind === 'send') {
+        const sentId = readRequestId(data);
+        if (sentId != null && viewer?.id) {
+          queryClient.setQueryData(QK.userProfile(viewer.id, userId), (old: UserProfile | undefined) =>
+            old ? { ...old, friendship: { status: 'request_sent', request_id: sentId } } : old,
+          );
+        }
+      }
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
       await refreshProfile();
@@ -386,7 +402,10 @@ export default function UserProfilePage() {
 
           <div className="space-y-3 px-4 pt-8">
             <div>
-              <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+                <PlanBadge plan={profile} />
+              </div>
               {profile.username && <p className="text-sm text-muted-foreground">@{profile.username}</p>}
             </div>
 

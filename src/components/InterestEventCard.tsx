@@ -1,56 +1,67 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, MapPin } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 import type { EventItem } from '@/lib/storage';
-import { getCategoryBanner } from '@/lib/categoryBanners';
+import { categoryCardStyle } from '@/lib/categoryStyle';
 import FriendsAttendingCount from '@/components/FriendsAttendingCount';
 
-function shortWhen(event: EventItem): string {
-  const start = (event as EventItem & { start_datetime?: string }).start_datetime;
-  const parsed = start
-    ? new Date(start)
-    : new Date(`${event.date}T${event.time || '00:00'}`);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  }
-  return [event.date, event.time].filter(Boolean).join(' · ');
-}
+export default function InterestEventCard({
+  event,
+  footer,
+  variant = 'tile',
+}: {
+  event: EventItem;
+  footer?: ReactNode;
+  /** tile = welcome-style square; row = full-width stacked card */
+  variant?: 'tile' | 'row';
+}) {
+  const style = categoryCardStyle(event.category);
+  const categoryChip = event.category ? (
+    <span className="shrink-0 whitespace-nowrap rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-medium text-primary">
+      {event.category}
+    </span>
+  ) : null;
+  const location = event.location ? (
+    <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+      <MapPin className="h-2.5 w-2.5 shrink-0" />
+      <span className="truncate">{event.location}</span>
+    </span>
+  ) : null;
 
-export default function InterestEventCard({ event }: { event: EventItem }) {
+  if (variant === 'row') {
+    return (
+      <Link
+        to={`/event/${event.id}`}
+        state={{ event }}
+        data-testid="interest-event-row"
+        className={`flex w-full items-center gap-3 rounded-2xl border bg-gradient-to-r px-3.5 py-3 backdrop-blur-sm transition-transform active:scale-[0.99] ${style.border} ${style.color}`}
+      >
+        <span className="text-xl shrink-0" aria-hidden="true">{style.emoji}</span>
+        <div className="min-w-0 flex-1 space-y-1">
+          <h3 className="truncate text-sm font-semibold text-foreground">{event.title}</h3>
+          <div className="flex items-center gap-2">
+            {categoryChip}
+            {location}
+          </div>
+        </div>
+        {footer ?? <FriendsAttendingCount count={event.friendsAttendingCount} />}
+      </Link>
+    );
+  }
+
   return (
     <Link
       to={`/event/${event.id}`}
       state={{ event }}
-      className="block w-[168px] shrink-0 overflow-hidden rounded-xl border border-border/50 bg-card/80 transition-transform active:scale-[0.98]"
+      className={`block w-56 shrink-0 space-y-2 rounded-2xl border bg-gradient-to-br p-4 backdrop-blur-sm transition-transform active:scale-[0.98] ${style.border} ${style.color}`}
     >
-      <div className="relative h-[88px] overflow-hidden bg-secondary">
-        <img
-          src={event.image || getCategoryBanner(event.category)}
-          alt=""
-          className="h-full w-full object-cover"
-        />
-        <span className="absolute left-1.5 top-1.5 rounded bg-background/85 px-1.5 py-0.5 text-[9px] font-semibold text-foreground">
-          {event.budget === 0 ? 'Free' : `€${event.budget}`}
-        </span>
-        {event.category && (
-          <span className="absolute right-1.5 top-1.5 max-w-[46%] truncate rounded bg-background/85 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
-            {event.category}
-          </span>
-        )}
-        <FriendsAttendingCount count={event.friendsAttendingCount} className="absolute bottom-1.5 left-1.5" />
+      <span className="text-2xl" aria-hidden="true">{style.emoji}</span>
+      <h3 className="line-clamp-1 text-sm font-semibold text-foreground">{event.title}</h3>
+      <div className="flex items-center justify-between gap-2">
+        {categoryChip ?? <span />}
+        {location}
       </div>
-      <div className="space-y-1 px-2.5 py-2">
-        <h3 className="line-clamp-2 text-[12px] font-semibold leading-snug text-foreground">{event.title}</h3>
-        <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <Clock className="h-3 w-3 shrink-0" />
-          <span className="truncate">{shortWhen(event)}</span>
-        </p>
-        {event.location ? (
-          <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <MapPin className="h-3 w-3 shrink-0" />
-            <span className="truncate">{event.location}</span>
-          </p>
-        ) : null}
-      </div>
+      {footer ?? <FriendsAttendingCount count={event.friendsAttendingCount} />}
     </Link>
   );
 }

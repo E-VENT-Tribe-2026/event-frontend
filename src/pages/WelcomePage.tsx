@@ -3,14 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MapPin, Sparkles, UserPlus, Zap, Users, Calendar, ArrowRight, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2 } from 'lucide-react';
 import { seedDatabase } from '@/lib/seedData';
+import { categoryCardStyle } from '@/lib/categoryStyle';
 
 const PREVIEW_EVENTS = [
-  { title: 'Neon Nights Festival', category: 'Music', location: 'NYC', emoji: '🎵', color: 'from-purple-500/20 to-pink-500/20', border: 'border-purple-500/30' },
-  { title: 'AI & Tech Summit', category: 'Tech', location: 'San Francisco', emoji: '💻', color: 'from-blue-500/20 to-cyan-500/20', border: 'border-blue-500/30' },
-  { title: 'Street Food Carnival', category: 'Food', location: 'Brooklyn', emoji: '🍕', color: 'from-orange-500/20 to-yellow-500/20', border: 'border-orange-500/30' },
-  { title: 'Sunset Yoga Retreat', category: 'Wellness', location: 'Santa Monica', emoji: '🧘', color: 'from-green-500/20 to-teal-500/20', border: 'border-green-500/30' },
-  { title: 'Urban Art Exhibition', category: 'Art', location: 'Miami', emoji: '🎨', color: 'from-pink-500/20 to-rose-500/20', border: 'border-pink-500/30' },
-  { title: 'Retro Gaming Night', category: 'Gaming', location: 'Chicago', emoji: '🎮', color: 'from-indigo-500/20 to-violet-500/20', border: 'border-indigo-500/30' },
+  { title: 'Neon Nights Festival', category: 'Music', location: 'NYC' },
+  { title: 'AI & Tech Summit', category: 'Tech', location: 'San Francisco' },
+  { title: 'Street Food Carnival', category: 'Food', location: 'Brooklyn' },
+  { title: 'Sunset Yoga Retreat', category: 'Wellness', location: 'Santa Monica' },
+  { title: 'Urban Art Exhibition', category: 'Art', location: 'Miami' },
+  { title: 'Retro Gaming Night', category: 'Gaming', location: 'Chicago' },
 ];
 
 const FEATURES = [
@@ -174,12 +175,14 @@ export default function WelcomePage() {
             transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
             className="flex gap-4 w-max"
           >
-            {[...PREVIEW_EVENTS, ...PREVIEW_EVENTS].map((ev, i) => (
+            {[...PREVIEW_EVENTS, ...PREVIEW_EVENTS].map((ev, i) => {
+              const style = categoryCardStyle(ev.category);
+              return (
               <div
                 key={i}
-                className={`shrink-0 w-56 rounded-2xl border ${ev.border} bg-gradient-to-br ${ev.color} backdrop-blur-sm p-4 space-y-2`}
+                className={`shrink-0 w-56 rounded-2xl border ${style.border} bg-gradient-to-br ${style.color} backdrop-blur-sm p-4 space-y-2`}
               >
-                <span className="text-2xl">{ev.emoji}</span>
+                <span className="text-2xl">{style.emoji}</span>
                 <p className="text-sm font-semibold text-foreground line-clamp-1">{ev.title}</p>
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-medium text-primary rounded-full bg-primary/20 px-2 py-0.5">{ev.category}</span>
@@ -188,7 +191,8 @@ export default function WelcomePage() {
                   </span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </motion.div>
         </section>
 

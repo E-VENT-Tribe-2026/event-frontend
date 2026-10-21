@@ -110,6 +110,10 @@ do $$
 declare
   from_col text;
   to_col text;
+  event_col text;
+  part_event text;
+  part_user text;
+  evt_owner text;
   select_pred text;
   insert_pred text;
   cols text;
@@ -129,19 +133,49 @@ begin
     'messages',
     array['recipient_id', 'reciever_id', 'receiver_id', 'to_user_id', 'addressee_id']
   );
+  event_col := public._evt_first_col('messages', array['event_id', 'chat_id']);
+  part_event := public._evt_first_col('participants', array['event_id', 'chat_id']);
+  part_user := public._evt_first_col(
+    'participants',
+    array['user_id', 'participant_id', 'profile_id', 'auth_user_id']
+  );
+  evt_owner := public._evt_first_col('events', array['created_by', 'organizer_id', 'owner_id']);
 
-  if from_col is null and to_col is null then
+  begin
+    execute 'alter table public.messages replica identity full';
+  exception
+    when others then null;
+  end;
+
+  -- Event chats are rooms, not DMs: every participant must SELECT the row
+  -- or Realtime never delivers someone else's message.
+  select_pred := concat_ws(
+    ' or ',
+    case when from_col is not null then public._evt_uid_eq(from_col) end,
+    case when to_col is not null then public._evt_uid_eq(to_col) end,
+    case
+      when event_col is not null and part_event is not null and part_user is not null then
+        format(
+          'exists (select 1 from public.participants p where p.%I::text = public.messages.%I::text and p.%I::text = auth.uid()::text)',
+          part_event, event_col, part_user
+        )
+    end,
+    case
+      when event_col is not null and evt_owner is not null then
+        format(
+          'exists (select 1 from public.events e where e.id::text = public.messages.%I::text and e.%I::text = auth.uid()::text)',
+          event_col, evt_owner
+        )
+    end
+  );
+
+  if select_pred is null or select_pred = '' then
     select string_agg(column_name, ', ' order by ordinal_position) into cols
     from information_schema.columns
     where table_schema = 'public' and table_name = 'messages';
-    raise notice 'Skipping messages policies; no user-id column matched. Columns: %', cols;
+    raise notice 'Skipping messages policies; no viewer match. Columns: %', cols;
   else
-    select_pred := concat_ws(
-      ' or ',
-      case when from_col is not null then public._evt_uid_eq(from_col) end,
-      case when to_col is not null then public._evt_uid_eq(to_col) end
-    );
-    insert_pred := public._evt_uid_eq(coalesce(from_col, to_col));
+    insert_pred := public._evt_uid_eq(coalesce(from_col, to_col, event_col));
 
     execute 'drop policy if exists "Users can view their messages" on public.messages';
     execute format(
@@ -152,10 +186,10 @@ begin
     execute 'drop policy if exists "Users can insert messages" on public.messages';
     execute format(
       'create policy "Users can insert messages" on public.messages for insert with check (%s)',
-      insert_pred
+      coalesce(insert_pred, 'auth.role() = ''authenticated''')
     );
 
-    raise notice 'messages policies use from=% to=%', from_col, to_col;
+    raise notice 'messages policies use from=% to=% event=%', from_col, to_col, event_col;
   end if;
 end $$;
 

@@ -27,7 +27,10 @@ vi.mock('@/lib/storage', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/auth', () => ({ getAuthToken: () => 'test-token', setAuthToken: () => {} }));
+vi.mock('@/lib/auth', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/auth')>();
+  return { ...mod, getAuthToken: () => 'test-token', setAuthToken: () => {} };
+});
 vi.mock('@/components/BottomNav', () => ({ default: () => null }));
 
 const EVENT_ROW: ApiNotification = {

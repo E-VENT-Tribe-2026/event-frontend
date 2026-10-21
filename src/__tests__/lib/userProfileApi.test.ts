@@ -19,6 +19,20 @@ describe('fetchUserProfile blocking', () => {
     vi.unstubAllGlobals();
   });
 
+  it('unwraps a nested profile payload', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      data: {
+        id: 'u2',
+        username: 'maya',
+        full_name: 'Maya',
+        friendship: { status: 'request_sent', request_id: 4 },
+      },
+    }));
+    const profile = await fetchUserProfile('u2');
+    expect(profile.id).toBe('u2');
+    expect(profile.friendship).toEqual({ status: 'request_sent', request_id: 4 });
+  });
+
   it('keeps a limited profile when the viewer blocked this user', async () => {
     fetchMock.mockResolvedValue(jsonResponse({
       id: 'u1',

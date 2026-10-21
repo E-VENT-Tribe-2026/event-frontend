@@ -3,6 +3,8 @@ import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { User } from '@/lib/storage';
 import ChatPage from '@/pages/ChatPage';
+import { markChatUnread, setViewingChatId } from '@/lib/chatUnread';
+import { notifyChatMessagesChanged } from '@/lib/realtimeEvents';
 
 const { getCurrentUserMock, getAuthTokenMock } = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn<[], User | null>(),
@@ -130,6 +132,8 @@ describe('ChatPage', () => {
 
   afterEach(() => {
     window.sessionStorage.clear();
+    localStorage.clear();
+    setViewingChatId(null);
     vi.unstubAllGlobals();
   });
 
@@ -137,6 +141,133 @@ describe('ChatPage', () => {
     getCurrentUserMock.mockReturnValue(null);
     renderChat();
     expect(await screen.findByText('Login page')).toBeInTheDocument();
+  });
+
+  it('shows a New messages tag that disappears after the chat is opened', async () => {
+    markChatUnread('u-chat', 'evt-1');
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) return jsonResponse({ data: [] });
+      return undefined;
+    });
+
+    renderChat();
+    expect(await screen.findByTestId('new-messages-tag')).toHaveTextContent('New messages');
+
+    await openChat(/DJ Luna/i);
+    expect(await screen.findByRole('button', { name: /Back to chats/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Back to chats/i }));
+    expect(await screen.findByRole('button', { name: /DJ Luna/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('new-messages-tag')).not.toBeInTheDocument();
+  });
+
+  it('adds the New messages tag when a chat receives a message on the list', async () => {
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) return jsonResponse({ data: [] });
+      return undefined;
+    });
+
+    renderChat();
+    expect(await screen.findByRole('button', { name: /DJ Luna/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('new-messages-tag')).not.toBeInTheDocument();
+
+    await act(async () => {
+      markChatUnread('u-chat', 'evt-1');
+    });
+    expect(await screen.findByTestId('new-messages-tag')).toHaveTextContent('New messages');
+  });
+
+  it('still tags another chat after the first conversation is opened and closed', async () => {
+    stubFetch((url) => {
+      const list = listRoutes(url, [
+        joinedEvent('evt-1', 'DJ Luna'),
+        joinedEvent('evt-2', 'Jazz Night'),
+      ]);
+      if (list) return list;
+      if (url.includes('/api/chats/') && url.includes('/messages')) return jsonResponse({ data: [] });
+      return undefined;
+    });
+
+    renderChat();
+    await openChat(/DJ Luna/i);
+    fireEvent.click(await screen.findByRole('button', { name: /Back to chats/i }));
+    expect(await screen.findByRole('button', { name: /Jazz Night/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('new-messages-tag')).not.toBeInTheDocument();
+
+    await act(async () => {
+      notifyChatMessagesChanged('evt-2', {
+        event_id: 'evt-2',
+        sender_id: 'other-user',
+        content: 'You coming?',
+      });
+    });
+
+    expect(await screen.findByTestId('new-messages-tag')).toHaveTextContent('New messages');
+    expect(screen.getByRole('button', { name: /Jazz Night/i })).toBeInTheDocument();
+  });
+
+  it('tags the first chat again when a new message arrives after it was read', async () => {
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) return jsonResponse({ data: [] });
+      return undefined;
+    });
+
+    renderChat();
+    await openChat(/DJ Luna/i);
+    fireEvent.click(await screen.findByRole('button', { name: /Back to chats/i }));
+    expect(await screen.findByRole('button', { name: /DJ Luna/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('new-messages-tag')).not.toBeInTheDocument();
+
+    await act(async () => {
+      notifyChatMessagesChanged('evt-1', {
+        event_id: 'evt-1',
+        sender_id: 'other-user',
+        content: 'On my way',
+      });
+    });
+
+    expect(await screen.findByTestId('new-messages-tag')).toHaveTextContent('New messages');
+  });
+
+  it('refreshes an open conversation when new messages arrive', async () => {
+    const rows: Array<Record<string, unknown>> = [
+      {
+        id: 1,
+        sender_id: 'other-user',
+        content: 'Welcome!',
+        created_at: '2030-05-01T12:00:00.000Z',
+        message_type: 'user',
+      },
+    ];
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) return jsonResponse({ data: rows });
+      return undefined;
+    });
+
+    renderChat();
+    await openChat(/DJ Luna/i);
+    expect(await screen.findByText('Welcome!')).toBeInTheDocument();
+
+    await act(async () => {
+      rows.push({
+        id: 2,
+        sender_id: 'other-user',
+        content: 'Just arrived',
+        created_at: '2030-05-01T12:06:00.000Z',
+        message_type: 'user',
+      });
+      notifyChatMessagesChanged('evt-1');
+    });
+
+    expect(await screen.findByText('Just arrived')).toBeInTheDocument();
   });
 
   it('opens an event conversation and sends a message via the chat API', async () => {

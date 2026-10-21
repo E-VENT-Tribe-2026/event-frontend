@@ -166,6 +166,7 @@ export default function AuthCallbackPage() {
         id: session.user.id,
         email: session.user.email || '',
         name: fullName,
+        username,
         avatar: avatarUrl,
         bio,
         interests,

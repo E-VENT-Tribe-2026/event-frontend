@@ -15,6 +15,24 @@ function bustNotificationCache(token: string) {
   notifyNotificationsChanged();
 }
 
+/** Incoming friend-request rows (not "accepted"). */
+export function isIncomingFriendRequestType(type: string): boolean {
+  const t = type.toLowerCase().trim();
+  if (t === 'friend_request_accepted') return false;
+  return t.startsWith('friend_request');
+}
+
+/**
+ * Bell badge: unread notifications plus pending requests that are not already
+ * an unread friend-request row (the notifications page merges those the same way).
+ */
+export function countBellUnreads(notifications: ApiNotification[], pendingRequestCount: number): number {
+  const unread = notifications.filter((n) => !n.read);
+  const unreadRequestNotifs = unread.filter((n) => isIncomingFriendRequestType(n.type)).length;
+  const extraPending = Math.max(0, pendingRequestCount - unreadRequestNotifs);
+  return unread.length + extraPending;
+}
+
 export type ApiNotification = {
   id: string;
   type: string;

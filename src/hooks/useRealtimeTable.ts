@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { getAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 
 export type RealtimeEvent = 'INSERT' | 'UPDATE' | 'DELETE' | '*';
@@ -35,6 +36,15 @@ export function useRealtimeTable({
 
   useEffect(() => {
     if (!supabase || !enabled || !table) return;
+
+    const token = getAuthToken();
+    if (token) {
+      try {
+        supabase.realtime?.setAuth(token);
+      } catch {
+        /* ignore */
+      }
+    }
 
     const channelName = `realtime-${schema}-${table}-${filter || 'all'}-${event}`;
     const channel = supabase
