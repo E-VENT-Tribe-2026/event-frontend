@@ -61,4 +61,34 @@ describe('RequireUsername — ticket #247 admin-verification gate', () => {
       expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
     });
   });
+
+  it('stays on the page when the profile is nested under data', async () => {
+    setAuthToken('verified-token');
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { username: 'alex', role: 'participant' } }), { status: 200 }),
+    );
+    renderGuarded();
+    await waitFor(() => {
+      expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Choose Username Screen')).not.toBeInTheDocument();
+  });
+
+  it('does not bounce to choose-username when profile/me fails with a server error', async () => {
+    setAuthToken('verified-token');
+    fetchMock.mockResolvedValueOnce(new Response('nope', { status: 500 }));
+    renderGuarded();
+    await waitFor(() => {
+      expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
+    });
+  });
+
+  it('sends accounts without a username to choose-username', async () => {
+    setAuthToken('verified-token');
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ username: null }), { status: 200 }),
+    );
+    renderGuarded();
+    expect(await screen.findByText('Choose Username Screen')).toBeInTheDocument();
+  });
 });

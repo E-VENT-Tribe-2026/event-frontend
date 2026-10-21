@@ -141,7 +141,10 @@ describe('Friends tab refreshes the notification list (#243)', () => {
       ),
     );
     renderFriends('/friends?tab=sent');
-    fireEvent.click(await screen.findByRole('button', { name: /Cancel/ }));
+    const cancel = await screen.findByRole('button', { name: /Cancel/ });
+    invalidateNotificationsMock.mockClear();
+    invalidatePrefixMock.mockClear();
+    fireEvent.click(cancel);
     expect(await screen.findByText('Friend request not found.')).toBeInTheDocument();
     expect(invalidateNotificationsMock).not.toHaveBeenCalled();
     expect(invalidatePrefixMock).not.toHaveBeenCalled();

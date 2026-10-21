@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Ban, Check, Search, UserMinus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
@@ -63,8 +63,19 @@ function errorMessage(err: unknown): string {
   return err instanceof Error && err.message ? err.message : 'Something went wrong. Please try again.';
 }
 
+function withoutHiddenRequests<T>(items: T[], hidden: Set<number>): T[] {
+  if (hidden.size === 0) return items;
+  return items.filter((item) => {
+    const id = (item as { request_id?: number }).request_id;
+    return typeof id !== 'number' || !hidden.has(id);
+  });
+}
+
 /** Paged list backed by one of the cached friendship fetchers. */
-function usePagedList<T>(fetchPage: (page: number, limit: number) => Promise<Page<T>>) {
+function usePagedList<T>(
+  fetchPage: (page: number, limit: number) => Promise<Page<T>>,
+  hiddenIds?: MutableRefObject<Set<number>>,
+) {
   const [state, setState] = useState<ListState<T>>(emptyList<T>);
 
   const load = useCallback(
@@ -72,8 +83,9 @@ function usePagedList<T>(fetchPage: (page: number, limit: number) => Promise<Pag
       setState((s) => ({ ...s, loading: true, error: '' }));
       try {
         const res = await fetchPage(page, PAGE_SIZE);
+        const hidden = hiddenIds?.current ?? new Set<number>();
         setState((s) => ({
-          items: page === 1 ? res.data : [...s.items, ...res.data],
+          items: withoutHiddenRequests(page === 1 ? res.data : [...s.items, ...res.data], hidden),
           page,
           hasMore: res.has_more,
           loading: false,
@@ -84,7 +96,7 @@ function usePagedList<T>(fetchPage: (page: number, limit: number) => Promise<Pag
         setState((s) => ({ ...s, loading: false, loaded: true, error: errorMessage(err) }));
       }
     },
-    [fetchPage],
+    [fetchPage, hiddenIds],
   );
 
   return { state, setState, load };
@@ -99,7 +111,10 @@ function UserRow({
   onOpen: () => void;
   children?: React.ReactNode;
 }) {
-  const label = user.username || user.display_name || user.full_name || 'Unknown user';
+  const username = (user.username || '').trim();
+  const fullName = (user.full_name || '').trim();
+  const primary = fullName || (username ? `@${username}` : user.display_name) || 'Unknown user';
+  const handle = username && fullName ? `@${username}` : null;
   return (
     <motion.li
       layout
@@ -109,11 +124,11 @@ function UserRow({
       className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3"
     >
       <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-        <UserAvatar src={userAvatarUrl(user)} seed={user.id} name={label} size="md" alt={`${label}'s profile picture`} />
+        <UserAvatar src={userAvatarUrl(user)} seed={user.id} name={primary} size="md" alt={`${primary}'s profile picture`} />
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
-          {user.full_name && (
-            <p className="truncate text-xs text-muted-foreground">{user.full_name}</p>
+          <p className="truncate text-sm font-semibold text-foreground">{primary}</p>
+          {handle && (
+            <p className="truncate text-xs text-muted-foreground">{handle}</p>
           )}
         </div>
       </button>
@@ -193,9 +208,10 @@ export default function FriendsPage() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
   const showError = (err: unknown) => setToast({ show: true, message: errorMessage(err), type: 'error' });
 
+  const hiddenRequestIds = useRef(new Set<number>());
   const friends = usePagedList<FriendItem>(fetchFriends);
-  const incoming = usePagedList<FriendRequestItem>(fetchIncomingRequests);
-  const sent = usePagedList<FriendRequestItem>(fetchSentRequests);
+  const incoming = usePagedList<FriendRequestItem>(fetchIncomingRequests, hiddenRequestIds);
+  const sent = usePagedList<FriendRequestItem>(fetchSentRequests, hiddenRequestIds);
   const blocked = usePagedList<BlockedUserItem>(fetchBlockedUsers);
 
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -272,6 +288,7 @@ export default function FriendsPage() {
 
   const onAccept = async (req: FriendRequestItem) => {
     setBusyKey(`in:${req.request_id}`);
+    hiddenRequestIds.current.add(req.request_id);
     try {
       const res = await acceptFriendRequest(req.request_id);
       refreshNotifications();
@@ -281,6 +298,7 @@ export default function FriendsPage() {
         items: [res, ...s.items.filter((f) => f.user.id !== res.user.id)],
       }));
     } catch (err) {
+      hiddenRequestIds.current.delete(req.request_id);
       showError(err);
     } finally {
       setBusyKey(null);
@@ -289,11 +307,13 @@ export default function FriendsPage() {
 
   const onDecline = async (req: FriendRequestItem) => {
     setBusyKey(`in:${req.request_id}`);
+    hiddenRequestIds.current.add(req.request_id);
     try {
       await declineFriendRequest(req.request_id);
       refreshNotifications();
       incoming.setState((s) => ({ ...s, items: s.items.filter((r) => r.request_id !== req.request_id) }));
     } catch (err) {
+      hiddenRequestIds.current.delete(req.request_id);
       showError(err);
     } finally {
       setBusyKey(null);
@@ -302,12 +322,15 @@ export default function FriendsPage() {
 
   const onCancel = async (req: FriendRequestItem) => {
     setBusyKey(`sent:${req.request_id}`);
+    hiddenRequestIds.current.add(req.request_id);
+    sent.setState((s) => ({ ...s, items: s.items.filter((r) => r.request_id !== req.request_id) }));
     try {
       await cancelFriendRequest(req.request_id);
       refreshNotifications();
-      sent.setState((s) => ({ ...s, items: s.items.filter((r) => r.request_id !== req.request_id) }));
     } catch (err) {
+      hiddenRequestIds.current.delete(req.request_id);
       showError(err);
+      void sent.load(1);
     } finally {
       setBusyKey(null);
     }

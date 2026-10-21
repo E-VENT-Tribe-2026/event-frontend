@@ -32,6 +32,8 @@ import { toProfileVisibility, type ProfileVisibility } from '@/lib/userProfileAp
 import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
 import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
 import InvitationsTab from '@/components/InvitationsTab';
+import PlanBadge from '@/components/PlanBadge';
+import { accountPlanFrom } from '@/lib/accountPlan';
 import { useMyInvitations } from '@/hooks/useMyInvitations';
 import { 
   fetchFriends, 
@@ -300,6 +302,7 @@ export default function ProfilePage() {
               bio: String(data.bio || ""),
               avatar: data.avatar_url,
               interests: Array.isArray(data.interests) ? data.interests : [],
+              isPremium: accountPlanFrom(data) === 'pro',
             });
             const loadedName = String(data.full_name || data.name || '');
             const loadedAvatar = typeof data.avatar_url === 'string' ? data.avatar_url : '';
@@ -787,6 +790,9 @@ export default function ProfilePage() {
                   </button>
                 </h2>
                 <p className="text-sm text-muted-foreground" data-testid="profile-username">@{username}</p>
+                <div className="flex justify-center pt-1">
+                  <PlanBadge plan={user} />
+                </div>
               </div>
             )}
           </div>

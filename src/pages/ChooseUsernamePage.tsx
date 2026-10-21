@@ -14,6 +14,7 @@ import {
   hasChosenUsername,
   normalizeFullName,
   normalizeUsername,
+  profileFromMeResponse,
 } from '@/lib/username';
 
 const GOOGLE_NAME_KEY = 'eventapp:google-name';
@@ -50,9 +51,10 @@ export default function ChooseUsernamePage() {
         const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
-        const profile = await res.json().catch(() => ({} as { username?: string; full_name?: string }));
+        const profile = profileFromMeResponse(await res.json().catch(() => ({})));
         if (cancelled) return;
-        if (res.ok && hasChosenUsername(profile.username)) {
+        const username = typeof profile.username === 'string' ? profile.username : null;
+        if (res.ok && hasChosenUsername(username)) {
           navigate('/home', { replace: true });
           return;
         }

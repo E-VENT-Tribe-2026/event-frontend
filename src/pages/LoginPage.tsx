@@ -109,6 +109,7 @@ export default function LoginPage() {
         id: me.id,
         email: me.email || email,
         name: fullName,
+        username,
         avatar: avatarUrl,
         bio,
         interests,

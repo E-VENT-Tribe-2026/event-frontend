@@ -89,6 +89,7 @@ describe('ChatPage sender display (#292)', () => {
 
   afterEach(() => {
     window.sessionStorage.clear();
+    localStorage.clear();
     vi.unstubAllGlobals();
   });
 

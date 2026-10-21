@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { setAuthToken } from '@/lib/auth';
 import FriendsPage, { SEARCH_DEBOUNCE_MS } from '@/pages/FriendsPage';
 import BottomNav from '@/components/BottomNav';
+import { markChatUnread, setViewingChatId } from '@/lib/chatUnread';
 
 const { getCurrentUserMock } = vi.hoisted(() => ({ getCurrentUserMock: vi.fn() }));
 
@@ -89,6 +90,8 @@ afterEach(() => {
   fetchMock.mockClear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  localStorage.clear();
+  setViewingChatId(null);
 });
 
 describe('FriendsPage', () => {
@@ -243,7 +246,7 @@ describe('FriendsPage', () => {
 });
 
 describe('FriendsPage search', () => {
-  it('searches once after typing stops, shows only the latest results with full names, and loads more', async () => {
+  it('searches once after typing stops, shows full name and username, and loads more', async () => {
     const searchCalls: string[] = [];
     handlers.unshift(
       route('GET', '/api/profile/search', (url) => {
@@ -261,9 +264,9 @@ describe('FriendsPage search', () => {
     for (const text of ['J', 'JO', 'JOH', 'JOHN']) fireEvent.change(input, { target: { value: text } });
     await act(async () => { vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS + 10); });
 
-    expect(await screen.findByText('@john_42')).toBeInTheDocument();
+    expect(await screen.findByText('John Smith')).toBeInTheDocument();
+    expect(screen.getByText('@john_42')).toBeInTheDocument();
     expect(searchCalls).toEqual(['JOHN:1']);
-    expect(screen.getByText('John Smith')).toBeInTheDocument();
     expect(input).toHaveAttribute('placeholder', 'Search by username...');
 
     fireEvent.click(screen.getByRole('button', { name: /Load more/ }));
@@ -354,5 +357,22 @@ describe('BottomNav Friends entry', () => {
     expect(screen.queryByRole('link', { name: /^Profile$/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('link', { name: /Friends/ }));
     expect(await screen.findByText('FRIENDS TAB')).toBeInTheDocument();
+  });
+
+  it('shows a blinking chat badge when new chats are available', async () => {
+    markChatUnread(ME, 'evt-new');
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <Routes>
+          <Route path="/home" element={<BottomNav />} />
+          <Route path="/chat" element={<p>CHAT TAB</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const badge = await screen.findByTestId('chat-badge');
+    expect(badge).toHaveTextContent('1');
+    expect(badge).toHaveClass('animate-pulse');
+    fireEvent.click(screen.getByRole('link', { name: /Chat/ }));
+    expect(await screen.findByText('CHAT TAB')).toBeInTheDocument();
   });
 });
