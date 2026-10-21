@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { getAuthToken } from '@/lib/auth';
+import { getAuthToken, notifyAuthExpired } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
-import { hasChosenUsername } from '@/lib/username';
+import { hasChosenUsername, profileFromMeResponse } from '@/lib/username';
 import { getPendingAdminVerification } from '@/lib/adminAuth';
 
 /** Paths that administrators are allowed to stay on without being redirected to /admin. */
@@ -23,14 +23,26 @@ export default function RequireUsername({ children }: { children: React.ReactNod
         const res = await fetch(getApiUrl('/api/profile/me'), {
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
-        const profile = await res.json().catch(() => ({} as { username?: string; role?: string }));
+        const body = await res.json().catch(() => ({}));
         if (cancelled) return;
-        if (res.ok && typeof profile.role === 'string') {
-          setRole(profile.role);
+        if (res.status === 401) {
+          notifyAuthExpired();
+          return;
         }
-        setState(res.ok && hasChosenUsername(profile.username) ? 'ok' : 'need');
+        const profile = profileFromMeResponse(body);
+        if (typeof profile.role === 'string') setRole(profile.role);
+        const username = typeof profile.username === 'string' ? profile.username : null;
+        // 403 = profile setup required. Other failures must not bounce a
+        // signed-in user to /choose-username on refresh.
+        if (res.ok) {
+          setState(hasChosenUsername(username) ? 'ok' : 'need');
+        } else if (res.status === 403) {
+          setState('need');
+        } else {
+          setState('ok');
+        }
       } catch {
-        if (!cancelled) setState('need');
+        if (!cancelled) setState('ok');
       }
     })();
     return () => {

@@ -82,6 +82,18 @@ describe('ChooseUsernamePage', () => {
     });
   });
 
+  it('skips the form when a wrapped profile already has a username', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ data: { username: 'alex', full_name: 'Alex Smith' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })),
+    );
+    renderPage();
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true }));
+  });
+
   it('still shows the form when GET /profile/me says setup is required', async () => {
     vi.stubGlobal(
       'fetch',

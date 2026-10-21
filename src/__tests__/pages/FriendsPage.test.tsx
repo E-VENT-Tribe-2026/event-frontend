@@ -198,7 +198,7 @@ describe('FriendsPage', () => {
 });
 
 describe('FriendsPage search', () => {
-  it('searches once after typing stops, shows only the latest results without full names, and loads more', async () => {
+  it('searches once after typing stops, shows full name and username, and loads more', async () => {
     const searchCalls: string[] = [];
     handlers.unshift(
       route('GET', '/api/profile/search', (url) => {
@@ -216,9 +216,9 @@ describe('FriendsPage search', () => {
     for (const text of ['J', 'JO', 'JOH', 'JOHN']) fireEvent.change(input, { target: { value: text } });
     await act(async () => { vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS + 10); });
 
-    expect(await screen.findByText('@john_42')).toBeInTheDocument();
+    expect(await screen.findByText('John Smith')).toBeInTheDocument();
+    expect(screen.getByText('@john_42')).toBeInTheDocument();
     expect(searchCalls).toEqual(['JOHN:1']);
-    expect(screen.queryByText('John Smith')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Load more/ }));
     expect(await screen.findByText('@johnny_b')).toBeInTheDocument();

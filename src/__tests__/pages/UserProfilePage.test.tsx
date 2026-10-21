@@ -51,6 +51,17 @@ function mockBackend(initial: Friendship, overrides: { failWith?: { status: numb
     const json = (status: number, body: unknown) =>
       ({ ok: status < 400, status, json: async () => body }) as Response;
 
+    if (method === 'GET' && url.includes('/api/friends/requests/sent')) {
+      const id = friendship.request_id;
+      return json(200, {
+        page: 1,
+        limit: 50,
+        has_more: false,
+        data: id
+          ? [{ request_id: id, created_at: '2026-01-01T00:00:00Z', user: { id: OTHER_ID, username: 'jane_doe', full_name: 'Jane Doe', display_name: 'Jane Doe', avatar_kind: 'icon', icon_id: 'sun', avatar_url: null } }]
+          : [],
+      });
+    }
     if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
       if (friendship.status === 'blocked') {
         return json(200, {
@@ -175,6 +186,36 @@ describe('UserProfilePage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /cancel friend request/i }));
 
+    expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/api/friends/requests/7'))).toBe(true);
+  });
+
+  it('still cancels when the profile omitted request_id', async () => {
+    let friendship = { status: 'request_sent', request_id: null as number | null };
+    const calls: Array<{ method: string; url: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+      const json = (status: number, body: unknown) =>
+        ({ ok: status < 400, status, json: async () => body }) as Response;
+      if (method === 'GET' && url.includes('/api/friends/requests/sent')) {
+        return json(200, {
+          page: 1, limit: 50, has_more: false,
+          data: [{ request_id: 7, created_at: '2026-01-01T00:00:00Z', user: { id: OTHER_ID, username: 'jane_doe', full_name: 'Jane Doe', display_name: 'Jane', avatar_kind: 'icon', icon_id: 'sun', avatar_url: null } }],
+        });
+      }
+      if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
+        return json(200, { ...baseProfile, friendship });
+      }
+      if (method === 'DELETE' && url.includes('/api/friends/requests/7')) {
+        friendship = { status: 'none', request_id: null };
+        return json(200, { message: 'ok' });
+      }
+      return json(404, { detail: 'not found' });
+    }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /cancel friend request/i }));
     expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/api/friends/requests/7'))).toBe(true);
   });

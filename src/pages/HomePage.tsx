@@ -17,7 +17,7 @@ import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidate, invalidatePrefix, cachedFetch, TTL } from '@/lib/queryCache';
-import { parseFriendsError, userProfilePath } from '@/lib/friendsApi';
+import { parseFriendsError, sendFriendRequest, userProfilePath } from '@/lib/friendsApi';
 import FriendsGoing from '@/components/FriendsGoing';
 import { useFriendsGoingEvents } from '@/hooks/useFriendsGoing';
 
@@ -242,20 +242,10 @@ export default function HomePage() {
     }
     setAddingFriendId(receiverId);
     try {
-      const res = await fetch(getApiUrl('/api/friends/requests'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ receiver_id: receiverId }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw parseFriendsError(res.status, err);
-      }
+      await sendFriendRequest(receiverId);
       setToast({ show: true, message: 'Friend request sent', type: 'success' });
       setSuggestedUsers((prev) => prev.filter((p) => p.id !== receiverId));
-      // The "excluded" list changed (a new sent request), so drop its cache.
       invalidate(`/api/friends/excluded:${userId ?? ''}`);
-      invalidatePrefix('/api/friends');
     } catch (e: any) {
       setToast({ show: true, message: e?.message || 'Could not send request', type: 'error' });
     } finally {

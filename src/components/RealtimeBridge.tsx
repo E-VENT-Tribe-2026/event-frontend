@@ -33,6 +33,8 @@ export default function RealtimeBridge() {
     enabled: hasSession,
     onData: () => {
       invalidatePrefix('/api/friends');
+      invalidatePrefix('/api/notifications');
+      invalidateNotifications();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(FRIENDS_CHANGED_EVENT));
       }

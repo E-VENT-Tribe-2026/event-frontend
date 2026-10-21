@@ -6,7 +6,9 @@ import {
   blockUser,
   fetchBlockedUsers,
   fetchFriends,
+  fetchIncomingRequestCount,
   parseFriendsError,
+  readRequestId,
   searchUsers,
   sendFriendRequest,
   unblockUser,
@@ -164,6 +166,22 @@ describe('friendship requests and caching', () => {
       status: 403,
       message: 'You cannot send a friend request to this user.',
     });
+  });
+
+  it('reads nested and string request ids', () => {
+    expect(readRequestId({ request_id: 7 })).toBe(7);
+    expect(readRequestId({ data: { request_id: '12' } })).toBe(12);
+    expect(readRequestId(null)).toBeNull();
+  });
+
+  it('reads a wrapped incoming request count', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { count: 3 } }));
+    await expect(fetchIncomingRequestCount()).resolves.toBe(3);
+  });
+
+  it('returns the request id from a wrapped send response', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { request_id: '9' } }, 201));
+    await expect(sendFriendRequest(jane.id)).resolves.toMatchObject({ request_id: 9 });
   });
 
   it('throws the backend reason when an action is refused', async () => {

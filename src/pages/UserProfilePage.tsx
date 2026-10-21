@@ -10,7 +10,7 @@ import { getCurrentUser } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
-import { useUserProfile, invalidateUserProfile, invalidateNotifications } from '@/lib/queries';
+import { useUserProfile, invalidateUserProfile, invalidateNotifications, QK } from '@/lib/queries';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { queryClient } from '@/lib/queryClient';
 import {
@@ -19,6 +19,8 @@ import {
   blockUser,
   cancelFriendRequest,
   declineFriendRequest,
+  findSentRequestId,
+  readRequestId,
   removeFriend,
   sendFriendRequest,
   unblockUser,
@@ -152,12 +154,17 @@ export default function UserProfilePage() {
   const action = useMutation({
     mutationFn: async (kind: FriendshipAction) => {
       if (!profile) return;
-      const requestId = profile.friendship?.request_id;
+      const requestId = readRequestId(profile.friendship) ?? profile.friendship?.request_id;
       switch (kind) {
         case 'send':
           return sendFriendRequest(profile.id);
-        case 'cancel':
-          return cancelFriendRequest(requestId as number);
+        case 'cancel': {
+          const id = typeof requestId === 'number' ? requestId : await findSentRequestId(profile.id);
+          if (typeof id !== 'number') {
+            throw new FriendsApiError('Friend request not found.', 404, 'request_not_found');
+          }
+          return cancelFriendRequest(id);
+        }
         case 'accept':
           return acceptFriendRequest(requestId as number);
         case 'decline':
@@ -170,9 +177,17 @@ export default function UserProfilePage() {
           return unblockUser(profile.id);
       }
     },
-    onSuccess: async (_data, kind) => {
+    onSuccess: async (data, kind) => {
       if (kind === 'block') setBlockedByMe(true);
       if (kind === 'unblock' || kind === 'send') setBlockedByMe(false);
+      if (kind === 'send') {
+        const requestId = readRequestId(data);
+        if (requestId != null && viewer?.id) {
+          queryClient.setQueryData(QK.userProfile(viewer.id, userId), (old: UserProfile | undefined) =>
+            old ? { ...old, friendship: { status: 'request_sent', request_id: requestId } } : old,
+          );
+        }
+      }
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
       invalidateUserProfile(userId);

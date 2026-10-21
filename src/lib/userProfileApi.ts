@@ -73,5 +73,12 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile> {
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) throw parseProfileLoadError(res.status, body);
-  return body as UserProfile;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw parseProfileLoadError(500, { detail: 'Could not load this profile.' });
+  }
+  const root = body as Record<string, unknown>;
+  const inner = [root.data, root.user, root.profile, root].find(
+    (value) => value && typeof value === 'object' && !Array.isArray(value),
+  );
+  return (inner || root) as UserProfile;
 }
