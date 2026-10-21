@@ -11,7 +11,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette } from 'lucide-react';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette, Mail } from 'lucide-react';
 import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
@@ -30,6 +30,8 @@ import { storageRefusalMessage } from '@/lib/profilePhoto';
 import { PROFILE_ICONS } from '@/lib/profileAssets';
 import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
 import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
+import InvitationsTab from '@/components/InvitationsTab';
+import { useMyInvitations } from '@/hooks/useMyInvitations';
 import { 
   fetchFriends, 
   fetchIncomingRequests, 
@@ -113,8 +115,8 @@ export default function ProfilePage() {
   
   // Navigation Tabs: Main parent tabs ('events' | 'friends')
   const [mainTab, setMainTab] = useState<'events' | 'friends'>('events');
-  // Events Sub-Tabs ('upcoming' | 'past' | 'cancelled' | 'favourites')
-  const [eventSubTab, setEventSubTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites'>('upcoming');
+  // Events Sub-Tabs ('upcoming' | 'past' | 'cancelled' | 'favourites' | 'invitations')
+  const [eventSubTab, setEventSubTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites' | 'invitations'>('upcoming');
   // Friends Sub-Tabs ('accepted' | 'requests')
   const [friendSubTab, setFriendSubTab] = useState<'accepted' | 'requests' | 'blocked'>('accepted');
 
@@ -135,6 +137,8 @@ export default function ProfilePage() {
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
   const [remoteOrganizedEvents, setRemoteOrganizedEvents] = useState<EventItem[]>([]);
   const [favorites, setFavorites] = useState<EventItem[]>([]);
+  // Number of invitations for the Invitations tab (shares the cache with the tab's list).
+  const { total: invitationsTotal } = useMyInvitations(Boolean(user?.id));
   const [localEventsEpoch, setLocalEventsEpoch] = useState(0);
   const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
 
@@ -1008,12 +1012,13 @@ export default function ProfilePage() {
           {mainTab === 'events' ? (
             <div className="space-y-3">
               {/* Events Sub-Tabs with Colored Badge Circles */}
-              <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
+              <div className="flex rounded-xl bg-secondary/60 p-1 gap-0.5 overflow-x-auto">
                 {[
                   { id: 'upcoming' as const, label: 'Upcoming', count: unifiedUpcoming.length, icon: Calendar },
                   { id: 'past' as const, label: 'Past', count: unifiedPast.length, icon: Clock },
                   { id: 'cancelled' as const, label: 'Cancelled', count: unifiedCancelled.length, icon: Ban },
                   { id: 'favourites' as const, label: 'Favourites', count: favorites.length, icon: Heart },
+                  { id: 'invitations' as const, label: 'Invitations', count: invitationsTotal, icon: Mail },
                 ].map((sub) => {
                   const isSubActive = eventSubTab === sub.id;
                   return (
@@ -1024,7 +1029,7 @@ export default function ProfilePage() {
                         setEventSubTab(sub.id);
                         setVisibleEvents(4);
                       }}
-                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                      className={`flex-auto whitespace-nowrap flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-[11px] font-medium transition-all ${
                         isSubActive
                           ? sub.id === 'cancelled'
                             ? 'bg-destructive text-destructive-foreground shadow-sm'
@@ -1032,8 +1037,8 @@ export default function ProfilePage() {
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      <sub.icon className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{sub.label}</span>
+                      {/* No icon here: five tabs only fit the card with their full names. */}
+                      <span>{sub.label}</span>
                       <span
                         className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
                           isSubActive
@@ -1049,7 +1054,9 @@ export default function ProfilePage() {
               </div>
 
               {/* Events Sub-Content */}
-              {eventSubTab !== 'favourites' ? (
+              {eventSubTab === 'invitations' ? (
+                <InvitationsTab viewerId={user?.id} />
+              ) : eventSubTab !== 'favourites' ? (
                 <div className="space-y-2.5">
                   {currentEventList.length === 0 ? (
                     <p className="text-center py-8 text-xs text-muted-foreground">
