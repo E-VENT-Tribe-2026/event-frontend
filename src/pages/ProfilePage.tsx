@@ -11,7 +11,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette } from 'lucide-react';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette, Mail } from 'lucide-react';
 import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
@@ -28,8 +28,11 @@ import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } f
 import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
 import { storageRefusalMessage } from '@/lib/profilePhoto';
 import { PROFILE_ICONS } from '@/lib/profileAssets';
+import { toProfileVisibility, type ProfileVisibility } from '@/lib/userProfileApi';
 import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
 import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
+import InvitationsTab from '@/components/InvitationsTab';
+import { useMyInvitations } from '@/hooks/useMyInvitations';
 import { 
   fetchFriends, 
   fetchIncomingRequests, 
@@ -60,6 +63,15 @@ const PROFILE_AVATARS = AVATAR_SEEDS.map((seed) => ({
   id: seed,
   url: getGeneratedAvatarUrl(seed),
 }));
+
+const PROFILE_VISIBILITY_OPTIONS: Array<{ value: ProfileVisibility; label: string; hint: string }> = [
+  { value: 'public', label: 'Public', hint: 'Everyone can see your profile. Only your friends see your upcoming events.' },
+  {
+    value: 'friends_only',
+    label: 'Friends only',
+    hint: 'People who are not your friends see only your username, full name, profile picture and banner.',
+  },
+];
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -109,12 +121,14 @@ export default function ProfilePage() {
   const photoRef = useRef<HTMLInputElement>(null);
   const [bio, setBio] = useState(user?.bio || '');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
+  const [visibility, setVisibility] = useState<ProfileVisibility>('public');
+  const [savedVisibility, setSavedVisibility] = useState<ProfileVisibility>('public');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   
   // Navigation Tabs: Main parent tabs ('events' | 'friends')
   const [mainTab, setMainTab] = useState<'events' | 'friends'>('events');
-  // Events Sub-Tabs ('upcoming' | 'past' | 'cancelled' | 'favourites')
-  const [eventSubTab, setEventSubTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites'>('upcoming');
+  // Events Sub-Tabs ('upcoming' | 'past' | 'cancelled' | 'favourites' | 'invitations')
+  const [eventSubTab, setEventSubTab] = useState<'upcoming' | 'past' | 'cancelled' | 'favourites' | 'invitations'>('upcoming');
   // Friends Sub-Tabs ('accepted' | 'requests')
   const [friendSubTab, setFriendSubTab] = useState<'accepted' | 'requests' | 'blocked'>('accepted');
 
@@ -135,6 +149,8 @@ export default function ProfilePage() {
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
   const [remoteOrganizedEvents, setRemoteOrganizedEvents] = useState<EventItem[]>([]);
   const [favorites, setFavorites] = useState<EventItem[]>([]);
+  // Number of invitations for the Invitations tab (shares the cache with the tab's list).
+  const { total: invitationsTotal } = useMyInvitations(Boolean(user?.id));
   const [localEventsEpoch, setLocalEventsEpoch] = useState(0);
   const [leavingEventId, setLeavingEventId] = useState<string | null>(null);
 
@@ -292,6 +308,8 @@ export default function ProfilePage() {
             setSavedName(loadedName);
             setSavedBio(String(data.bio || ''));
             setSavedInterests(Array.isArray(data.interests) ? data.interests : []);
+            setVisibility(toProfileVisibility(data.visibility));
+            setSavedVisibility(toProfileVisibility(data.visibility));
             setUsername(typeof data.username === 'string' ? data.username : '');
             
             setAvatarUrl(loadedAvatar);
@@ -382,6 +400,7 @@ export default function ProfilePage() {
     setName(savedName);
     setBio(savedBio);
     setInterests(savedInterests);
+    setVisibility(savedVisibility);
     setPreviewAvatarUrl(avatarUrl);
     setPreviewBannerUrl(bannerUrl);
     setPreviewAvatarKind(avatarKind);
@@ -485,11 +504,13 @@ export default function ProfilePage() {
       return;
     }
 
-    const textPayload = {
+    const textPayload: Record<string, unknown> = {
       full_name: cleaned,
       bio,
       interests,
     };
+    // Sent only when changed, so saving other fields never rewrites the stored setting.
+    if (visibility !== savedVisibility) textPayload.visibility = visibility;
     const payload: Record<string, unknown> = { ...textPayload };
     if (previewAvatarUrl !== avatarUrl || previewAvatarKind !== avatarKind) {
       payload.avatar_url = previewAvatarUrl || null;
@@ -548,6 +569,10 @@ export default function ProfilePage() {
       setSavedName(nextName);
       setSavedBio(bio);
       setSavedInterests(interests);
+      // The server's value: a fallback save without the setting keeps the stored one.
+      const nextVisibility = toProfileVisibility(savedProfile?.visibility ?? visibility);
+      setVisibility(nextVisibility);
+      setSavedVisibility(nextVisibility);
 
       setAvatarUrl(previewAvatarUrl);
       setBannerUrl(previewBannerUrl);
@@ -887,6 +912,37 @@ export default function ProfilePage() {
           )}
         </div>
 
+        {/* Profile visibility */}
+        <div className="rounded-2xl glass-card p-4 space-y-2">
+          <h3 className="text-sm font-semibold">Profile visibility</h3>
+          {editing ? (
+            <div className="flex gap-1 rounded-xl bg-secondary/60 p-1" role="radiogroup" aria-label="Profile visibility">
+              {PROFILE_VISIBILITY_OPTIONS.map((option) => {
+                const selected = visibility === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setVisibility(option.value)}
+                    className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-all ${selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-testid="profile-visibility">
+              {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.label}
+            </p>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.hint}
+          </p>
+        </div>
+
         {/* Save/Cancel Buttons */}
         {editing && (
           <div className="flex items-center justify-end gap-2 pt-1">
@@ -1008,12 +1064,13 @@ export default function ProfilePage() {
           {mainTab === 'events' ? (
             <div className="space-y-3">
               {/* Events Sub-Tabs with Colored Badge Circles */}
-              <div className="flex rounded-xl bg-secondary/60 p-1 gap-1">
+              <div className="flex rounded-xl bg-secondary/60 p-1 gap-0.5 overflow-x-auto">
                 {[
                   { id: 'upcoming' as const, label: 'Upcoming', count: unifiedUpcoming.length, icon: Calendar },
                   { id: 'past' as const, label: 'Past', count: unifiedPast.length, icon: Clock },
                   { id: 'cancelled' as const, label: 'Cancelled', count: unifiedCancelled.length, icon: Ban },
                   { id: 'favourites' as const, label: 'Favourites', count: favorites.length, icon: Heart },
+                  { id: 'invitations' as const, label: 'Invitations', count: invitationsTotal, icon: Mail },
                 ].map((sub) => {
                   const isSubActive = eventSubTab === sub.id;
                   return (
@@ -1024,7 +1081,7 @@ export default function ProfilePage() {
                         setEventSubTab(sub.id);
                         setVisibleEvents(4);
                       }}
-                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                      className={`flex-auto whitespace-nowrap flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-[11px] font-medium transition-all ${
                         isSubActive
                           ? sub.id === 'cancelled'
                             ? 'bg-destructive text-destructive-foreground shadow-sm'
@@ -1032,8 +1089,8 @@ export default function ProfilePage() {
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      <sub.icon className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{sub.label}</span>
+                      {/* No icon here: five tabs only fit the card with their full names. */}
+                      <span>{sub.label}</span>
                       <span
                         className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
                           isSubActive
@@ -1049,7 +1106,9 @@ export default function ProfilePage() {
               </div>
 
               {/* Events Sub-Content */}
-              {eventSubTab !== 'favourites' ? (
+              {eventSubTab === 'invitations' ? (
+                <InvitationsTab viewerId={user?.id} />
+              ) : eventSubTab !== 'favourites' ? (
                 <div className="space-y-2.5">
                   {currentEventList.length === 0 ? (
                     <p className="text-center py-8 text-xs text-muted-foreground">

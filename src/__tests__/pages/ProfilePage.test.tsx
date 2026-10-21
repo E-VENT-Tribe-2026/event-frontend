@@ -210,6 +210,32 @@ describe('ProfilePage identity', () => {
     expect(screen.getByText('Appearance')).toBeInTheDocument();
   });
 
+  it('saves the profile visibility with the profile update and keeps the choice', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/profile/me') && init?.method === 'PUT') {
+        return json({ ...baseProfile, visibility: 'friends_only' });
+      }
+      if (url.includes('/api/profile/me')) return json({ ...baseProfile, visibility: 'public' });
+      return json([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByTestId('profile-visibility')).toHaveTextContent('Public');
+    fireEvent.click(await screen.findByRole('button', { name: /edit profile/i }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Friends only' }));
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(await screen.findByTestId('profile-visibility')).toHaveTextContent('Friends only');
+    const puts = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'PUT',
+    );
+    expect(puts).toHaveLength(1);
+    expect(JSON.parse(String((puts[0][1] as RequestInit).body)).visibility).toBe('friends_only');
+  });
+
   it('refuses an empty full name and does not save a stand-in', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

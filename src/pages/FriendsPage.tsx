@@ -631,7 +631,7 @@ export default function FriendsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Unblock this person?</AlertDialogTitle>
             <AlertDialogDescription>
-              @{pendingUnblock?.display_name} will be able to send you friend requests again.
+              Your previous friendship with @{pendingUnblock?.display_name} will not be restored. To be friends again, one of you will need to send a new friend request.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

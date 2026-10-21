@@ -20,6 +20,8 @@ import { getCategoryBanner } from '@/lib/categoryBanners';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { formatUserIdentity } from '@/lib/userIdentity';
 import InvitedByBanner from '@/components/InvitedByBanner';
+import FriendsAttendingSection from '@/components/FriendsAttendingSection';
+import { fetchFriendsAttending, fetchParticipantCount, fetchParticipantList, type ParticipantRow } from '@/lib/eventAttendeesApi';
 import InviteFriendsDialog from '@/components/InviteFriendsDialog';
 import type { EventInvitationSummary } from '@/lib/invitationsApi';
 import FriendsGoing from '@/components/FriendsGoing';
@@ -57,7 +59,9 @@ export default function EventDetailsPage() {
   const [loadingApi, setLoadingApi] = useState(true);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [showVenuePaymentModal, setShowVenuePaymentModal] = useState(false);
-  const [apiParticipants, setApiParticipants] = useState<Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string; username?: string } }>>([]);
+  const [apiParticipants, setApiParticipants] = useState<ParticipantRow[]>([]);
+  // The user's friends who attend, for a user who has not joined (backend #187).
+  const [attendingFriends, setAttendingFriends] = useState<ParticipantRow[]>([]);
   const [isUpdatingParticipation, setIsUpdatingParticipation] = useState(false);
   const [attendeeCount, setAttendeeCount] = useState<number | null>(null);
   const [myParticipationStatus, setMyParticipationStatus] = useState<ParticipationStatus | null>(null);
@@ -114,7 +118,7 @@ export default function EventDetailsPage() {
         setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
         return false;
       }
-      await syncParticipationFromBackend();
+      await syncParticipationFromBackend({ fresh: true });
       setInvitation(null); // joining removes the invitation
       setToast({ show: true, message: 'Successfully joined!', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
@@ -127,30 +131,19 @@ export default function EventDetailsPage() {
     }
   };
 
-  const syncParticipationFromBackend = useCallback(async () => {
+  const syncParticipationFromBackend = useCallback(async (opts?: { fresh?: boolean }) => {
     if (!id || !apiEvent) {
       setAttendeeCount(null);
       setMyParticipationStatus(null);
       setParticipationKnown(false);
       setApiParticipants([]);
+      setAttendingFriends([]);
       return;
     }
+    // After a join, leave or removal the cached attendee data is stale: read it fresh.
+    if (opts?.fresh) invalidatePrefix(`/api/participants/${id}`);
 
     const token = await getApiToken();
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    let participantsList: Array<{ user_id: string; status?: string; profiles?: { full_name?: string; avatar_url?: string; username?: string } }> = [];
-    try {
-      const pRes = await fetch(getApiUrl(`/api/participants/${id}/participants`), { headers });
-      if (pRes.ok) {
-        const list = await pRes.json().catch(() => []);
-        participantsList = Array.isArray(list) ? list : [];
-        setAttendeeCount(participantsList.length);
-      }
-    } catch {
-      // Keep previous attendee count if backend temporarily fails.
-    }
 
     let authUserId: string | null = backendAuthUserId;
     if (token && !authUserId) {
@@ -163,16 +156,13 @@ export default function EventDetailsPage() {
       setMyParticipationStatus('none');
       setParticipationKnown(true);
       setApiParticipants([]);
+      setAttendingFriends([]);
       return;
     }
 
+    // Is the user going? (never cached: membership must be exact)
     let status: ParticipationStatus = 'none';
-    const inferredJoined = Boolean(
-      participantsList.some(
-        (p) =>
-          sameAuthUserId(p.user_id, authUserId) && String(p.status || 'going').toLowerCase() !== 'removed',
-      ),
-    );
+    let statusKnown = false;
     if (token) {
       try {
         const sRes = await fetch(getApiUrl(`/api/participants/${id}/my-status`), {
@@ -183,27 +173,44 @@ export default function EventDetailsPage() {
           const st = typeof data?.status === 'string' ? data.status : '';
           if (st === 'going') status = 'going';
           else if (st === 'removed') status = 'removed';
-          else if (st === 'none') status = 'none';
-          else if (inferredJoined) status = 'going';
-        } else if (inferredJoined) {
-          status = 'going';
+          statusKnown = true;
         }
       } catch {
-        status = inferredJoined ? 'going' : 'none';
+        // fall through: try to infer it from the attendee list below
       }
-    } else {
-      status = inferredJoined ? 'going' : 'none';
     }
-    setMyParticipationStatus(status);
 
     const isOwner =
       sameAuthUserId(apiEvent.organizerId, authUserId) || sameAuthUserId(apiEvent.organizerId, user?.id);
-    if (isOwner || status === 'going') {
-      setApiParticipants(participantsList);
-    } else {
-      setApiParticipants([]);
-    }
 
+    // The full list is only for the organizer and participants; others would get a 403.
+    let list: ParticipantRow[] = [];
+    if (isOwner || status === 'going' || !statusKnown) {
+      try {
+        list = await fetchParticipantList(id, token);
+        if (!statusKnown) {
+          const inList = list.some(
+            (p) => sameAuthUserId(p.user_id, authUserId) && String(p.status || 'going').toLowerCase() !== 'removed',
+          );
+          status = inList ? 'going' : 'none';
+        }
+      } catch {
+        // not allowed to see the list (or a temporary failure): the count and friends below still show
+      }
+    }
+    setMyParticipationStatus(status);
+
+    // The number of attendees and the user's attending friends are open to every signed-in user.
+    const [countRes, friendsRes] = await Promise.allSettled([
+      fetchParticipantCount(id, token),
+      fetchFriendsAttending(id, token),
+    ]);
+    if (countRes.status === 'fulfilled') setAttendeeCount(countRes.value);
+    else if (list.length > 0) setAttendeeCount(list.length);
+    // Otherwise keep the previous count if the backend temporarily fails.
+    setAttendingFriends(friendsRes.status === 'fulfilled' ? friendsRes.value : []);
+
+    setApiParticipants(isOwner || status === 'going' ? list : []);
     setParticipationKnown(true);
   }, [id, apiEvent, user?.id, backendAuthUserId]);
 
@@ -404,18 +411,21 @@ export default function EventDetailsPage() {
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
   const fullAttendeeRows = useMemo(() => {
+    type AttendeeRow = { id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string; isFriend?: boolean };
     if (!event || !canViewFullAttendeeList) {
-      return [] as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
+      return [] as AttendeeRow[];
     }
     if (useApiParticipation && apiParticipants.length > 0) {
       return apiParticipants
         .filter((p) => p?.user_id)
-        .map((p: any) => ({
+        .map((p): AttendeeRow => ({
           id: p.user_id,
-          profilePhoto: p.profiles?.avatar_url || p.user?.avatar_url,
-          avatar: p.profiles?.avatar_url || p.user?.avatar_url,
-          name: p.profiles?.full_name || p.user?.full_name || 'Participant',
-          username: p.user?.username || p.profiles?.username || p.user?.display_name,
+          profilePhoto: p.profiles?.avatar_url || p.user?.avatar_url || undefined,
+          avatar: p.profiles?.avatar_url || p.user?.avatar_url || undefined,
+          name: p.profiles?.full_name || p.user?.full_name || p.user?.display_name || 'Participant',
+          // Only a real username: an account without one shows its full name alone.
+          username: p.user?.username || p.profiles?.username || undefined,
+          isFriend: Boolean(p.is_friend),
         }));
     }
     return event.participants
@@ -424,7 +434,7 @@ export default function EventDetailsPage() {
         if (!u) return null;
         return { id: u.id, profilePhoto: u.profilePhoto, avatar: u.avatar, name: u.name, email: u.email, username: u.username };
       })
-      .filter(Boolean) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
+      .filter(Boolean) as AttendeeRow[];
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
   const recordCheckin = useCallback(async (userId: string, name: string, ticketId?: string) => {
@@ -544,7 +554,7 @@ export default function EventDetailsPage() {
             setIsUpdatingParticipation(false);
             return;
           }
-          await syncParticipationFromBackend();
+          await syncParticipationFromBackend({ fresh: true });
           leaveEvent(event.id, user.id);
           setEventsState(getEvents());
           setToast({ show: true, message: 'You left the event.', type: 'success' });
@@ -650,7 +660,7 @@ export default function EventDetailsPage() {
           setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
           return;
         }
-        await syncParticipationFromBackend();
+        await syncParticipationFromBackend({ fresh: true });
         setToast({ show: true, message: 'Attendee removed.', type: 'success' });
         invalidatePrefix(`/api/participants/${event.id}`);
       } catch {
@@ -935,8 +945,18 @@ export default function EventDetailsPage() {
                       />
                       <span className="truncate text-sm font-medium text-foreground">
                         {formatUserIdentity({ fullName: row.name })}
-                        <p className="text-sm text-muted-foreground" data-testid="profile-username">@{row.username}</p>
+                        {row.username && (
+                          <p className="text-sm text-muted-foreground" data-testid="profile-username">@{row.username}</p>
+                        )}
                       </span>
+                      {row.isFriend && (
+                        <span
+                          data-testid="friend-label"
+                          className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"
+                        >
+                          Friend
+                        </span>
+                      )}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                     {isEventOwner && !isCancelledEvent && (
@@ -966,6 +986,11 @@ export default function EventDetailsPage() {
                 ))}
               </ul>
             )
+          ) : attendingFriends.length > 0 ? (
+            <FriendsAttendingSection
+              friends={attendingFriends}
+              othersCount={Math.max(0, attendeeDisplayCount - attendingFriends.length)}
+            />
           ) : (
             <p className="text-sm leading-relaxed text-muted-foreground">
               For privacy, only the count is shown here:{' '}

@@ -57,7 +57,7 @@ describe('fetchUserProfile blocking', () => {
       name: 'ProfileLoadError',
       status: 404,
       code: 'profile_unavailable',
-      message: 'This user could not be found.',
+      message: 'This profile is unavailable',
     });
   });
 
@@ -66,7 +66,7 @@ describe('fetchUserProfile blocking', () => {
     await expect(fetchUserProfile('u1')).rejects.toMatchObject({
       status: 404,
       code: 'profile_unavailable',
-      message: 'This user could not be found.',
+      message: 'This profile is unavailable',
     });
   });
 });
