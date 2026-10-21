@@ -26,14 +26,6 @@ function clampToWorld(lat: number, lng: number): [number, number] {
   ];
 }
 
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 /** Spread markers that share the same rounded coordinates so popups stay tappable. */
 function spreadOverlapping(events: EventItem[]): Array<{ item: EventItem; lat: number; lng: number }> {
   const valid = events.filter(
@@ -256,7 +248,7 @@ export default function MapPage() {
       const organizerUsername = rawUsername ? `@${rawUsername.replace(/^@/, '')}` : null;
       const organizerAvatar = prof?.avatar_url || event.organizerAvatar;
 
-            // Built with DOM nodes + textContent so user text is never parsed as HTML (#245).
+      // Built with DOM nodes + textContent so user text is never parsed as HTML (#245).
       const popup = buildMapEventPopup({
         id: event.id,
         title: event.title,
