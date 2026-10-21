@@ -30,7 +30,7 @@ export type BlockedUserItem = { blocked_at?: string | null; user: UserSummary };
 
 export type Page<T> = { page: number; limit: number; has_more: boolean; data: T[] };
 
-/** Row from GET /api/profile/search (no display_name; full_name is not shown in search). */
+/** Row from GET /api/profile/search; matched on username, shown with the full name. */
 export type UserSearchResult = {
   id: string;
   username: string;
@@ -95,6 +95,7 @@ export function parseFriendsError(status: number, body: unknown): FriendsApiErro
     : status === 403 ? 'You cannot send a friend request to this user.'
     : status === 404 ? 'This user could not be found.'
     : status === 422 ? 'The request was not valid. Please try again.'
+    : status === 429 ? 'Too many requests. Please wait a moment and try again.'
     : 'Something went wrong. Please try again.';
 
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
@@ -112,6 +113,9 @@ export function parseFriendsError(status: number, body: unknown): FriendsApiErro
     );
   }
   if (typeof detail === 'string' && detail.trim()) return new FriendsApiError(detail, status);
+  // The rate limiter answers with { error: "Rate limit exceeded: ..." } instead of a detail.
+  const error = (body as { error?: unknown } | null)?.error;
+  if (status === 429 && typeof error === 'string' && error.trim()) return new FriendsApiError(error, status);
   return new FriendsApiError(fallback, status);
 }
 

@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users, UserCheck } from 'lucide-react';
+import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { getCurrentUser } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -24,16 +34,24 @@ import {
   unblockUser,
   userAvatarUrl,
   userProfilePath,
-  fetchFriends,
-  type FriendItem,
+  type UserSummary,
 } from '@/lib/friendsApi';
-import { ProfileLoadError, type ProfileEventGroup, type UserProfile } from '@/lib/userProfileApi';
+import {
+  PROFILE_UNAVAILABLE_MESSAGE,
+  ProfileLoadError,
+  fetchUserFriends,
+  isProfileUnavailable,
+  type ProfileEventGroup,
+  type UserProfile,
+} from '@/lib/userProfileApi';
 
 type MainTab = 'events' | 'friends';
 type EventTab = 'upcoming' | 'past';
-type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove' | 'block' | 'unblock';
+type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove';
+type BlockAction = 'block' | 'unblock';
 
-const EMPTY_GROUP: ProfileEventGroup = { upcoming: [], past: [] };
+// The profile carries the first 10 friends; later pages use the same size so offsets line up.
+const FRIENDS_PAGE_SIZE = 10;
 
 function errorMessage(error: unknown): string {
   if (error instanceof FriendsApiError) return error.message;
@@ -41,11 +59,7 @@ function errorMessage(error: unknown): string {
 }
 
 function profileLoadMessage(error: unknown): string {
-  if (error instanceof ProfileLoadError) {
-    if (error.status === 403) return 'This profile is private.';
-    if (error.status === 404) return 'This user could not be found.';
-    return error.message;
-  }
+  if (error instanceof ProfileLoadError) return error.message;
   return 'Could not load this profile.';
 }
 
@@ -84,6 +98,11 @@ function EventSection({ title, events }: { title: string; events: Array<Record<s
   );
 }
 
+/** Event lists the backend returned, in display order; a list it left out is not shown. */
+function availableEventTabs(groups: Array<ProfileEventGroup | undefined>): EventTab[] {
+  return (['upcoming', 'past'] as const).filter((tab) => groups.some((g) => Array.isArray(g?.[tab])));
+}
+
 export default function UserProfilePage() {
   const navigate = useNavigate();
   const { userId = '' } = useParams<{ userId: string }>();
@@ -93,14 +112,13 @@ export default function UserProfilePage() {
   const [mainTab, setMainTab] = useState<MainTab>('events');
   const [eventTab, setEventTab] = useState<EventTab>('upcoming');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
-  const [blockedByMe, setBlockedByMe] = useState(false);
-  useEffect(() => {
-    setBlockedByMe(false);
-  }, [userId]);
+  const [confirmBlock, setConfirmBlock] = useState<BlockAction | null>(null);
 
-  // Friends Data State for the viewed user
-  const [userFriends, setUserFriends] = useState<FriendItem[]>([]);
-  const [friendsLoading, setFriendsLoading] = useState(false);
+  // Friends of the viewed user beyond the first page, which comes with the profile.
+  const [moreFriends, setMoreFriends] = useState<UserSummary[]>([]);
+  const [friendsPage, setFriendsPage] = useState(1);
+  const [friendsHasMore, setFriendsHasMore] = useState(false);
+  const [friendsLoadingMore, setFriendsLoadingMore] = useState(false);
 
   const [tokenReady, setTokenReady] = useState(() => Boolean(getAuthToken()));
   useEffect(() => {
@@ -126,33 +144,24 @@ export default function UserProfilePage() {
     userId,
   );
 
-  // Fetch friends list (hidden when the viewer has blocked this user)
+  // A new first page (other user, refetch after an action) restarts the friends list.
+  const firstFriendsPage = profile?.friends;
   useEffect(() => {
-    if (!userId) return;
-    if (blockedByMe || profile?.blocked_by_me || profile?.friendship?.status === 'blocked') {
-      setUserFriends([]);
-      setFriendsLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setFriendsLoading(true);
-    fetchFriends(1, 50)
-      .then((res) => {
-        if (!cancelled) setUserFriends(res.data || []);
-      })
-      .catch(() => {
-        if (!cancelled) setUserFriends([]);
-      })
-      .finally(() => {
-        if (!cancelled) setFriendsLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [userId, blockedByMe, profile?.blocked_by_me, profile?.friendship?.status]);
+    setMoreFriends([]);
+    setFriendsPage(1);
+    // A full first page may have more behind it; an empty next page then hides "Load more".
+    setFriendsHasMore((firstFriendsPage?.length ?? 0) >= FRIENDS_PAGE_SIZE);
+  }, [firstFriendsPage]);
+
+  const refreshProfile = async () => {
+    invalidateUserProfile(userId);
+    await refetch();
+  };
 
   const action = useMutation({
     mutationFn: async (kind: FriendshipAction) => {
       if (!profile) return;
-      const requestId = profile.friendship?.request_id;
+      const requestId = profile.friendship?.request_id ?? null;
       switch (kind) {
         case 'send':
           return sendFriendRequest(profile.id);
@@ -164,102 +173,112 @@ export default function UserProfilePage() {
           return declineFriendRequest(requestId as number);
         case 'remove':
           return removeFriend(profile.id);
-        case 'block':
-          return blockUser(profile.id);
-        case 'unblock':
-          return unblockUser(profile.id);
       }
     },
-    onSuccess: async (_data, kind) => {
-      if (kind === 'block') setBlockedByMe(true);
-      if (kind === 'unblock' || kind === 'send') setBlockedByMe(false);
+    onSuccess: async () => {
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
-      invalidateUserProfile(userId);
-      await refetch();
+      await refreshProfile();
     },
     onError: (err) => {
       setToast({ show: true, message: errorMessage(err), type: 'error' });
-      invalidateUserProfile(userId);
-      void refetch();
+      void refreshProfile();
     },
   });
 
-  const events = useMemo(() => {
-    const grouped = profile?.events;
-    return {
-      organized: grouped?.organized ?? EMPTY_GROUP,
-      joined: grouped?.joined ?? EMPTY_GROUP,
-    };
+  const block = useMutation({
+    mutationFn: async (kind: BlockAction) => {
+      if (kind === 'block') await blockUser(userId);
+      else await unblockUser(userId);
+    },
+    onSuccess: async (_data, kind) => {
+      invalidatePrefix('/api/notifications');
+      invalidateNotifications();
+      setToast({ show: true, message: kind === 'block' ? 'User blocked.' : 'User unblocked.', type: 'success' });
+      await refreshProfile();
+    },
+    onError: (err) => {
+      setToast({ show: true, message: errorMessage(err), type: 'error' });
+      void refreshProfile();
+    },
+  });
+
+  const eventGroups = useMemo(() => {
+    const groups: Array<{ title: string; group: ProfileEventGroup }> = [];
+    if (profile?.events?.organized) groups.push({ title: 'Organized', group: profile.events.organized });
+    if (profile?.events?.joined) groups.push({ title: 'Joined', group: profile.events.joined });
+    return groups;
   }, [profile]);
+
+  const eventTabs = useMemo(() => availableEventTabs(eventGroups.map((g) => g.group)), [eventGroups]);
+
+  const mainTabs = useMemo(() => {
+    const list: Array<{ id: MainTab; label: string; icon: typeof Calendar }> = [];
+    if (eventTabs.length > 0) list.push({ id: 'events', label: 'Events', icon: Calendar });
+    if (profile?.friends) list.push({ id: 'friends', label: 'Friends', icon: Users });
+    return list;
+  }, [eventTabs, profile]);
+
+  // Keep the selected tabs on parts the backend returned.
+  const activeMainTab = mainTabs.some((t) => t.id === mainTab) ? mainTab : mainTabs[0]?.id;
+  const activeEventTab = eventTabs.includes(eventTab) ? eventTab : eventTabs[0];
 
   if (isSelf) return <Navigate to="/profile" replace />;
 
   const run = (kind: FriendshipAction) => action.mutate(kind);
-  const busy = action.isPending;
-  const isBlockedProfile = Boolean(
-    blockedByMe || profile?.blocked_by_me || profile?.friendship?.status === 'blocked',
-  );
+  const busy = action.isPending || block.isPending;
 
-  const renderAction = (p: UserProfile) => {
-    const primary =
-      'flex items-center justify-center gap-1.5 rounded-full px-5 py-2 text-xs font-semibold disabled:opacity-60';
-    const gradient = `${primary} gradient-primary text-primary-foreground shadow-glow`;
-    const outline = `${primary} border border-border bg-secondary text-foreground hover:bg-secondary/80`;
+  const friends = [...(profile?.friends ?? []), ...moreFriends];
 
-    const status =
-      blockedByMe || p.blocked_by_me || p.friendship?.status === 'blocked'
-        ? 'blocked'
-        : (p.friendship?.status ?? 'none');
-    const blockBtn = (
-      <button type="button" onClick={() => run('block')} disabled={busy} className={outline}>
-        <Ban className="h-3.5 w-3.5" /> Block
-      </button>
-    );
-    switch (status) {
+  const loadMoreFriends = async () => {
+    const next = friendsPage + 1;
+    setFriendsLoadingMore(true);
+    try {
+      const res = await fetchUserFriends(userId, next, FRIENDS_PAGE_SIZE);
+      setMoreFriends((prev) => [...prev, ...res.data]);
+      setFriendsPage(next);
+      setFriendsHasMore(res.has_more);
+    } catch (err) {
+      setToast({ show: true, message: errorMessage(err), type: 'error' });
+    } finally {
+      setFriendsLoadingMore(false);
+    }
+  };
+
+  const primary =
+    'flex items-center justify-center gap-1.5 rounded-full px-5 py-2 text-xs font-semibold disabled:opacity-60';
+  const gradient = `${primary} gradient-primary text-primary-foreground shadow-glow`;
+  const outline = `${primary} border border-border bg-secondary text-foreground hover:bg-secondary/80`;
+
+  const renderFriendshipAction = (p: UserProfile) => {
+    switch (p.friendship?.status) {
       case 'none':
         return (
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => run('send')} disabled={busy} className={gradient}>
-              <UserPlus className="h-3.5 w-3.5" /> Send Friend Request
-            </button>
-            {blockBtn}
-          </div>
+          <button type="button" onClick={() => run('send')} disabled={busy} className={gradient}>
+            <UserPlus className="h-3.5 w-3.5" /> Send Friend Request
+          </button>
         );
       case 'request_sent':
         return (
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => run('cancel')} disabled={busy} className={outline}>
-              <X className="h-3.5 w-3.5" /> Cancel Friend Request
-            </button>
-            {blockBtn}
-          </div>
+          <button type="button" onClick={() => run('cancel')} disabled={busy} className={outline}>
+            <X className="h-3.5 w-3.5" /> Cancel Friend Request
+          </button>
         );
       case 'request_received':
         return (
-          <div className="flex flex-wrap gap-2">
+          <>
             <button type="button" onClick={() => run('accept')} disabled={busy} className={gradient}>
               <Check className="h-3.5 w-3.5" /> Accept
             </button>
             <button type="button" onClick={() => run('decline')} disabled={busy} className={outline}>
               <X className="h-3.5 w-3.5" /> Decline
             </button>
-            {blockBtn}
-          </div>
+          </>
         );
       case 'friends':
         return (
-          <div className="flex flex-wrap gap-2">
-            {blockBtn}
-            <button type="button" onClick={() => run('remove')} disabled={busy} className={outline}>
-              <UserMinus className="h-3.5 w-3.5" /> Remove Friend
-            </button>
-          </div>
-        );
-      case 'blocked':
-        return (
-          <button type="button" onClick={() => run('unblock')} disabled={busy} className={outline}>
-            Unblock
+          <button type="button" onClick={() => run('remove')} disabled={busy} className={outline}>
+            <UserMinus className="h-3.5 w-3.5" /> Remove Friend
           </button>
         );
       default:
@@ -267,10 +286,32 @@ export default function UserProfilePage() {
     }
   };
 
-  const tabs: Array<{ id: EventTab; label: string; icon: typeof Calendar }> = [
-    { id: 'upcoming', label: 'Upcoming', icon: Calendar },
-    { id: 'past', label: 'Past', icon: Clock },
-  ];
+  const renderActions = (p: UserProfile) => {
+    if (p.blocked_by_me || p.friendship?.status === 'blocked') {
+      return (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setConfirmBlock('unblock')} disabled={busy} className={outline}>
+            <Ban className="h-3.5 w-3.5" /> Unblock
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-wrap gap-2">
+        {renderFriendshipAction(p)}
+        <button
+          type="button"
+          onClick={() => setConfirmBlock('block')}
+          disabled={busy}
+          className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
+        >
+          <Ban className="h-3.5 w-3.5" /> Block
+        </button>
+      </div>
+    );
+  };
+
+  const displayName = profile ? profile.full_name || profile.username || 'this user' : 'this user';
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -305,6 +346,10 @@ export default function UserProfilePage() {
           >
             Log in
           </button>
+        </div>
+      ) : isProfileUnavailable(error) ? (
+        <div className="px-4 py-16 text-center" role="alert">
+          <p className="text-sm text-muted-foreground">{PROFILE_UNAVAILABLE_MESSAGE}</p>
         </div>
       ) : error || !profile ? (
         <div className="px-4 py-16 text-center" role="alert">
@@ -345,7 +390,7 @@ export default function UserProfilePage() {
               {profile.username && <p className="text-sm text-muted-foreground">@{profile.username}</p>}
             </div>
 
-            {renderAction(profile)}
+            {renderActions(profile)}
 
             {profile.bio ? (
               <p className="whitespace-pre-line text-sm text-foreground/90">{profile.bio}</p>
@@ -365,101 +410,133 @@ export default function UserProfilePage() {
             )}
           </div>
 
-          {/* Main Parent Tabs: Events vs Friends (hidden for users you blocked) */}
-          {!isBlockedProfile && (
-          <div className="mx-auto max-w-lg px-4 space-y-4">
-            <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
-              {[
-                { id: 'events' as const, label: 'Events', icon: Calendar },
-                { id: 'friends' as const, label: 'Friends', icon: Users },
-              ].map((tab) => {
-                const active = mainTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setMainTab(tab.id)}
-                    className={`flex flex-1 items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-semibold transition-all ${
-                      active
-                        ? 'gradient-primary text-primary-foreground shadow-glow'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
-                    }`}
-                  >
-                    <tab.icon className="h-4 w-4" />
-                    <span>{tab.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Main Content Sections */}
-            {mainTab === 'events' ? (
-              <div className="space-y-4">
-                <div className="flex gap-1 rounded-xl glass-card p-1" role="tablist">
-                  {tabs.map((tab) => {
-                    const active = eventTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
-                        data-testid={`user-tab-${tab.id}`}
-                        onClick={() => setEventTab(tab.id)}
-                        className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all ${
-                          active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        <tab.icon className="h-3.5 w-3.5" />
-                        {tab.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <EventSection title="Organized" events={events.organized[eventTab]} />
-                <EventSection title="Joined" events={events.joined[eventTab]} />
+          {mainTabs.length > 0 && (
+            <div className="mx-auto max-w-lg px-4 space-y-4">
+              <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
+                {mainTabs.map((tab) => {
+                  const active = activeMainTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      data-testid={`user-main-tab-${tab.id}`}
+                      onClick={() => setMainTab(tab.id)}
+                      className={`flex flex-1 items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-semibold transition-all ${
+                        active
+                          ? 'gradient-primary text-primary-foreground shadow-glow'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                      }`}
+                    >
+                      <tab.icon className="h-4 w-4" />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
               </div>
-            ) : (
-              <div className="space-y-3">
-                {friendsLoading ? (
-                  <div className="flex justify-center py-8">
-                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-primary" />
-                  </div>
-                ) : userFriends.length === 0 ? (
-                  <p className="text-center py-8 text-xs text-muted-foreground">No friends found.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {userFriends.map((f) => {
-                      const label = f.user.username || f.user.display_name || f.user.full_name || 'User';
+
+              {activeMainTab === 'events' && activeEventTab ? (
+                <div className="space-y-4">
+                  <div className="flex gap-1 rounded-xl glass-card p-1" role="tablist">
+                    {eventTabs.map((id) => {
+                      const active = activeEventTab === id;
+                      const Icon = id === 'upcoming' ? Calendar : Clock;
                       return (
-                        <motion.li
-                          key={f.user.id}
-                          layout
-                          initial={{ opacity: 0, y: 6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3 cursor-pointer hover:border-primary/40 transition-all"
-                          onClick={() => navigate(userProfilePath(f.user.id, viewer?.id ?? null))}
+                        <button
+                          key={id}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          data-testid={`user-tab-${id}`}
+                          onClick={() => setEventTab(id)}
+                          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all ${
+                            active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                          }`}
                         >
-                          <UserAvatar src={userAvatarUrl(f.user)} seed={f.user.id} name={label} size="md" />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-semibold text-foreground">@{label}</p>
-                            {f.user.full_name && <p className="truncate text-xs text-muted-foreground">{f.user.full_name}</p>}
-                          </div>
-                        </motion.li>
+                          <Icon className="h-3.5 w-3.5" />
+                          {id === 'upcoming' ? 'Upcoming' : 'Past'}
+                        </button>
                       );
                     })}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
+                  </div>
+
+                  {eventGroups.map(({ title, group }) => {
+                    const list = group[activeEventTab];
+                    return Array.isArray(list) ? <EventSection key={title} title={title} events={list} /> : null;
+                  })}
+                </div>
+              ) : activeMainTab === 'friends' ? (
+                <div className="space-y-3" aria-label="Friends">
+                  {friends.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-muted-foreground">No friends yet.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {friends.map((f) => {
+                        const name = f.full_name || f.display_name || f.username || 'User';
+                        return (
+                          <motion.li
+                            key={f.id}
+                            layout
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3 cursor-pointer hover:border-primary/40 transition-all"
+                            onClick={() => navigate(userProfilePath(f.id, viewer?.id ?? null))}
+                          >
+                            <UserAvatar src={userAvatarUrl(f)} seed={f.id} name={name} size="md" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-semibold text-foreground">{name}</p>
+                              {f.username && (
+                                <p className="truncate text-xs text-muted-foreground">@{f.username}</p>
+                              )}
+                            </div>
+                          </motion.li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {friendsHasMore && (
+                    <button
+                      type="button"
+                      onClick={() => void loadMoreFriends()}
+                      disabled={friendsLoadingMore}
+                      className="w-full rounded-full border border-border bg-secondary py-2 text-xs font-semibold text-foreground hover:bg-secondary/80 disabled:opacity-60"
+                    >
+                      {friendsLoadingMore ? 'Loading…' : 'Load more'}
+                    </button>
+                  )}
+                </div>
+              ) : null}
+            </div>
           )}
         </main>
       )}
+
+      <AlertDialog open={confirmBlock !== null} onOpenChange={(open) => !open && setConfirmBlock(null)}>
+        <AlertDialogContent className="rounded-3xl glass-card border border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmBlock === 'unblock' ? `Unblock ${displayName}?` : `Block ${displayName}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmBlock === 'unblock'
+                ? 'Your previous friendship will not be restored. To be friends again, one of you will need to send a new friend request.'
+                : 'They will no longer be able to see your profile or send you friend requests. Your friendship and any pending friend requests between you will be removed.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-2xl">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmBlock) block.mutate(confirmBlock);
+                setConfirmBlock(null);
+              }}
+              className={`rounded-2xl ${confirmBlock === 'block' ? 'bg-destructive text-destructive-foreground' : ''}`}
+            >
+              {confirmBlock === 'unblock' ? 'Unblock' : 'Block'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <BottomNav />
     </div>
