@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import WarningDialog from '@/components/WarningDialog';
 import { AUTH_TOKEN_EVENT, getAuthToken } from '@/lib/auth';
 import { acknowledgeWarning, fetchPendingWarnings, type UserWarning } from '@/lib/warningsApi';
+import { NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
+import { invalidateNotifications } from '@/lib/queries';
 
 const ACK_ERROR = "We couldn't confirm that you read this warning. Check your connection and try again.";
 
@@ -100,12 +102,17 @@ export default function WarningsGate({ yieldFocus = false }: WarningsGateProps) 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') void load();
     };
+    // A new notification may be a new warning: show it at once. load() still
+    // skips while a warning is showing or a check is in flight.
+    const onNotificationsChanged = () => { void load(); };
 
     window.addEventListener(AUTH_TOKEN_EVENT, onTokenChanged);
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
     return () => {
       window.removeEventListener(AUTH_TOKEN_EVENT, onTokenChanged);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
       abortLoad();
       abortAcknowledge();
     };
@@ -125,6 +132,9 @@ export default function WarningsGate({ yieldFocus = false }: WarningsGateProps) 
     try {
       await acknowledgeWarning(token, current.id, controller.signal);
       if (stale()) return;
+      // Refresh the notification list (the warning is now read). Called while the
+      // warning still counts as showing, so the change event does not re-check here.
+      invalidateNotifications();
       if (index + 1 < queue.length) {
         setIndex(index + 1);
         setSubmitting(false);
