@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Clock, MapPin } from 'lucide-react';
 import type { EventItem } from '@/lib/storage';
 import { getCategoryBanner } from '@/lib/categoryBanners';
+import FriendsAttendingCount from '@/components/FriendsAttendingCount';
 
 function shortWhen(event: EventItem): string {
   const start = (event as EventItem & { start_datetime?: string }).start_datetime;
@@ -35,6 +36,7 @@ export default function InterestEventCard({ event }: { event: EventItem }) {
             {event.category}
           </span>
         )}
+        <FriendsAttendingCount count={event.friendsAttendingCount} className="absolute bottom-1.5 left-1.5" />
       </div>
       <div className="space-y-1 px-2.5 py-2">
         <h3 className="line-clamp-2 text-[12px] font-semibold leading-snug text-foreground">{event.title}</h3>

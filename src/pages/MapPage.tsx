@@ -8,12 +8,12 @@ import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
-import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
+import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
-import { useFriendsGoingEvents } from '@/hooks/useFriendsGoing';
-import { friendsGoingLabel } from '@/lib/eventSocial';
+import { friendsAttendingHtml } from '@/lib/friendsAttendingPopup';
+import { fetchMapEvents } from '@/lib/mapEventsApi';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -116,10 +116,8 @@ export default function MapPage() {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(getApiUrl(`/api/events?${params}`), { headers, signal: controller.signal });
-      if (!res.ok) throw new Error('fetch failed');
-      const body = await res.json();
-      const rows = parseEventsApiList(body);
+      // Through the client-side cache (events list), cleared with the other events lists.
+      const rows = await fetchMapEvents(params, controller.signal);
       const list = rows.map(mapApiEventToItem);
       const local = getLocalEvents().filter((e) => !e.isDraft);
       const byId = new Map<string, EventItem>();
@@ -189,15 +187,6 @@ export default function MapPage() {
       return true;
     });
   }, [rawEvents, category, debouncedFilterDate, selectedCity, debouncedTitle]);
-
-  const { rows: friendsGoingEvents } = useFriendsGoingEvents(filteredEvents, 20);
-  const friendsByEvent = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const row of friendsGoingEvents) {
-      map[row.event.id] = friendsGoingLabel(row.friends);
-    }
-    return map;
-  }, [friendsGoingEvents]);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,7 +279,7 @@ export default function MapPage() {
           <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;line-height:1.3;color:#0f172a">${escapeHtml(event.title)}</h3>
           <p style="margin:0 0 2px;font-size:11px;color:#64748b">${escapeHtml(event.date)} · ${escapeHtml(event.time)}</p>
           <p style="margin:0 0 10px;font-size:11px;color:#64748b">${escapeHtml(event.location || '—')}</p>
-          ${friendsByEvent[event.id] ? `<p style="margin:0 0 10px;font-size:11px;font-weight:600;color:#6d28d9">${escapeHtml(friendsByEvent[event.id])}</p>` : ''}
+          ${friendsAttendingHtml(event.friendsAttendingCount)}
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f8fafc;border-radius:8px">
             ${avatarHtml}
             <div style="min-width:0;line-height:1.2">
@@ -314,7 +303,7 @@ export default function MapPage() {
       map.fitBounds(bounds.pad(0.15), { padding: [36, 36], maxZoom: 14 });
       map.panInsideBounds(WORLD_BOUNDS, { animate: false });
     }
-  }, [filteredEvents, mapReady, organizerProfiles, friendsByEvent]);
+  }, [filteredEvents, mapReady, organizerProfiles]);
 
   useEffect(() => {
     const map = mapInstance.current;
