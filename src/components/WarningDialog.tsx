@@ -12,6 +12,17 @@ const NO_REASON = 'No reason was provided.';
 
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/**
+ * True when `node` is inside a different warning dialog card than `own`.
+ * Two dialogs shown at once leave each other's focus alone instead of
+ * pulling it back and forth.
+ */
+function inOtherWarningDialog(node: unknown, own: HTMLElement | null): boolean {
+  if (!(node instanceof Element)) return false;
+  const host = node.closest('[data-warning-dialog]');
+  return host !== null && host !== own;
+}
+
 interface WarningDialogProps {
   /** The warning to show; null hides the dialog. */
   warning: UserWarning | null;
@@ -80,6 +91,7 @@ export default function WarningDialog({
       if (e.key !== 'Tab' || !blocking || !trapFocus) return;
       const card = cardRef.current;
       if (!card) return;
+      if (inOtherWarningDialog(e.target, card) || inOtherWarningDialog(document.activeElement, card)) return;
       e.preventDefault();
       const items = Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (items.length === 0) {
@@ -101,6 +113,7 @@ export default function WarningDialog({
     if (!open || !blocking || !trapFocus) return;
     const onFocusIn = (e: FocusEvent) => {
       const card = cardRef.current;
+      if (inOtherWarningDialog(e.target, card) || inOtherWarningDialog(document.activeElement, card)) return;
       if (card && e.target instanceof Node && !card.contains(e.target)) {
         (actionRef.current ?? card).focus();
       }
@@ -161,6 +174,7 @@ export default function WarningDialog({
             aria-modal="true"
             aria-labelledby={titleId}
             aria-describedby={reasonId}
+            data-warning-dialog=""
             tabIndex={-1}
             initial={{ scale: 0.9, opacity: 0, y: 16 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
