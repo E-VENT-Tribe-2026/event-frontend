@@ -16,7 +16,8 @@ vi.mock('react-router-dom', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/supabase', () => ({
+vi.mock('@/lib/supabase', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/supabase')>()),
   supabase: null,
   syncSupabaseSession: vi.fn(() => Promise.resolve()),
   clearSupabaseSession: vi.fn(),

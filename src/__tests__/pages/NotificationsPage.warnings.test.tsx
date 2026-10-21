@@ -31,7 +31,11 @@ vi.mock('@/lib/storage', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/storage')>();
   return { ...mod, getCurrentUser: () => ({ id: 'me', name: 'Me', email: 'me@example.com' }), getNotifications: () => [], saveNotifications: () => {} };
 });
-vi.mock('@/lib/auth', () => ({ getAuthToken: () => 'test-token', setAuthToken: () => {} }));
+vi.mock('@/lib/auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/auth')>()),
+  getAuthToken: () => 'test-token',
+  setAuthToken: () => {},
+}));
 vi.mock('@/components/BottomNav', () => ({ default: () => null }));
 
 const ACK_ERROR = "We couldn't confirm that you read this warning. Check your connection and try again.";
