@@ -9,6 +9,7 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { PROFILE_ICONS } from '@/lib/profileAssets';
 import { cachedFetch, invalidatePrefix, TTL } from '@/lib/queryCache';
+import { queryClient } from '@/lib/queryClient';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,10 +26,11 @@ export type UserSummary = {
 
 export type FriendItem = { friend_since: string; user: UserSummary };
 export type FriendRequestItem = { request_id: number; created_at: string; user: UserSummary };
+export type BlockedUserItem = { blocked_at?: string | null; user: UserSummary };
 
 export type Page<T> = { page: number; limit: number; has_more: boolean; data: T[] };
 
-/** Row from GET /api/profile/search (no display_name; full_name is not shown in search). */
+/** Row from GET /api/profile/search; matched on username, shown with the full name. */
 export type UserSearchResult = {
   id: string;
   username: string;
@@ -41,6 +43,7 @@ export type UserSearchResult = {
 export type FriendshipErrorCode =
   | 'cannot_friend_self'
   | 'user_not_found'
+  | 'user_blocked'
   | 'already_friends'
   | 'request_already_sent'
   | 'request_already_received'
@@ -69,6 +72,9 @@ export class FriendsApiError extends Error {
 
 export const FRIENDS_CHANGED_EVENT = 'eventapp:friends-changed';
 
+/** The Friends screen opened on its Requests tab (incoming requests with Accept / Decline). */
+export const FRIEND_REQUESTS_PATH = '/friends?tab=incoming';
+
 /** Path of a user's profile page; one's own account opens the Profile tab. */
 export function userProfilePath(userId: string, currentUserId?: string | null): string {
   return currentUserId && userId === currentUserId ? '/profile' : `/user/${userId}`;
@@ -84,21 +90,33 @@ export function userAvatarUrl(user: Pick<UserSummary, 'avatar_kind' | 'icon_id' 
 /** Turn any backend error body into a sentence the user can read. */
 export function parseFriendsError(status: number, body: unknown): FriendsApiError {
   const detail = (body as { detail?: unknown } | null)?.detail;
+  const fallback =
+    status === 401 ? 'Your session has expired. Please sign in again.'
+    : status === 403 ? 'You cannot send a friend request to this user.'
+    : status === 404 ? 'This user could not be found.'
+    : status === 422 ? 'The request was not valid. Please try again.'
+    : status === 429 ? 'Too many requests. Please wait a moment and try again.'
+    : 'Something went wrong. Please try again.';
 
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
     const d = detail as { code?: unknown; message?: unknown; request_id?: unknown };
-    const message = typeof d.message === 'string' && d.message.trim() ? d.message : 'Something went wrong. Please try again.';
+    const code = typeof d.code === 'string' ? d.code : null;
+    const rawMessage = typeof d.message === 'string' && d.message.trim() ? d.message : null;
+    const message =
+      rawMessage
+      ?? (code === 'user_blocked' ? 'You cannot send a friend request to this user.' : fallback);
     return new FriendsApiError(
       message,
       status,
-      typeof d.code === 'string' ? d.code : null,
+      code,
       typeof d.request_id === 'number' ? d.request_id : null,
     );
   }
   if (typeof detail === 'string' && detail.trim()) return new FriendsApiError(detail, status);
-  if (status === 401) return new FriendsApiError('Your session has expired. Please sign in again.', status);
-  if (status === 422) return new FriendsApiError('The request was not valid. Please try again.', status);
-  return new FriendsApiError('Something went wrong. Please try again.', status);
+  // The rate limiter answers with { error: "Rate limit exceeded: ..." } instead of a detail.
+  const error = (body as { error?: unknown } | null)?.error;
+  if (status === 429 && typeof error === 'string' && error.trim()) return new FriendsApiError(error, status);
+  return new FriendsApiError(fallback, status);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -128,7 +146,14 @@ function friendsKey(path: string): string {
 
 function onMutated(): void {
   invalidatePrefix('/api/friends');
+  invalidatePrefix('/api/blocks');
   invalidatePrefix('/api/profile/search');
+  invalidatePrefix('/api/events');
+  queryClient.invalidateQueries({ queryKey: ['events'] });
+  queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+  queryClient.invalidateQueries({ queryKey: ['event'] });
+  queryClient.invalidateQueries({ queryKey: ['favorites'] });
+  queryClient.invalidateQueries({ queryKey: ['userProfile'] });
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FRIENDS_CHANGED_EVENT));
 }
 
@@ -147,6 +172,11 @@ export function fetchIncomingRequests(page = 1, limit = 20): Promise<Page<Friend
 export function fetchSentRequests(page = 1, limit = 20): Promise<Page<FriendRequestItem>> {
   const path = `/api/friends/requests/sent?page=${page}&limit=${limit}`;
   return cachedFetch(friendsKey(path), () => request<Page<FriendRequestItem>>(path), TTL.SHORT);
+}
+
+export function fetchBlockedUsers(page = 1, limit = 20): Promise<Page<BlockedUserItem>> {
+  const path = `/api/blocks?page=${page}&limit=${limit}`;
+  return cachedFetch(`/api/blocks:${cacheScope()}:${path}`, () => request<Page<BlockedUserItem>>(path), TTL.MEDIUM);
 }
 
 /** Pending incoming requests. Not cached: the badge must be correct on every screen load. */
@@ -202,5 +232,19 @@ export async function cancelFriendRequest(requestId: number): Promise<void> {
 
 export async function removeFriend(friendId: string): Promise<void> {
   await request(`/api/friends/${friendId}`, { method: 'DELETE' });
+  onMutated();
+}
+
+export async function blockUser(userId: string): Promise<BlockedUserItem> {
+  const res = await request<BlockedUserItem>('/api/blocks', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+  onMutated();
+  return res;
+}
+
+export async function unblockUser(userId: string): Promise<void> {
+  await request(`/api/blocks/${encodeURIComponent(userId)}`, { method: 'DELETE' });
   onMutated();
 }

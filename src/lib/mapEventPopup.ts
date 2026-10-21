@@ -1,4 +1,5 @@
 import { sanitizeUrl } from '@/lib/sanitize';
+import { friendsAttendingHtml } from '@/lib/friendsAttendingPopup';
 
 /**
  * Builds the content of the event window shown when an event is selected on the map.
@@ -16,6 +17,8 @@ export interface MapEventPopupData {
   time: string;
   location?: string | null;
   budget: number;
+    /** Number of the viewer's friends who attend (#290). Nothing is shown when 0 or missing. */
+  friendsAttendingCount?: number;
   organizerFullName: string;
   /** Already formatted for display, e.g. "@anna". Omitted when the organizer has no username. */
   organizerUsername?: string | null;
@@ -59,6 +62,16 @@ function buildAvatar(data: MapEventPopupData): HTMLElement[] {
     initialEl.style.display = 'flex';
   });
   return [img, initialEl];
+}
+
+function buildFriendsAttending(count: unknown): Node[] {
+  // friendsAttendingHtml (#290) writes only a whole number into fixed markup (see its tests),
+  // so turning it into nodes cannot inject anything. No user text ever goes through here.
+  const html = friendsAttendingHtml(count as number | undefined);
+  if (!html) return [];
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  return Array.from(template.content.childNodes);
 }
 
 function buildCostBadge(budget: unknown): HTMLElement {
@@ -113,6 +126,6 @@ export function buildMapEventPopup(data: MapEventPopupData): HTMLElement {
   // dataset sets the attribute value directly; it is never parsed as HTML.
   button.dataset.mapEventId = asText(data.id);
 
-  root.append(title, when, location, organizerRow, button);
+  root.append(title, when, location, ...buildFriendsAttending(data.friendsAttendingCount), organizerRow, button);
   return root;
 }

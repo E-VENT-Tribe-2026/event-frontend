@@ -81,4 +81,25 @@ describe('buildMapEventPopup', () => {
     expect(popup.textContent).toContain('€12');
     expect(popup.querySelectorAll('p')).toHaveLength(3); // date, location, organizer name
   });
+
+    it('shows the friends attending count (#290) and nothing when none attend', () => {
+    const popup = buildMapEventPopup({ ...base, friendsAttendingCount: 3 });
+    const count = popup.querySelector('[data-testid="friends-attending-count"]');
+    expect(count?.textContent).toBe('3');
+    expect(count?.getAttribute('aria-label')).toBe('3 friends attending');
+
+    for (const none of [0, undefined]) {
+      const empty = buildMapEventPopup({ ...base, friendsAttendingCount: none });
+      expect(empty.querySelector('[data-testid="friends-attending-count"]')).toBeNull();
+    }
+  });
+
+  it('never writes anything but a whole number as the friends count', () => {
+    const popup = buildMapEventPopup({
+      ...base,
+      friendsAttendingCount: '<img src=x onerror=alert(1)>' as unknown as number,
+    });
+    expect(popup.querySelector('[data-testid="friends-attending-count"]')).toBeNull();
+    expectNoInjectedMarkup(popup);
+  });
 });

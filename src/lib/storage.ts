@@ -1,6 +1,6 @@
 // In-memory "database" helpers (no localStorage)
 
-export type UserRole = 'participant' | 'organizer';
+export type UserRole = 'participant' | 'organizer' | 'administrator';
 
 export interface User {
   id: string;
@@ -66,6 +66,8 @@ export interface EventItem {
   organizerFullName?: string;
   status?: string;
   isCancelled?: boolean;
+  /** How many of the signed-in user's friends attend this event (0 when unknown). */
+  friendsAttendingCount?: number;
   isPrivate: boolean;
   isDraft: boolean;
   requiresApproval: boolean;

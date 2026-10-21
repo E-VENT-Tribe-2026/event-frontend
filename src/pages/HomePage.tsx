@@ -5,6 +5,7 @@ import { ALL_INTERESTS } from '@/lib/interests';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import EventCard from '@/components/EventCard';
+import InterestEventCard from '@/components/InterestEventCard';
 import AppToast from '@/components/AppToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
@@ -16,7 +17,9 @@ import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidate, invalidatePrefix, cachedFetch, TTL } from '@/lib/queryCache';
-import { userProfilePath } from '@/lib/friendsApi';
+import { parseFriendsError, userProfilePath } from '@/lib/friendsApi';
+import FriendsGoing from '@/components/FriendsGoing';
+import { useFriendsGoingEvents } from '@/hooks/useFriendsGoing';
 
 const EMPTY_EVENTS: EventItem[] = [];
 const EMPTY_SET = new Set<string>();
@@ -34,7 +37,7 @@ type SuggestedUser = {
   avatar_url?: string | null;
 };
 
-const FRIEND_LIST_PATHS = ['/api/friends'];
+const FRIEND_LIST_PATHS = ['/api/friends', '/api/blocks'];
 const REQUEST_PATHS = ['/api/friends/requests/sent', '/api/friends/requests/incoming'];
 
 const INTEREST_EMOJI: Record<string, string> = {
@@ -106,12 +109,20 @@ async function fetchExcludedIds(token: string, selfId: string | undefined): Prom
 }
 
 function SectionHeader({
-  icon: Icon, title, badge, collapsed, onToggle,
-}: { icon: LucideIcon; title: string; badge?: string; collapsed?: boolean; onToggle?: () => void }) {
+  icon: Icon, title, badge, collapsed, onToggle, iconClassName, iconWrapClassName,
+}: {
+  icon: LucideIcon;
+  title: string;
+  badge?: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
+  iconClassName?: string;
+  iconWrapClassName?: string;
+}) {
   return (
     <button type="button" onClick={onToggle} className="flex w-full items-center gap-2.5 pt-5 pb-3 group">
-      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 group-hover:bg-primary/25 transition-colors shrink-0 shadow-sm">
-        <Icon className="h-4 w-4 text-primary" />
+      <div className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors shrink-0 shadow-sm ${iconWrapClassName || 'bg-primary/15 group-hover:bg-primary/25'}`}>
+        <Icon className={`h-4 w-4 ${iconClassName || 'text-primary'}`} />
       </div>
       <h2 className="text-base font-bold text-foreground tracking-tight">{title}</h2>
       {badge && <span className="ml-1.5 rounded-full gradient-primary px-2.5 py-0.5 text-[10px] font-bold text-primary-foreground shadow-glow">{badge}</span>}
@@ -237,8 +248,8 @@ export default function HomePage() {
         body: JSON.stringify({ receiver_id: receiverId }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to send friend request');
+        const err = await res.json().catch(() => null);
+        throw parseFriendsError(res.status, err);
       }
       setToast({ show: true, message: 'Friend request sent', type: 'success' });
       setSuggestedUsers((prev) => prev.filter((p) => p.id !== receiverId));
@@ -388,11 +399,14 @@ export default function HomePage() {
     setVisibleAll(PAGE);
   }, [budgetMin, budgetMax, category, debouncedDate, selectedCity, debouncedSearch]);
 
-  // ---------- Derived data ----------
   const events = useMemo(() => {
     const local = getLocalEvents().filter((e) => !e.isDraft);
     const byId = new Map<string, EventItem>();
-    [...apiEvents, ...local].filter(isEventUpcoming).forEach((e) => byId.set(e.id, e));
+    // API rows win over localStorage so realtime refreshes are not clobbered.
+    for (const e of [...local, ...apiEvents]) {
+      if (!isEventUpcoming(e) || String(e.status || '').toLowerCase() === 'cancelled') continue;
+      byId.set(e.id, e);
+    }
     return Array.from(byId.values());
   }, [apiEvents]);
 
@@ -408,17 +422,18 @@ export default function HomePage() {
   }, [myEventsData, joinedEventsData]);
 
   const applyFilters = useCallback(
-    (list: EventItem[]) =>
-      list.filter((e) => {
-        if (!isEventUpcoming(e)) return false;
-        if (e.budget < budgetMin || e.budget > budgetMax) return false;
-        if (category !== 'All' && e.category !== category) return false;
-        if (debouncedDate && e.date !== debouncedDate) return false;
-        if (selectedCity && extractCityFromLocation(e.location || '') !== selectedCity) return false;
-        return true;
-      }),
-    [budgetMin, budgetMax, category, debouncedDate, selectedCity],
-  );
+  (list: EventItem[]) =>
+    list.filter((e) => {
+      if (!isEventUpcoming(e)) return false;
+      if (String(e.status || '').toLowerCase() === 'cancelled') return false;
+      if (e.budget < budgetMin || e.budget > budgetMax) return false;
+      if (category !== 'All' && e.category !== category) return false;
+      if (debouncedDate && e.date !== debouncedDate) return false;
+      if (selectedCity && extractCityFromLocation(e.location || '') !== selectedCity) return false;
+      return true;
+    }),
+  [budgetMin, budgetMax, category, debouncedDate, selectedCity],
+);
 
   const filtered = useMemo(() => applyFilters(events), [events, applyFilters]);
   const filteredRecommendations = useMemo(
@@ -426,13 +441,21 @@ export default function HomePage() {
     [interestRecommendations, applyFilters],
   );
 
-  const friendActivity = useMemo(() => {
-    const firstEvent = events[0];
-    if (!user?.friends?.length || !firstEvent) return [];
-    return user.friends
-      .slice(0, 4)
-      .map((fId) => ({ friend: { id: fId, name: 'Friend', profilePhoto: '', avatar: '' }, event: firstEvent }));
-  }, [user, events]);
+  const tonightEvents = useMemo(() => {
+    const byId = new Map<string, EventItem>();
+    for (const event of [...events, ...interestRecommendations]) {
+      if (!isEventUpcoming(event) || String(event.status || '').toLowerCase() === 'cancelled') continue;
+      byId.set(event.id, event);
+    }
+    return Array.from(byId.values())
+      .sort((a, b) => eventStartMs(a) - eventStartMs(b))
+      .slice(0, 24);
+  }, [events, interestRecommendations]);
+  const {
+    rows: friendsGoingEvents,
+    loading: friendsGoingLoading,
+    friendCount,
+  } = useFriendsGoingEvents(user ? tonightEvents : EMPTY_EVENTS);
 
   const handleJoin = (id: string) => {
     if (!user) { navigate('/login'); return; }
@@ -635,18 +658,45 @@ export default function HomePage() {
 
           {/* Right Main Area */}
           <div className="space-y-6 min-w-0">
-            {/* Friend Activity */}
-            {friendActivity.length > 0 && (
+            {user && (
               <div className="space-y-1">
-                <SectionHeader icon={Users} title="Friend activity" collapsed={!!collapsed['friends']} onToggle={() => toggleSection('friends')} />
+                <SectionHeader
+                  icon={Users}
+                  title="Tonight with friends"
+                  collapsed={!!collapsed['friends']}
+                  onToggle={() => toggleSection('friends')}
+                  iconClassName="text-orange-500"
+                  iconWrapClassName="bg-orange-500/15 group-hover:bg-orange-500/25"
+                />
                 {!collapsed['friends'] && (
-                  <div className="space-y-3 rounded-2xl glass-card p-4">
-                    {friendActivity.map((item, i) => (
-                      <div key={i} className="flex items-center gap-3">
-                        <UserAvatar src={item.friend.avatar || item.friend.profilePhoto} seed={item.friend.id} name={item.friend.name} size="sm" />
-                        <p className="text-xs text-foreground"><span className="font-semibold">{item.friend.name}</span> joined <span className="font-medium text-primary">{item.event.title}</span></p>
+                  <div className="space-y-2.5 rounded-2xl glass-card p-4">
+                    {friendsGoingLoading && friendsGoingEvents.length === 0 ? (
+                      <div className="space-y-2" aria-busy="true">
+                        <span className="sr-only">Looking for events your friends joined</span>
+                        {Array.from({ length: 2 }).map((_, i) => (
+                          <div key={i} className="h-16 rounded-xl shimmer" />
+                        ))}
                       </div>
-                    ))}
+                    ) : friendsGoingEvents.length > 0 ? (
+                      friendsGoingEvents.map((item) => (
+                        <button
+                          key={item.event.id}
+                          type="button"
+                          onClick={() => navigate(`/event/${item.event.id}`, { state: { event: item.event } })}
+                          className="w-full rounded-xl bg-secondary/40 px-3 py-2.5 text-left transition-colors hover:bg-secondary/70"
+                        >
+                          <p className="text-sm font-semibold text-foreground truncate">{item.event.title}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{item.event.date} · {item.event.time}</p>
+                          <FriendsGoing friends={item.friends} compact />
+                        </button>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground text-center py-2">
+                        {friendCount === 0
+                          ? 'Add friends to see the events they join.'
+                          : 'None of your friends have joined an upcoming event yet.'}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -655,19 +705,24 @@ export default function HomePage() {
             {/* Interest-Based Discovery */}
             {user && (
               <div className="space-y-2">
-                <SectionHeader icon={Sparkles} title="Based on your interests" />
+                <SectionHeader
+                  icon={Sparkles}
+                  title="Based on your interests"
+                  iconClassName="text-pink-400"
+                  iconWrapClassName="bg-pink-400/15 group-hover:bg-pink-400/25"
+                />
                 {user.interests?.length ? (
                   recsInitialLoading ? (
-                    <div className="flex gap-4 overflow-hidden pt-1">
-                      {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="w-[260px] sm:w-[280px] h-44 animate-pulse rounded-2xl glass-card shrink-0" />
+                    <div className="flex gap-2.5 overflow-hidden pt-1">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <div key={i} className="h-[156px] w-[168px] shrink-0 animate-pulse rounded-xl border border-border/40 bg-secondary/40" />
                       ))}
                     </div>
                   ) : filteredRecommendations.length > 0 ? (
-                    <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x custom-scrollbar">
+                    <div className="flex gap-2.5 overflow-x-auto pb-3 pt-1 snap-x custom-scrollbar">
                       {filteredRecommendations.map((event) => (
-                        <div key={event.id} className="w-[260px] sm:w-[280px] shrink-0 snap-start scale-[0.95] origin-top-left">
-                          <EventCard event={event} onJoin={handleJoin} isFavorite={favoriteIds.has(event.id)} />
+                        <div key={event.id} className="snap-start">
+                          <InterestEventCard event={event} />
                         </div>
                       ))}
                     </div>

@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { type EventItem, getCurrentUser } from '@/lib/storage';
-import { MapPin, Clock, Users, UserCheck, Heart } from 'lucide-react';
+import { MapPin, Clock, Users, Heart } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { useParticipantCount, invalidateFavorites } from '@/lib/queries';
+import FriendsAttendingCount from '@/components/FriendsAttendingCount';
 
 interface EventCardProps {
   event: EventItem;
   onJoin?: (id: string) => void;
+  /** @deprecated No longer used: the friends number comes from event.friendsAttendingCount. */
   showFriendBadge?: boolean;
   isFavorite?: boolean; 
 }
@@ -30,7 +32,7 @@ const formatEventDateTime = (startStr?: string, fallbackDate?: string, fallbackT
   }
 };
 
-export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: initialIsFavorite = false }: EventCardProps) {
+export default function EventCard({ event, onJoin, isFavorite: initialIsFavorite = false }: EventCardProps) {
   const navigate = useNavigate();
   const user = getCurrentUser();
   const isAlreadyJoined = Boolean(user && event.participants?.includes(user.id));
@@ -89,7 +91,6 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     return () => { cancelled = true; };
   }, [event.organizerId, (event as any).created_by]);
 
-  const friendJoined = user?.isPremium && user?.friends?.some(fId => event.participants?.includes(fId));
 
   const handleFavorite = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -175,11 +176,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
         ) : (
           <div className="absolute top-2 left-2 rounded-full bg-secondary/90 px-3 py-1 text-xs font-semibold text-secondary-foreground backdrop-blur-sm">€{event.budget}</div>
         )}
-        {(showFriendBadge || friendJoined) && (
-          <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-accent/90 px-2.5 py-1 text-[10px] font-semibold text-accent-foreground backdrop-blur-sm">
-            <UserCheck className="h-3 w-3" /> Friend joined
-          </div>
-        )}
+        <FriendsAttendingCount count={event.friendsAttendingCount} className="absolute bottom-2 left-2" />
       </div>
 
       <div className="p-4 space-y-2">

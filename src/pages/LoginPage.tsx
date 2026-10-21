@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
-import { supabase } from '@/lib/supabase';
+import { supabase, syncSupabaseSession } from '@/lib/supabase';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
@@ -61,12 +61,7 @@ export default function LoginPage() {
       }
 
       setAuthToken(accessToken);
-      if (supabase && refreshToken) {
-        await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-      }
+      await syncSupabaseSession(accessToken, refreshToken);
 
       // An administrator whose current sign-in isn't verified
       // yet goes straight to the verification step — before any profile
@@ -117,9 +112,10 @@ export default function LoginPage() {
         avatar: avatarUrl,
         bio,
         interests,
+        role: typeof authStatus.role === 'string' ? authStatus.role : undefined,
       });
       setPassword('');
-      navigate(destinationAfterSignIn(username));
+      navigate(destinationAfterSignIn(username, typeof authStatus.role === 'string' ? authStatus.role : null));
     } catch {
       setToast({ show: true, message: 'Connection failed', type: 'error' });
       setIsSubmitting(false);

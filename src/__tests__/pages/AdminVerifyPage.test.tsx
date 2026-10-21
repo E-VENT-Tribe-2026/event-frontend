@@ -10,7 +10,11 @@ vi.mock('react-router-dom', async (importOriginal) => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
+vi.mock('@/lib/supabase', () => ({
+  supabase: null,
+  syncSupabaseSession: vi.fn(() => Promise.resolve()),
+  clearSupabaseSession: vi.fn(),
+}));
 
 function renderPage() {
   render(
@@ -106,7 +110,7 @@ describe('AdminVerifyPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /verify and continue/i }));
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith('/admin', { replace: true });
     });
     expect(getPendingAdminVerification()).toBeNull();
   });

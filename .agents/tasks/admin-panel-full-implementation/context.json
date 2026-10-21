@@ -1,0 +1,23 @@
+{
+  "project_type": "React 18 + TypeScript SPA, Vite build, Tailwind CSS + shadcn/ui",
+  "language": "TypeScript (strict)",
+  "build_system": "Vite 5, path alias @/ → src/. No monorepo, single package.json.",
+  "test_framework": "Vitest 3 + @testing-library/react. Tests live under src/__tests__/.",
+  "build_command": "npm run build",
+  "test_command": "npm test",
+  "verification_instructions": "1. Run npm test. 2. Run npm run build.",
+  "snapshot_or_generated_files": null,
+  "environment_constraints": "Windows PowerShell. Never push to git.",
+  "contribution_requirements": "TypeScript strict, no any. All moderation actions use AlertDialog.",
+  "key_patterns": "Cards: rounded-2xl border border-border bg-card p-5 shadow-sm. Loading: Loader2 animate-spin. Pills: admin=bg-primary/20 text-primary, suspended=bg-red-500/15 text-red-400. AlertDialog for confirms. AppToast for messages.",
+  "relevant_files": [
+    "src/lib/adminApi.ts",
+    "src/lib/apiUrls.ts",
+    "src/lib/auth.ts",
+    "src/lib/storage.ts",
+    "src/pages/AdminPanelPage.tsx",
+    "src/components/RequireUsername.tsx",
+    "src/components/admin/AdminUsersTab.tsx"
+  ],
+  "directory_structure": "src/pages/ src/components/admin/ src/components/ui/ src/lib/ src/hooks/ src/__tests__/"
+}

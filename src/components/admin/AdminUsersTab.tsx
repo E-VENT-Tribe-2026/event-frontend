@@ -1,234 +1,343 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { Search, Users, ShieldCheck, UserCheck, Loader2, X, ChevronRight } from 'lucide-react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import {
+  Search,
+  Users,
+  Loader2,
+  X,
+  ChevronRight,
+  AlertTriangle,
+  ShieldCheck,
+  Shield,
+  Ban,
+  Star,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UserAvatar } from '@/components/UserAvatar';
-import AdminUserDetailsModal from './AdminUserDetailsModal';
-import {
-  fetchAdminCounts,
-  fetchAdminUsers,
-  type AdminUserSummary,
-} from '@/lib/adminApi';
+import { fetchAdminUsers, type AdminUserSummary } from '@/lib/adminApi';
+
+type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings' | 'pro';
+
+type UserRow = AdminUserSummary & {
+  is_suspended?: boolean;
+  warnings_count?: number;
+  is_pro?: boolean;
+};
 
 interface AdminUsersTabProps {
+  onOpenUser: (userId: string) => void;
   onErrorToast: (msg: string) => void;
-  onSuccessToast: (msg: string) => void;
 }
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 350;
 
-export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUsersTabProps) {
-  // Counts
-  const [totalUsers, setTotalUsers] = useState<number | null>(null);
-  const [loadingCounts, setLoadingCounts] = useState<boolean>(true);
+const FILTER_LABELS: Record<FilterChip, string> = {
+  all: 'All',
+  administrators: 'Administrators',
+  suspended: 'Suspended',
+  with_warnings: 'With warnings',
+  pro: 'Pro',
+};
 
-  // Users list & search
-  const [users, setUsers] = useState<AdminUserSummary[]>([]);
+const FILTER_ICONS: Partial<Record<FilterChip, typeof Shield>> = {
+  administrators: Shield,
+  suspended: Ban,
+  with_warnings: AlertTriangle,
+  pro: Star,
+};
+
+const isAdminUser = (u: UserRow) => (u.role ?? '').toLowerCase().includes('admin');
+const isSuspendedUser = (u: UserRow) => Boolean(u.is_suspended);
+const hasWarnings = (u: UserRow) => (u.warnings_count ?? 0) > 0;
+const isProUser = (u: UserRow) => Boolean(u.is_pro);
+
+const FILTER_PREDICATES: Record<FilterChip, (u: UserRow) => boolean> = {
+  all: () => true,
+  administrators: isAdminUser,
+  suspended: isSuspendedUser,
+  with_warnings: hasWarnings,
+  pro: isProUser,
+};
+
+export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTabProps) {
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
+  const [allFetchedUsers, setAllFetchedUsers] = useState<UserRow[]>([]);
   const [page, setPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [searchInput, setSearchInput] = useState<string>('');
   const [activeSearch, setActiveSearch] = useState<string>('');
-
-  // Selected user for details modal
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const [activeFilter, setActiveFilter] = useState<FilterChip>('all');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countsFetchedRef = useRef<boolean>(false);
+  const requestIdRef = useRef(0);
+  // Search query for which every page is already loaded (null = not fully loaded)
+  const fullyLoadedRef = useRef<string | null>(null);
+  const onErrorToastRef = useRef(onErrorToast);
+  onErrorToastRef.current = onErrorToast;
 
-  // Load counts on mount
-  useEffect(() => {
-    let cancelled = false;
-    fetchAdminCounts()
-      .then((data) => {
-        if (!cancelled && typeof data.total_users === 'number') {
-          countsFetchedRef.current = true;
-          setTotalUsers(data.total_users);
-        }
-      })
-      .catch(() => {
-        // Fallback or non-blocking
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingCounts(false);
-      });
+  // Filtering is derived from the loaded data, so switching chips is instant once loaded
+  const users = useMemo(
+    () => allFetchedUsers.filter(FILTER_PREDICATES[activeFilter]),
+    [allFetchedUsers, activeFilter],
+  );
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Fetch users list
   const loadUsers = useCallback(
-    async (targetPage: number, query: string, append = false) => {
-      if (append) {
+    async (
+      targetPage: number,
+      query: string,
+      opts: { append?: boolean; loadAll?: boolean } = {},
+    ) => {
+      const reqId = ++requestIdRef.current;
+      if (opts.append) {
         setLoadingMore(true);
       } else {
         setLoadingUsers(true);
+        setLoadingMore(false);
       }
 
       try {
-        const res = await fetchAdminUsers(targetPage, PAGE_SIZE, query);
-        setUsers((prev) => (append ? [...prev, ...res.items] : res.items));
-        setPage(res.page);
-        setTotalPages(res.total_pages);
-        // Fallback to res.total only if counts endpoint did not supply total_users
-        if (!countsFetchedRef.current && !query.trim()) {
-          setTotalUsers((prev) => (prev !== null ? prev : res.total));
+        let current = targetPage;
+        let items: UserRow[] = [];
+        let last;
+
+        // Fetch one page, or every remaining page when loadAll is set
+        while (true) {
+          const res = await fetchAdminUsers(current, PAGE_SIZE, query.trim() || undefined);
+          if (reqId !== requestIdRef.current) return;
+          items = items.concat(res.items as UserRow[]);
+          last = res;
+          if (!opts.loadAll || res.page >= res.total_pages) break;
+          current = res.page + 1;
+        }
+
+        setAllFetchedUsers((prev) => {
+          const combined = opts.append ? [...prev, ...items] : items;
+          return Array.from(new Map(combined.map((u) => [u.id, u])).values());
+        });
+
+        setPage(last.page);
+        setTotalPages(last.total_pages);
+        fullyLoadedRef.current = last.page >= last.total_pages ? query.trim() : null;
+
+        if (!query.trim() && last.total !== undefined) {
+          setTotalUsers(last.total);
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to fetch users';
-        onErrorToast(msg);
+        if (reqId !== requestIdRef.current) return;
+        onErrorToastRef.current(err instanceof Error ? err.message : 'Failed to fetch users');
       } finally {
-        setLoadingUsers(false);
-        setLoadingMore(false);
+        if (reqId === requestIdRef.current) {
+          setLoadingUsers(false);
+          setLoadingMore(false);
+        }
       }
     },
-    [onErrorToast],
+    [],
   );
 
-  // Initial load
+  // Runs on mount and whenever the search or filter changes
   useEffect(() => {
-    void loadUsers(1, '');
-  }, [loadUsers]);
+    if (fullyLoadedRef.current === activeSearch) return; // everything already in memory
+    void loadUsers(1, activeSearch, { loadAll: activeFilter !== 'all' });
+  }, [activeSearch, activeFilter, loadUsers]);
 
-  // Handle debounced search input change
   const handleSearchChange = (value: string) => {
     setSearchInput(value);
-
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    debounceTimerRef.current = setTimeout(() => {
-      const trimmed = value.trim();
-      setActiveSearch(trimmed);
-      void loadUsers(1, trimmed, false);
-    }, SEARCH_DEBOUNCE_MS);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(
+      () => setActiveSearch(value.trim()),
+      SEARCH_DEBOUNCE_MS,
+    );
   };
 
   const handleClearSearch = () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     setSearchInput('');
     setActiveSearch('');
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    void loadUsers(1, '', false);
   };
 
   const handleLoadMore = () => {
     if (page < totalPages && !loadingMore) {
-      void loadUsers(page + 1, activeSearch, true);
+      void loadUsers(page + 1, activeSearch, { append: true });
     }
   };
 
-  const handleOpenUser = (userId: string) => {
-    setSelectedUserId(userId);
-    setModalOpen(true);
-  };
-
-  const handleRoleGranted = (updatedUserId: string) => {
-    // Update role in list dynamically without page reload
-    setUsers((prev) =>
-      prev.map((u) => (u.id === updatedUserId ? { ...u, role: 'administrator' } : u)),
-    );
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Total Registered Users Card */}
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      {/* Registered users card */}
+      <div
+        className="rounded-[18px] border p-4 sm:p-5"
+        style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+      >
+        <div className="flex items-center gap-4">
+          <div
+            className="flex h-12 w-12 items-center justify-center rounded-xl"
+            style={{ background: 'hsl(210 80% 50% / .18)', color: 'hsl(210 90% 60%)' }}
+          >
+            <Users className="h-5 w-5" />
+          </div>
           <div>
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Total Registered Users
-            </p>
-            <h2 className="mt-1.5 text-3xl font-extrabold text-foreground">
-              {loadingCounts && totalUsers === null ? (
-                <span className="inline-block h-8 w-16 animate-pulse rounded bg-secondary" />
+            <h2
+              className="text-2xl font-bold leading-none tracking-tight"
+              style={{ color: 'var(--adm-fg)' }}
+            >
+              {totalUsers === null ? (
+                <span
+                  className="inline-block h-6 w-10 animate-pulse rounded"
+                  style={{ background: 'var(--adm-secondary)' }}
+                />
               ) : (
-                (totalUsers ?? users.length).toLocaleString()
+                totalUsers.toLocaleString()
               )}
             </h2>
-          </div>
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Users className="h-6 w-6" />
+            <p className="mt-1 text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              Registered users
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Search Input */}
+      {/* Filter chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        {(Object.keys(FILTER_LABELS) as FilterChip[]).map((chip) => {
+          const isActive = activeFilter === chip;
+          const Icon = FILTER_ICONS[chip];
+          return (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => setActiveFilter(chip)}
+              aria-pressed={isActive}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all"
+              style={
+                isActive
+                  ? {
+                      background: 'hsl(271 76% 53%)',
+                      borderColor: 'hsl(271 76% 53%)',
+                      color: 'white',
+                      boxShadow: '0 0 14px hsl(271 76% 53% / .45)',
+                    }
+                  : {
+                      background: 'var(--adm-card)',
+                      borderColor: 'var(--adm-border)',
+                      color: 'var(--adm-fg)',
+                    }
+              }
+            >
+              {Icon && <Icon className="h-3.5 w-3.5" />}
+              <span>{FILTER_LABELS[chip]}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Search */}
       <div className="relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Search
+          className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
+          style={{ color: 'var(--adm-muted-fg)' }}
+        />
         <input
           type="text"
           value={searchInput}
           onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder="Search users by username..."
-          aria-label="Search users by username"
-          className="w-full rounded-xl bg-secondary pl-10 pr-10 py-3 text-sm text-foreground outline-none border border-border/50 focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-colors"
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          placeholder="Search by username..."
+          aria-label="Search by username"
+          className="w-full rounded-[14px] border pl-11 pr-10 text-sm outline-none transition-colors"
+          style={{
+            background: 'var(--adm-card)',
+            borderColor: searchFocused ? 'hsl(271 76% 53% / .7)' : 'var(--adm-border)',
+            boxShadow: searchFocused ? '0 0 0 3px hsl(271 76% 53% / .15)' : 'none',
+            color: 'var(--adm-fg)',
+            height: 44,
+          }}
         />
         {searchInput && (
           <button
             type="button"
             onClick={handleClearSearch}
             aria-label="Clear search"
-            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:text-foreground"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1"
+            style={{ color: 'var(--adm-muted-fg)' }}
           >
             <X className="h-4 w-4" />
           </button>
         )}
       </div>
 
-      {/* User List Section */}
+      {/* List */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            {activeSearch ? `Search Results for "${activeSearch}"` : 'Registered Users'}
+          <p
+            className="text-[11px] font-medium uppercase tracking-wider"
+            style={{ color: 'var(--adm-muted-fg)' }}
+          >
+            User
           </p>
-          <span className="text-xs text-muted-foreground">
-            {users.length} {users.length === 1 ? 'user' : 'users'}
+          <span className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+            Role · warnings · status
           </span>
         </div>
 
         {loadingUsers ? (
-          <div className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border border-border/50 bg-card">
-            <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            <p className="text-xs text-muted-foreground">Loading users...</p>
+          <div
+            className="flex flex-col items-center justify-center space-y-3 rounded-2xl border py-16"
+            style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+          >
+            <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--adm-primary)' }} />
+            <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              Loading users...
+            </p>
           </div>
         ) : users.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-14 text-center rounded-2xl border border-dashed border-border bg-card/50 p-6 space-y-2">
-            <Users className="h-10 w-10 text-muted-foreground/50" />
-            <p className="text-sm font-medium text-foreground">No users found</p>
-            <p className="text-xs text-muted-foreground max-w-xs">
+          <div
+            className="flex flex-col items-center justify-center space-y-2 rounded-2xl border border-dashed p-6 py-14 text-center"
+            style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+          >
+            <Users className="h-10 w-10 opacity-50" style={{ color: 'var(--adm-muted-fg)' }} />
+            <p className="text-sm font-medium" style={{ color: 'var(--adm-fg)' }}>
+              No users found
+            </p>
+            <p className="max-w-xs text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
               {activeSearch
                 ? `No user accounts matched "${activeSearch}". Try another search term.`
-                : 'There are no registered accounts in the system yet.'}
+                : 'No users match this filter.'}
             </p>
           </div>
         ) : (
           <ul className="space-y-2">
             {users.map((u) => {
-              const isAdmin = u.role === 'administrator';
+              const isAdmin = isAdminUser(u);
+              const suspended = isSuspendedUser(u);
+              const warnings = u.warnings_count ?? 0;
               const hasUsername = Boolean(u.username && u.username.trim());
+              const isHovered = hoveredRow === u.id;
 
               return (
                 <motion.li
                   key={u.id}
-                  layout
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="group relative"
                 >
                   <button
                     type="button"
-                    onClick={() => handleOpenUser(u.id)}
+                    onClick={() => onOpenUser(u.id)}
+                    onMouseEnter={() => setHoveredRow(u.id)}
+                    onMouseLeave={() => setHoveredRow(null)}
                     aria-label={`View details for ${u.full_name}`}
-                    className="w-full flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card p-3.5 text-left transition-all hover:bg-secondary/40 hover:border-primary/40 active:scale-[0.99]"
+                    className="flex w-full items-center justify-between gap-3 rounded-[14px] border px-4 py-3.5 text-left transition-all active:scale-[0.99]"
+                    style={{
+                      background: isHovered ? 'hsl(213 50% 17%)' : 'var(--adm-card)',
+                      borderColor: isHovered ? 'hsl(271 76% 53% / .55)' : 'var(--adm-border)',
+                    }}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex min-w-0 items-center gap-3.5">
                       <UserAvatar
                         src={u.avatar_url}
                         srcSecondary={u.avatar_url}
@@ -237,27 +346,104 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
                         size="md"
                       />
                       <div className="min-w-0">
-                        {/* If no username, appear with full name alone */}
-                        <p className="text-sm font-semibold text-foreground truncate">{u.full_name}</p>
+                        <p
+                          className="truncate text-sm font-semibold"
+                          style={{ color: 'var(--adm-fg)' }}
+                        >
+                          {u.full_name}
+                        </p>
                         {hasUsername && (
-                          <p className="text-xs text-muted-foreground truncate">@{u.username}</p>
+                          <p
+                            className="truncate text-xs"
+                            style={{ color: 'var(--adm-muted-fg)' }}
+                          >
+                            @{u.username}
+                          </p>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2.5 shrink-0">
+                    <div className="flex shrink-0 items-center gap-2">
+                      {isProUser(u) && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
+                          style={{
+                            background: 'hsl(45 93% 50% / .15)',
+                            color: 'hsl(45 93% 60%)',
+                            borderColor: 'hsl(45 93% 50% / .35)',
+                          }}
+                        >
+                          <Star className="h-3 w-3" />
+                          Pro
+                        </span>
+                      )}
+
+                      {warnings > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
+                          style={{
+                            background: 'hsl(38 92% 52% / .15)',
+                            color: 'var(--adm-warn-text)',
+                            borderColor: 'hsl(38 92% 52% / .35)',
+                          }}
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          {warnings}
+                        </span>
+                      )}
+
+                      <span
+                        className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                        style={
+                          suspended
+                            ? {
+                                background: 'hsl(0 72% 51% / .15)',
+                                color: 'hsl(0 85% 70%)',
+                                borderColor: 'hsl(0 72% 51% / .4)',
+                              }
+                            : {
+                                background: 'hsl(142 70% 45% / .15)',
+                                color: 'hsl(142 70% 60%)',
+                                borderColor: 'hsl(142 70% 45% / .35)',
+                              }
+                        }
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ background: suspended ? 'hsl(0 85% 70%)' : 'hsl(142 70% 60%)' }}
+                        />
+                        {suspended ? 'Suspended' : 'Active'}
+                      </span>
+
                       {isAdmin ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                          style={{
+                            background: 'hsl(271 76% 53% / .18)',
+                            color: 'var(--adm-primary-text)',
+                            borderColor: 'hsl(271 76% 53% / .4)',
+                          }}
+                        >
                           <ShieldCheck className="h-3 w-3" />
                           Admin
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                          <UserCheck className="h-3 w-3" />
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium"
+                          style={{
+                            background: 'var(--adm-secondary)',
+                            borderColor: 'var(--adm-border)',
+                            color: 'hsl(213 20% 78%)',
+                          }}
+                        >
                           User
                         </span>
                       )}
-                      <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+
+                      <ChevronRight
+                        className="h-4 w-4 transition-colors"
+                        style={{ color: isHovered ? 'var(--adm-fg)' : 'var(--adm-muted-fg)' }}
+                      />
                     </div>
                   </button>
                 </motion.li>
@@ -266,14 +452,19 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
           </ul>
         )}
 
-        {/* Load More Button */}
-        {page < totalPages && !loadingUsers && (
-          <div className="pt-2 text-center">
+        {/* Load more (only for "All"; other filters load everything up front) */}
+        {activeFilter === 'all' && page < totalPages && !loadingUsers && (
+          <div className="pt-1 text-center">
             <button
               type="button"
               disabled={loadingMore}
               onClick={handleLoadMore}
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-secondary px-5 py-2.5 text-xs font-semibold text-foreground hover:bg-secondary/80 active:scale-95 transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-xl border px-5 py-2.5 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
+              style={{
+                borderColor: 'var(--adm-border)',
+                background: 'var(--adm-secondary)',
+                color: 'var(--adm-fg)',
+              }}
             >
               {loadingMore ? (
                 <>
@@ -287,19 +478,6 @@ export default function AdminUsersTab({ onErrorToast, onSuccessToast }: AdminUse
           </div>
         )}
       </div>
-
-      {/* Selected User Details Modal */}
-      <AdminUserDetailsModal
-        userId={selectedUserId}
-        isOpen={modalOpen}
-        onClose={() => {
-          setModalOpen(false);
-          setSelectedUserId(null);
-        }}
-        onRoleGranted={handleRoleGranted}
-        onErrorToast={onErrorToast}
-        onSuccessToast={onSuccessToast}
-      />
     </div>
   );
 }
