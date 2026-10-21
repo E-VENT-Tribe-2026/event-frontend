@@ -38,6 +38,8 @@ import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import WarningsGate from '@/components/WarningsGate';
+import AccountRefusalGate from '@/components/AccountRefusalGate';
+import type { SuspensionNotice } from '@/lib/suspension';
 import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import RealtimeBridge from '@/components/RealtimeBridge';
 import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
@@ -137,6 +139,18 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     navigate('/login', { replace: true });
   };
 
+  // Same sign-out as handleLogout, for a request refused because the account is
+  // suspended or became an administrator; the login page shows a suspension notice.
+  const handleAccountRefused = (state?: { suspension: SuspensionNotice }) => {
+    stopSessionTimeout();
+    setShowWarning(false);
+    logout();
+    clearAuthToken();
+    clearCache();
+    clearAllQueries();
+    navigate('/login', state ? { replace: true, state } : { replace: true });
+  };
+
   // Kick the user out immediately whenever any API call receives a 401 (expired token)
   useEffect(() => {
     const onExpired = () => {
@@ -158,6 +172,7 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     <>
       {children}
       <WarningsGate yieldFocus={showWarning} />
+      <AccountRefusalGate onSignOut={handleAccountRefused} />
       <SessionTimeoutModal
         show={showWarning}
         secondsLeft={secondsLeft}
