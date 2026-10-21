@@ -18,6 +18,8 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 vi.mock('@/lib/supabase', () => ({
   supabase: null,
+  syncSupabaseSession: vi.fn(() => Promise.resolve()),
+  clearSupabaseSession: vi.fn(),
 }));
 
 describe('SignupPage', () => {

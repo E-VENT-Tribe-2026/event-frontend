@@ -26,10 +26,12 @@ import { queryClient } from '@/lib/queryClient';
 import {
   FriendsApiError,
   acceptFriendRequest,
+  blockUser,
   cancelFriendRequest,
   declineFriendRequest,
   removeFriend,
   sendFriendRequest,
+  unblockUser,
   userAvatarUrl,
   userProfilePath,
   type UserSummary,
@@ -37,10 +39,8 @@ import {
 import {
   PROFILE_UNAVAILABLE_MESSAGE,
   ProfileLoadError,
-  blockUser,
   fetchUserFriends,
   isProfileUnavailable,
-  unblockUser,
   type ProfileEventGroup,
   type UserProfile,
 } from '@/lib/userProfileApi';
@@ -187,7 +187,10 @@ export default function UserProfilePage() {
   });
 
   const block = useMutation({
-    mutationFn: (kind: BlockAction) => (kind === 'block' ? blockUser(userId) : unblockUser(userId)),
+    mutationFn: async (kind: BlockAction) => {
+      if (kind === 'block') await blockUser(userId);
+      else await unblockUser(userId);
+    },
     onSuccess: async (_data, kind) => {
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
@@ -284,7 +287,7 @@ export default function UserProfilePage() {
   };
 
   const renderActions = (p: UserProfile) => {
-    if (p.blocked_by_me) {
+    if (p.blocked_by_me || p.friendship?.status === 'blocked') {
       return (
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setConfirmBlock('unblock')} disabled={busy} className={outline}>

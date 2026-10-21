@@ -350,6 +350,30 @@ describe('UserProfilePage', () => {
     expect(await screen.findByText('Rate limit exceeded: 200 per 1 minute')).toBeInTheDocument();
   });
 
+  it('shows a friendly error when sending a request to a user you blocked', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      { failWith: { status: 403, detail: { code: 'user_blocked' } } },
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+
+    expect(await screen.findByText('You cannot send a friend request to this user.')).toBeInTheDocument();
+  });
+
+  it('treats a "blocked" friendship status as a profile the viewer blocked', async () => {
+    mockBackend(
+      { status: 'blocked', request_id: null },
+      { profile: { events: undefined, friends: undefined } },
+    );
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /^unblock$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^block$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  });
+
   it('shows the message the backend returns when the request limit is reached', async () => {
     mockBackend(
       { status: 'none', request_id: null },

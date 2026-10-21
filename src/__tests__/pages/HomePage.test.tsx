@@ -142,6 +142,7 @@ describe('HomePage', () => {
       expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
     });
     expect(screen.queryByText(/Loading the latest events/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Tonight with friends' })).toBeInTheDocument();
   });
 
   it('shows empty state when API returns no events and local storage is empty', async () => {
@@ -156,6 +157,25 @@ describe('HomePage', () => {
     await waitFor(() => {
       expect(screen.getByText(/No events match your filters/i)).toBeInTheDocument();
     });
+  });
+
+  it('lets a live API event replace a stale local copy of the same id', async () => {
+    getEventsMock.mockReturnValue([
+      localEvent({ id: 'api-e1', title: 'Stale Local Title', budget: 25 }),
+    ]);
+
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
+      if (url.includes('/api/events')) return Promise.resolve(jsonOk({ data: [apiEventRow] }));
+      return Promise.reject(new Error('unmocked'));
+    });
+
+    renderHome();
+    await waitFor(() => {
+      expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText('Stale Local Title')).not.toBeInTheDocument();
   });
 
   it('merges local events when API returns an empty list', async () => {

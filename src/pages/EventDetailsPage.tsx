@@ -1,6 +1,6 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getEvents, getCurrentUser, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, cancelEvent, type EventItem } from '@/lib/storage';
-import { ArrowLeft, MapPin, Clock, Users, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Ban } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, Users, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Ban, CalendarPlus, MapPinned } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import AppToast from '@/components/AppToast';
@@ -15,20 +15,34 @@ import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 import EventLocationMap from '@/components/EventLocationMap';
-import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
+import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { formatUserIdentity } from '@/lib/userIdentity';
+import InvitedByBanner from '@/components/InvitedByBanner';
+import InviteFriendsDialog from '@/components/InviteFriendsDialog';
+import type { EventInvitationSummary } from '@/lib/invitationsApi';
+import FriendsGoing from '@/components/FriendsGoing';
+import { fetchAllFriends, friendsGoingToEvent } from '@/lib/eventSocial';
+import { type UserSummary } from '@/lib/friendsApi';
+import { addCheckin, CHECKINS_CHANGED_EVENT, isCheckedIn, isCheckinWindow, listCheckins, parseTicketQr, type CheckinRecord } from '@/lib/checkin';
+import { postEventChatMessage } from '@/lib/chatPayload';
+import { downloadIcs, googleCalendarUrl } from '@/lib/calendar';
 
 type ParticipationStatus = 'none' | 'going' | 'removed';
 
 async function readApiErrorMessage(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { detail?: unknown };
   const d = body.detail;
-  if (typeof d === 'string') return d;
+  if (typeof d === 'string' && d.trim()) return d;
+  if (d && typeof d === 'object' && !Array.isArray(d)) {
+    const msg = (d as { message?: unknown }).message;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+  }
   if (Array.isArray(d) && d[0] && typeof (d[0] as { msg?: string }).msg === 'string') {
     return (d[0] as { msg: string }).msg;
   }
+  if (res.status === 404) return 'Event not found';
   return `Something went wrong (HTTP ${res.status})`;
 }
 
@@ -39,6 +53,7 @@ export default function EventDetailsPage() {
   const [events, setEventsState] = useState(getEvents());
   const [apiEvent, setApiEvent] = useState<EventItem | null>(null);
   const [apiEventStatus, setApiEventStatus] = useState<string | null>(null);
+  const [apiNotFound, setApiNotFound] = useState(false);
   const [loadingApi, setLoadingApi] = useState(true);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [showVenuePaymentModal, setShowVenuePaymentModal] = useState(false);
@@ -51,6 +66,12 @@ export default function EventDetailsPage() {
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
   const [isCancellingEvent, setIsCancellingEvent] = useState(false);
   const [backendAuthUserId, setBackendAuthUserId] = useState<string | null>(null);
+  const [invitation, setInvitation] = useState<EventInvitationSummary | null>(null);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [friendSummaries, setFriendSummaries] = useState<UserSummary[]>([]);
+  const [checkins, setCheckins] = useState<CheckinRecord[]>([]);
+  const [checkinBusy, setCheckinBusy] = useState(false);
+  const [ticketScan, setTicketScan] = useState('');
   const user = getCurrentUser();
   const allUsers = getUsers();
 
@@ -60,7 +81,7 @@ export default function EventDetailsPage() {
     if (!state?.event || !id) return null;
     return state.event.id === id ? state.event : null;
   }, [location.state, id]);
-  const event = apiEvent ?? routeEvent ?? localEvent ?? null;
+  const event = apiNotFound ? null : (apiEvent ?? routeEvent ?? localEvent ?? null);
   const useApiParticipation = apiEvent !== null;
 
   const getApiToken = async (): Promise<string | null> => {
@@ -89,13 +110,16 @@ export default function EventDetailsPage() {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       });
       if (!res.ok) {
+        if (res.status === 404) setApiNotFound(true);
         setToast({ show: true, message: await readApiErrorMessage(res), type: 'error' });
         return false;
       }
       await syncParticipationFromBackend();
+      setInvitation(null); // joining removes the invitation
       setToast({ show: true, message: 'Successfully joined!', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
       invalidatePrefix('/api/events?');
+      invalidatePrefix('/api/participants/my/events');
       return true;
     } catch {
       setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
@@ -202,10 +226,12 @@ export default function EventDetailsPage() {
     if (!id) {
       setLoadingApi(false);
       setApiEvent(null);
+      setApiNotFound(false);
       return;
     }
     let cancelled = false;
     setLoadingApi(true);
+    setApiNotFound(false);
 
     (async () => {
       const token = await getApiToken();
@@ -214,13 +240,25 @@ export default function EventDetailsPage() {
 
       try {
         const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
-        if (!res.ok) throw new Error();
+        if (!res.ok) {
+          if (res.status === 404) {
+            if (!cancelled) {
+              setApiNotFound(true);
+              setApiEvent(null);
+              setApiEventStatus(null);
+            }
+            return;
+          }
+          throw new Error();
+        }
         const data = await res.json();
         if (cancelled) return;
 
         const mapped = mapApiEventToItem(data);
         setApiEvent(mapped);
+        setApiNotFound(false);
         setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+        setInvitation((data?.invitation as EventInvitationSummary | null | undefined) ?? null);
         setParticipationKnown(false);
 
         const creatorId = data.created_by || data.organizer_id || mapped.organizerId;
@@ -278,6 +316,34 @@ export default function EventDetailsPage() {
     return event?.participants ?? [];
   }, [useApiParticipation, apiParticipants, event?.participants]);
 
+  const friendsGoing = useMemo(
+    () => friendsGoingToEvent(friendSummaries, participantIds),
+    [friendSummaries, participantIds],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAllFriends().then((list) => {
+      if (!cancelled) setFriendSummaries(list);
+    });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!id) {
+      setCheckins([]);
+      return;
+    }
+    const refresh = () => setCheckins(listCheckins(id));
+    refresh();
+    const onChange = (event: Event) => {
+      const eventId = (event as CustomEvent<{ eventId?: string }>).detail?.eventId;
+      if (!eventId || eventId === id) refresh();
+    };
+    window.addEventListener(CHECKINS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(CHECKINS_CHANGED_EVENT, onChange);
+  }, [id]);
+
   const attendeeDisplayCount =
     useApiParticipation && attendeeCount !== null ? attendeeCount : participantIds.length;
 
@@ -327,8 +393,6 @@ export default function EventDetailsPage() {
       ));
     }
 
-    console.log(apiParticipants) 
-
     return event.participants
       .map((pId) => {
         const u = allUsers.find((x) => x.id === pId);
@@ -363,6 +427,12 @@ export default function EventDetailsPage() {
       .filter(Boolean) as Array<{ id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string }>;
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
+  const recordCheckin = useCallback(async (userId: string, name: string, ticketId?: string) => {
+    if (!event) return;
+    addCheckin(event.id, { userId, name, ticketId });
+    await postEventChatMessage(event.id, { v: 1, type: 'checkin', text: `${name} is here` });
+  }, [event]);
+
   useEffect(() => {
     if (loadingApi && !localEvent) return;
     const ev = apiEvent ?? localEvent ?? null;
@@ -383,6 +453,7 @@ export default function EventDetailsPage() {
   const isEventPassed = !isEventUpcoming(event);
   const isPastEvent = !isCancelledEvent && isEventPassed;
   const isUpcomingEvent = !isCancelledEvent && isEventUpcoming(event);
+  const canInviteFriends = Boolean(user && useApiParticipation && isUpcomingEvent && (isEventOwner || hasJoined));
   const isChatExpired = isEventPassed && (() => {
     const normalized = /[Zz]$\vert{}[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
     const ts = new Date(normalized).getTime();
@@ -479,6 +550,7 @@ export default function EventDetailsPage() {
           setToast({ show: true, message: 'You left the event.', type: 'success' });
           invalidatePrefix(`/api/participants/${event.id}`);
           invalidatePrefix('/api/events?');
+          invalidatePrefix('/api/participants/my/events');
         } catch {
           setToast({ show: true, message: 'Server unavailable. Try again.', type: 'error' });
         } finally {
@@ -491,6 +563,7 @@ export default function EventDetailsPage() {
       setToast({ show: true, message: 'You left the event.', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
       invalidatePrefix('/api/events?');
+      invalidatePrefix('/api/participants/my/events');
       setIsUpdatingParticipation(false);
       return;
     }
@@ -707,6 +780,7 @@ export default function EventDetailsPage() {
       </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-10 relative z-10 space-y-6">
+        <InvitedByBanner invitation={invitation} />
         <div className="rounded-2xl glass-card p-5 space-y-4">
           <div className="flex items-start justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -755,6 +829,28 @@ export default function EventDetailsPage() {
             </div>
           </div>
 
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={googleCalendarUrl(event)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80"
+            >
+              <CalendarPlus className="h-3.5 w-3.5 text-primary" />
+              Google Calendar
+            </a>
+            <button
+              type="button"
+              onClick={() => downloadIcs(event)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80"
+            >
+              <CalendarPlus className="h-3.5 w-3.5 text-primary" />
+              Download .ics
+            </button>
+          </div>
+
+          <FriendsGoing friends={friendsGoing} />
+
           <div className="space-y-1">
             {canViewFullAttendeeList ? (
               <div className="flex items-center gap-2">
@@ -793,10 +889,21 @@ export default function EventDetailsPage() {
 
         {/* Full attendee list */}
         <div className="rounded-2xl glass-card p-4 space-y-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Users className="h-4 w-4 text-primary" />
-            Attendees
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Users className="h-4 w-4 text-primary" />
+              Attendees
+            </h2>
+            {canInviteFriends && (
+              <button
+                type="button"
+                onClick={() => setShowInviteDialog(true)}
+                className="inline-flex items-center gap-1 rounded-full gradient-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow"
+              >
+                <UserPlus className="h-3.5 w-3.5" /> Invite friends
+              </button>
+            )}
+          </div>
           {canViewFullAttendeeList ? (
             (!participationKnown || (useApiParticipation && apiParticipants.length === 0 && !participationKnown)) && useApiParticipation ? (
               <div className="space-y-2">
@@ -831,6 +938,18 @@ export default function EventDetailsPage() {
                         <p className="text-sm text-muted-foreground" data-testid="profile-username">@{row.username}</p>
                       </span>
                     </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                    {isEventOwner && !isCancelledEvent && (
+                      <button
+                        type="button"
+                        disabled={checkinBusy || isCheckedIn(event.id, row.id)}
+                        onClick={() => void recordCheckin(row.id, row.name)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-primary/35 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <MapPinned className="h-3 w-3" />
+                        {isCheckedIn(event.id, row.id) ? 'Here' : 'Mark here'}
+                      </button>
+                    )}
                     {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && !isCancelledEvent && (
                       <button
                         type="button"
@@ -842,6 +961,7 @@ export default function EventDetailsPage() {
                         {removingParticipantId === row.id ? '…' : 'Remove'}
                       </button>
                     )}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -854,6 +974,79 @@ export default function EventDetailsPage() {
             </p>
           )}
         </div>
+
+        {canInviteFriends && (
+          <InviteFriendsDialog open={showInviteDialog} onOpenChange={setShowInviteDialog} eventId={event.id} />
+        )}
+
+        {!isCancelledEvent && user && (isEventOwner || hasJoined) && (
+          <div className="rounded-2xl glass-card p-4 space-y-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <MapPinned className="h-4 w-4 text-primary" />
+              Door check-in
+              <span className="ml-auto rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
+                {checkins.length} here
+              </span>
+            </h2>
+            {checkins.length > 0 && (
+              <ul className="space-y-1.5">
+                {checkins.map((c) => (
+                  <li key={c.userId} className="text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">{c.name}</span> checked in
+                  </li>
+                ))}
+              </ul>
+            )}
+            {hasJoined && isCheckinWindow(eventStartMs(event)) && (
+              <button
+                type="button"
+                disabled={checkinBusy || isCheckedIn(event.id, user.id)}
+                onClick={async () => {
+                  setCheckinBusy(true);
+                  await recordCheckin(user.id, user.name || 'You');
+                  setCheckinBusy(false);
+                  setToast({ show: true, message: "You're here. Enjoy the event!", type: 'success' });
+                }}
+                className="w-full rounded-xl gradient-primary py-3 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50"
+              >
+                {isCheckedIn(event.id, user.id) ? "You're here" : "I'm here"}
+              </button>
+            )}
+            {isEventOwner && (
+              <form
+                className="flex gap-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const parsed = parseTicketQr(ticketScan);
+                  if (!parsed?.ticketId && !parsed?.name) return;
+                  setCheckinBusy(true);
+                  await recordCheckin(
+                    parsed.ticketId || `guest-${Date.now()}`,
+                    parsed.name || 'Guest',
+                    parsed.ticketId,
+                  );
+                  setTicketScan('');
+                  setCheckinBusy(false);
+                }}
+              >
+                <input
+                  value={ticketScan}
+                  onChange={(e) => setTicketScan(e.target.value)}
+                  placeholder="Paste ticket QR or ID"
+                  aria-label="Ticket QR or ID"
+                  className="flex-1 rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <button
+                  type="submit"
+                  disabled={checkinBusy || !ticketScan.trim()}
+                  className="rounded-xl bg-secondary px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                >
+                  Check in
+                </button>
+              </form>
+            )}
+          </div>
+        )}
 
         {/* Map */}
         <div className="rounded-2xl glass-card p-4 space-y-3">

@@ -3,10 +3,12 @@ import { type EventItem, getCurrentUser } from '@/lib/storage';
 import { MapPin, Clock, Users, UserCheck, Heart } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/UserAvatar';
+import FriendsGoing from '@/components/FriendsGoing';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { useParticipantCount, invalidateFavorites } from '@/lib/queries';
+import { useFriendsGoing } from '@/hooks/useFriendsGoing';
 
 interface EventCardProps {
   event: EventItem;
@@ -45,6 +47,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
   // Use TanStack Query for participant count (persisted to localStorage)
   const { data: countData } = useParticipantCount(event.id);
   const attendeeCount = countData?.count ?? event.participants?.length ?? 0;
+  const { friends: friendsGoing } = useFriendsGoing(event.id);
 
   // Sync favorite state from props
   useEffect(() => {
@@ -89,7 +92,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     return () => { cancelled = true; };
   }, [event.organizerId, (event as any).created_by]);
 
-  const friendJoined = user?.isPremium && user?.friends?.some(fId => event.participants?.includes(fId));
+  const friendJoined = friendsGoing.length > 0 || Boolean(showFriendBadge);
 
   const handleFavorite = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -175,9 +178,10 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
         ) : (
           <div className="absolute top-2 left-2 rounded-full bg-secondary/90 px-3 py-1 text-xs font-semibold text-secondary-foreground backdrop-blur-sm">€{event.budget}</div>
         )}
-        {(showFriendBadge || friendJoined) && (
+        {friendJoined && (
           <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-accent/90 px-2.5 py-1 text-[10px] font-semibold text-accent-foreground backdrop-blur-sm">
-            <UserCheck className="h-3 w-3" /> Friend joined
+            <UserCheck className="h-3 w-3" />
+            {friendsGoing.length > 1 ? `${friendsGoing.length} friends` : 'Friend going'}
           </div>
         )}
       </div>
@@ -210,6 +214,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1 truncate"><MapPin className="h-3 w-3 shrink-0" />{event.location}</span>
         </div>
+        <FriendsGoing friends={friendsGoing} compact linkProfiles={false} />
         
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center gap-1 text-xs text-muted-foreground">

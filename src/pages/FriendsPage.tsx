@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Ban, Check, Search, UserMinus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
+import TopBar from '@/components/TopBar';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
 import {
@@ -20,22 +21,26 @@ import { invalidatePrefix } from '@/lib/queryCache';
 import { invalidateNotifications } from '@/lib/queries';
 import {
   acceptFriendRequest,
+  blockUser,
   cancelFriendRequest,
   declineFriendRequest,
+  fetchBlockedUsers,
   fetchFriends,
   fetchIncomingRequests,
   fetchSentRequests,
+  FRIENDS_CHANGED_EVENT,
   removeFriend,
   searchUsers,
+  unblockUser,
   userAvatarUrl,
   userProfilePath,
+  type BlockedUserItem,
   type FriendItem,
   type FriendRequestItem,
   type Page,
   type UserSearchResult,
   type UserSummary,
 } from '@/lib/friendsApi';
-import { fetchBlockedUsers, unblockUser, type BlockedUserItem } from '@/lib/userProfileApi';
 
 type Section = 'friends' | 'incoming' | 'sent' | 'blocked';
 
@@ -195,13 +200,19 @@ export default function FriendsPage() {
 
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<UserSummary | null>(null);
+  const [pendingBlock, setPendingBlock] = useState<UserSummary | null>(null);
   const [pendingUnblock, setPendingUnblock] = useState<UserSummary | null>(null);
 
   useEffect(() => {
-    void friends.load(1);
-    void incoming.load(1);
-    void sent.load(1);
-    void blocked.load(1);
+    const refresh = () => {
+      void friends.load(1);
+      void incoming.load(1);
+      void sent.load(1);
+      void blocked.load(1);
+    };
+    refresh();
+    window.addEventListener(FRIENDS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(FRIENDS_CHANGED_EVENT, refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -317,14 +328,23 @@ export default function FriendsPage() {
     }
   };
 
-  const onConfirmUnblock = async () => {
-    const user = pendingUnblock;
-    setPendingUnblock(null);
+  const onConfirmBlock = async () => {
+    const user = pendingBlock;
+    setPendingBlock(null);
     if (!user) return;
-    setBusyKey(`blocked:${user.id}`);
+    setBusyKey(`block:${user.id}`);
     try {
-      await unblockUser(user.id);
-      blocked.setState((s) => ({ ...s, items: s.items.filter((b) => b.user.id !== user.id) }));
+      const blockedRow = await blockUser(user.id);
+      friends.setState((s) => ({ ...s, items: s.items.filter((f) => f.user.id !== user.id) }));
+      blocked.setState((s) => ({
+        ...s,
+        loaded: true,
+        items: [{
+          user: blockedRow.user ?? user,
+          blocked_at: blockedRow.blocked_at ?? new Date().toISOString(),
+        }, ...s.items.filter((b) => b.user.id !== user.id)],
+      }));
+      setToast({ show: true, message: `@${user.display_name || user.username || 'user'} has been blocked.`, type: 'success' });
     } catch (err) {
       showError(err);
     } finally {
@@ -332,11 +352,27 @@ export default function FriendsPage() {
     }
   };
 
-  const lists: Record<Section, ListState<unknown>> = {
-    friends: friends.state,
-    incoming: incoming.state,
-    sent: sent.state,
-    blocked: blocked.state,
+  const onConfirmUnblock = async () => {
+    const user = pendingUnblock;
+    setPendingUnblock(null);
+    if (!user) return;
+    setBusyKey(`unblock:${user.id}`);
+    try {
+      await unblockUser(user.id);
+      blocked.setState((s) => ({ ...s, items: s.items.filter((b) => b.user.id !== user.id) }));
+      setToast({ show: true, message: `@${user.display_name || user.username || 'user'} has been unblocked.`, type: 'success' });
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const counts: Partial<Record<Section, number>> = {
+    friends: friends.state.loaded ? friends.state.items.length : undefined,
+    incoming: incoming.state.loaded ? incoming.state.items.length : undefined,
+    sent: sent.state.loaded ? sent.state.items.length : undefined,
+    blocked: blocked.state.loaded ? blocked.state.items.length : undefined,
   };
 
   const hasActiveSearch = query.trim().length > 0;
@@ -349,25 +385,18 @@ export default function FriendsPage() {
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
-      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/95 backdrop-blur-lg px-4 py-3.5 shadow-xs">
-        <h1 className="mx-auto max-w-lg text-base font-bold text-foreground">Friends & Search</h1>
-      </header>
+      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-md">
+        <TopBar
+          search={query}
+          onSearchChange={setQuery}
+          searchPlaceholder="Search by username..."
+        />
+        <header className="mx-auto flex max-w-lg items-center border-b border-border/60 px-4 py-2.5">
+          <h1 className="text-base font-bold text-foreground">Friends</h1>
+        </header>
+      </div>
 
       <div className="mx-auto max-w-lg space-y-4 px-4 pt-4">
-        {/* Search Bar at the Top */}
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by username..."
-            aria-label="Search by username"
-            autoComplete="off"
-            className="w-full rounded-2xl bg-secondary/80 py-3 pl-10 pr-4 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 border border-border/50"
-          />
-        </div>
-
         {/* If user is actively searching, display search results view */}
         {hasActiveSearch ? (
           <section aria-label="Search results" className="space-y-3 pt-1">
@@ -394,8 +423,7 @@ export default function FriendsPage() {
             <div role="tablist" aria-label="Friends sections" className="flex gap-1 rounded-2xl glass-card p-1">
               {SECTIONS.map(({ id, label }) => {
                 const active = section === id;
-                const list = lists[id];
-                const count = list.loaded ? list.items.length : undefined;
+                const count = counts[id];
                 return (
                   <button
                     key={id}
@@ -414,7 +442,7 @@ export default function FriendsPage() {
                       <span className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
                         active ? 'bg-background/25 text-inherit' : 'bg-secondary text-muted-foreground'
                       }`}>
-                        {count}{list.hasMore ? '+' : ''}
+                        {count}{(id === 'incoming' ? incoming : id === 'sent' ? sent : id === 'blocked' ? blocked : friends).state.hasMore ? '+' : ''}
                       </span>
                     )}
                   </button>
@@ -434,8 +462,18 @@ export default function FriendsPage() {
                     <UserRow key={f.user.id} user={f.user} onOpen={() => openProfile(f.user.id)}>
                       <button
                         type="button"
+                        onClick={() => setPendingBlock(f.user)}
+                        disabled={busyKey === `block:${f.user.id}` || busyKey === `friend:${f.user.id}`}
+                        className={`${actionBtn} bg-secondary text-foreground hover:bg-destructive/15 hover:text-destructive`}
+                        aria-label={`Block ${f.user.display_name}`}
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                        Block
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setPendingRemoval(f.user)}
-                        disabled={busyKey === `friend:${f.user.id}`}
+                        disabled={busyKey === `friend:${f.user.id}` || busyKey === `block:${f.user.id}`}
                         className={`${actionBtn} bg-secondary text-foreground hover:bg-destructive/15 hover:text-destructive`}
                         aria-label={`Remove ${f.user.display_name} from friends`}
                       >
@@ -482,6 +520,31 @@ export default function FriendsPage() {
               </section>
             )}
 
+            {section === 'blocked' && (
+              <section aria-label="Blocked users" className="pt-1">
+                <ListBody
+                  list={blocked.state}
+                  emptyIcon={Ban}
+                  emptyText="You have not blocked anyone."
+                  onLoadMore={() => void blocked.load(blocked.state.page + 1)}
+                >
+                  {blocked.state.items.map((b) => (
+                    <UserRow key={b.user.id} user={b.user} onOpen={() => openProfile(b.user.id)}>
+                      <button
+                        type="button"
+                        onClick={() => setPendingUnblock(b.user)}
+                        disabled={busyKey === `unblock:${b.user.id}`}
+                        className={`${actionBtn} bg-secondary text-foreground hover:bg-secondary/80`}
+                        aria-label={`Unblock ${b.user.display_name}`}
+                      >
+                        Unblock
+                      </button>
+                    </UserRow>
+                  ))}
+                </ListBody>
+              </section>
+            )}
+
             {section === 'sent' && (
               <section aria-label="Sent friend requests" className="pt-1">
                 <ListBody
@@ -500,32 +563,6 @@ export default function FriendsPage() {
                       >
                         <X className="h-3.5 w-3.5" />
                         Cancel
-                      </button>
-                    </UserRow>
-                  ))}
-                </ListBody>
-              </section>
-            )}
-
-            {section === 'blocked' && (
-              <section aria-label="Blocked users" className="pt-1">
-                <ListBody
-                  list={blocked.state}
-                  emptyIcon={Ban}
-                  emptyText="You have not blocked anyone."
-                  onLoadMore={() => void blocked.load(blocked.state.page + 1)}
-                >
-                  {blocked.state.items.map((b) => (
-                    <UserRow key={b.user.id} user={b.user} onOpen={() => openProfile(b.user.id)}>
-                      <button
-                        type="button"
-                        onClick={() => setPendingUnblock(b.user)}
-                        disabled={busyKey === `blocked:${b.user.id}`}
-                        className={`${actionBtn} bg-secondary text-foreground hover:bg-secondary/80`}
-                        aria-label={`Unblock ${b.user.username || b.user.display_name}`}
-                      >
-                        <Ban className="h-3.5 w-3.5" />
-                        Unblock
                       </button>
                     </UserRow>
                   ))}
@@ -551,17 +588,32 @@ export default function FriendsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={pendingUnblock !== null} onOpenChange={(open) => !open && setPendingUnblock(null)}>
+      <AlertDialog open={pendingBlock !== null} onOpenChange={(open) => !open && setPendingBlock(null)}>
         <AlertDialogContent className="rounded-3xl glass-card border border-border">
           <AlertDialogHeader>
-            <AlertDialogTitle>Unblock @{pendingUnblock?.username || pendingUnblock?.display_name}?</AlertDialogTitle>
+            <AlertDialogTitle>Block this person?</AlertDialogTitle>
             <AlertDialogDescription>
-              Your previous friendship will not be restored. To be friends again, one of you will need to send a new friend request.
+              @{pendingBlock?.display_name} will be removed from your friends and added to your blocked list. You can unblock them later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="rounded-2xl">Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void onConfirmUnblock()} className="rounded-2xl">Unblock</AlertDialogAction>
+            <AlertDialogAction onClick={() => void onConfirmBlock()} className="rounded-2xl bg-destructive text-destructive-foreground">Block</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={pendingUnblock !== null} onOpenChange={(open) => !open && setPendingUnblock(null)}>
+        <AlertDialogContent className="rounded-3xl glass-card border border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unblock this person?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your previous friendship with @{pendingUnblock?.display_name} will not be restored. To be friends again, one of you will need to send a new friend request.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-2xl">Keep blocked</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void onConfirmUnblock()} className="rounded-2xl gradient-primary text-primary-foreground">Unblock</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
