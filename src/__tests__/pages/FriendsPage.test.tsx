@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { setAuthToken } from '@/lib/auth';
 import FriendsPage, { SEARCH_DEBOUNCE_MS } from '@/pages/FriendsPage';
 import BottomNav from '@/components/BottomNav';
+import { markChatUnread, setViewingChatId } from '@/lib/chatUnread';
 
 const { getCurrentUserMock } = vi.hoisted(() => ({ getCurrentUserMock: vi.fn() }));
 
@@ -89,6 +90,8 @@ afterEach(() => {
   fetchMock.mockClear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  localStorage.clear();
+  setViewingChatId(null);
 });
 
 describe('FriendsPage', () => {
@@ -354,5 +357,22 @@ describe('BottomNav Friends entry', () => {
     expect(screen.queryByRole('link', { name: /^Profile$/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('link', { name: /Friends/ }));
     expect(await screen.findByText('FRIENDS TAB')).toBeInTheDocument();
+  });
+
+  it('shows a blinking chat badge when new chats are available', async () => {
+    markChatUnread(ME, 'evt-new');
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <Routes>
+          <Route path="/home" element={<BottomNav />} />
+          <Route path="/chat" element={<p>CHAT TAB</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const badge = await screen.findByTestId('chat-badge');
+    expect(badge).toHaveTextContent('1');
+    expect(badge).toHaveClass('animate-pulse');
+    fireEvent.click(screen.getByRole('link', { name: /Chat/ }));
+    expect(await screen.findByText('CHAT TAB')).toBeInTheDocument();
   });
 });

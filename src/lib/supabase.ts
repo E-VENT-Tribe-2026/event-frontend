@@ -16,6 +16,9 @@ if ((!supabaseUrl || !supabaseAnonKey) && import.meta.env.MODE !== 'test') {
 export const supabase: SupabaseClient | null =
   supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
+/** Fired after the FastAPI JWT is pushed into the Realtime client. */
+export const SUPABASE_REALTIME_AUTH_EVENT = 'eventapp:supabase-realtime-auth';
+
 export function isSupabaseConfigured(): boolean {
   return Boolean(supabaseUrl && supabaseAnonKey);
 }
@@ -34,6 +37,9 @@ export async function syncSupabaseSession(
     supabase.realtime.setAuth(accessToken);
   } catch {
     /* ignore */
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(SUPABASE_REALTIME_AUTH_EVENT));
   }
   const refresh = typeof refreshToken === 'string' ? refreshToken : '';
   if (!refresh) return;

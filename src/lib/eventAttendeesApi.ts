@@ -29,6 +29,56 @@ async function getJson<T>(path: string, token: string | null): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Accept a raw array or a wrapped `{ data | friends | participants }` payload. */
+export function parseParticipantRows(body: unknown): ParticipantRow[] {
+  if (Array.isArray(body)) return body as ParticipantRow[];
+  if (body && typeof body === 'object') {
+    const obj = body as Record<string, unknown>;
+    for (const key of ['data', 'friends', 'participants', 'items', 'results', 'users']) {
+      if (Array.isArray(obj[key])) return obj[key] as ParticipantRow[];
+    }
+  }
+  return [];
+}
+
+function nestedUser(row: ParticipantRow): UserSummary | Record<string, unknown> | null {
+  if (row.user && typeof row.user === 'object') return row.user;
+  const extra = row as ParticipantRow & { friend?: unknown };
+  if (extra.friend && typeof extra.friend === 'object') return extra.friend as Record<string, unknown>;
+  return null;
+}
+
+export function participantRowToSummary(row: ParticipantRow): UserSummary | null {
+  const extra = row as ParticipantRow & Record<string, unknown>;
+  const nested = nestedUser(row);
+  const p = row.profiles;
+  const nestedRec = nested as Record<string, unknown> | null;
+  const id = String(
+    row.user_id || extra.userId || extra.profile_id || extra.participant_id || nestedRec?.id || extra.id || '',
+  ).trim();
+  if (!id) return null;
+  const u = (nested as UserSummary | null) ?? null;
+  const username =
+    (typeof u?.username === 'string' ? u.username : null) ??
+    (typeof p?.username === 'string' ? p.username : null);
+  const fullName =
+    (typeof u?.full_name === 'string' ? u.full_name : null) ??
+    (typeof p?.full_name === 'string' ? p.full_name : null) ??
+    (typeof extra.name === 'string' ? extra.name : null);
+  return {
+    id,
+    username,
+    full_name: fullName,
+    display_name: String(u?.display_name || fullName || username || 'Friend'),
+    avatar_kind: u?.avatar_kind ?? (typeof extra.avatar_kind === 'string' ? extra.avatar_kind : null),
+    icon_id: u?.icon_id ?? (typeof extra.icon_id === 'string' ? extra.icon_id : null),
+    avatar_url:
+      u?.avatar_url ??
+      (typeof p?.avatar_url === 'string' ? p.avatar_url : null) ??
+      (typeof extra.avatar_url === 'string' ? extra.avatar_url : null),
+  };
+}
+
 /** Number of attendees: open to every signed-in user. */
 export function fetchParticipantCount(eventId: string, token: string | null): Promise<number> {
   const path = `/api/participants/${eventId}/participants/count`;
@@ -49,7 +99,7 @@ export function fetchFriendsAttending(eventId: string, token: string | null): Pr
     `${path}:${scopeOf(token)}`,
     async () => {
       const body = await getJson<unknown>(path, token);
-      return Array.isArray(body) ? (body as ParticipantRow[]) : [];
+      return parseParticipantRows(body);
     },
     TTL.SHORT,
   );
@@ -62,7 +112,7 @@ export function fetchParticipantList(eventId: string, token: string | null): Pro
     `${path}:${scopeOf(token)}`,
     async () => {
       const body = await getJson<unknown>(path, token);
-      return Array.isArray(body) ? (body as ParticipantRow[]) : [];
+      return parseParticipantRows(body);
     },
     TTL.SHORT,
   );

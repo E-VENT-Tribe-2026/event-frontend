@@ -36,6 +36,8 @@ import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
 import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
+import ManageAccountPage from '@/pages/ManageAccountPage';
+import PremiumPage from '@/pages/PremiumPage';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import RealtimeBridge from '@/components/RealtimeBridge';
@@ -77,6 +79,7 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
           id: String(profile.id),
           email: String(profile.email || getCurrentUser()?.email || ''),
           name: String(profile.full_name || profile.name || getCurrentUser()?.name || ''),
+          username: typeof profile.username === 'string' ? profile.username : getCurrentUser()?.username,
           avatar: String(profile.avatar_url || ''),
           bio: String(profile.bio || ''),
           interests: Array.isArray(profile.interests) ? profile.interests as string[] : [],
@@ -193,6 +196,8 @@ const App = () => (
             <Route path="/create" element={<RequireUsername><CreateEventPage /></RequireUsername>} />
             <Route path="/map" element={<RequireUsername><MapPage /></RequireUsername>} />
             <Route path="/profile" element={<RequireUsername><ProfilePage /></RequireUsername>} />
+            <Route path="/account" element={<RequireUsername><ManageAccountPage /></RequireUsername>} />
+            <Route path="/premium" element={<RequireUsername><PremiumPage /></RequireUsername>} />
             <Route path="/user/:userId" element={<RequireUsername><UserProfilePage /></RequireUsername>} />
             <Route path="/chat" element={<RequireUsername><ChatPage /></RequireUsername>} />
             <Route path="/friends" element={<RequireUsername><FriendsPage /></RequireUsername>} />

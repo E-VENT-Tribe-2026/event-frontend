@@ -13,6 +13,14 @@ describe('eventIdFromRealtimeRow', () => {
   it('returns null when neither row has an event id', () => {
     expect(eventIdFromRealtimeRow({ new: { id: 'm1' }, old: {} })).toBeNull();
   });
+
+  it('stringifies a numeric event id', () => {
+    expect(eventIdFromRealtimeRow({ new: { event_id: 42 }, old: {} })).toBe('42');
+  });
+
+  it('reads a nested event object when event_id is missing', () => {
+    expect(eventIdFromRealtimeRow({ new: { event: { id: 'nested-9' } }, old: {} })).toBe('nested-9');
+  });
 });
 
 describe('notifyEventsChanged', () => {

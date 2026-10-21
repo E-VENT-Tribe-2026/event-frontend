@@ -14,7 +14,16 @@ import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
 import { userProfilePath } from '@/lib/friendsApi';
 import { cachedFetch, invalidate, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
-import { CHAT_MESSAGES_CHANGED_EVENT } from '@/lib/realtimeEvents';
+import { CHAT_MESSAGES_CHANGED_EVENT, eventIdFromRealtimeRow } from '@/lib/realtimeEvents';
+import {
+  CHAT_UNREAD_CHANGED_EVENT,
+  isChatUnread,
+  markChatRead,
+  noteIncomingChatMessage,
+  noteNewerChatMessage,
+  rememberSeen,
+  setViewingChatId,
+} from '@/lib/chatUnread';
 import EventPollCard from '@/components/EventPollCard';
 import { addCheckin, isCheckedIn } from '@/lib/checkin';
 import {
@@ -55,6 +64,46 @@ type ChatMessage = {
   options?: string[];
   optionIndex?: number;
 };
+
+export const CHAT_LIVE_POLL_MS = 4000;
+
+function messageRowId(row: Record<string, unknown>): string {
+  if (row.id != null && String(row.id).trim()) return String(row.id);
+  const sender = row.sender_id || row.user_id || row.created_by || '';
+  const at = row.created_at || row.sent_at || row.timestamp || '';
+  const content = row.content || row.message || row.text || '';
+  return `${sender}:${at}:${String(content).slice(0, 48)}`;
+}
+
+function sameVisibleMessages(prev: ChatMessage[], next: ChatMessage[]): boolean {
+  if (prev.length !== next.length) return false;
+  return prev.every((m, i) => m.id === next[i].id && m.text === next[i].text && m.from === next[i].from);
+}
+
+function isNearBottom(el: HTMLElement, threshold = 96): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+}
+
+function latestMessageMeta(
+  rows: Record<string, unknown>[],
+): { createdAt: string; senderId: string | null; messageId: string } | null {
+  let latest: { createdAt: string; senderId: string | null; messageId: string } | null = null;
+  for (const row of rows) {
+    const raw = row.created_at || row.sent_at || row.timestamp;
+    if (!raw) continue;
+    const createdAt = new Date(String(raw)).toISOString();
+    if (Number.isNaN(Date.parse(createdAt))) continue;
+    if (!latest || createdAt > latest.createdAt) {
+      const sender = row.sender_id || row.user_id || row.created_by;
+      latest = {
+        createdAt,
+        senderId: sender == null || sender === '' ? null : String(sender),
+        messageId: messageRowId(row),
+      };
+    }
+  }
+  return latest;
+}
 
 function isExpiredOver48h(eventDate: string): boolean {
   if (!eventDate) return false;
@@ -117,9 +166,16 @@ export default function ChatPage() {
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const pinToBottomRef = useRef(true);
   // Only the newest loadMessages call may update the screen, so a slow response
   // for a chat you already left cannot overwrite the chat you are looking at.
   const messagesRequestRef = useRef(0);
+  const activeChatRef = useRef<string | null>(null);
+  const chatsRef = useRef<ChatEvent[]>([]);
+  const loadMessagesRef = useRef<(eventId: string, silent?: boolean) => Promise<void>>(async () => {});
+  const loadChatListRef = useRef<(silent?: boolean) => Promise<void>>(async () => {});
+  activeChatRef.current = activeChat;
 
   useEffect(() => {
     let cancelled = false;
@@ -133,13 +189,24 @@ export default function ChatPage() {
   }, [token, user?.id]);
 
   useEffect(() => {
-    if (activeChat && !chats.some((entry) => entry.id === activeChat)) setActiveChat(null);
-  }, [activeChat, chats]);
+    if (!activeChat || chatListLoading) return;
+    if (chats.some((entry) => entry.id === activeChat)) return;
+    setActiveChat(null);
+  }, [activeChat, chats, chatListLoading]);
 
   useEffect(() => {
+    pinToBottomRef.current = true;
+  }, [activeChat]);
+
+  useEffect(() => {
+    if (!pinToBottomRef.current || messagesLoading) return;
+    const scroller = scrollerRef.current;
+    if (scroller) {
+      scroller.scrollTop = scroller.scrollHeight;
+      return;
+    }
     const el = messagesEndRef.current;
-    if (!el || messagesLoading) return;
-    if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'auto', block: 'end' });
   }, [messages, messagesLoading, activeChat]);
 
   if (!user) return <Navigate to="/login" replace />;
@@ -188,7 +255,7 @@ export default function ChatPage() {
         String(profiles?.avatar_url || senderObj?.avatar_url || senderObj?.avatar || row.sender_avatar || '').trim() || undefined;
 
       return {
-        id: String(row.id || crypto.randomUUID()),
+        id: messageRowId(row),
         from: isMe ? 'me' : 'them',
         text: isCheckin ? `${senderName || 'Someone'} is here` : text,
         time: sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -223,10 +290,11 @@ export default function ChatPage() {
   }, [messages, activeChat]);
 
   const activeChatObj = chats.find((entry) => entry.id === activeChat) || null;
+  chatsRef.current = chats;
 
   const loadChatList = useCallback(async (silent = false) => {
     if (!token) { if (!silent) setChatListLoading(false); return; }
-    if (!silent) setChatListLoading(true);
+    if (!silent && chatsRef.current.length === 0) setChatListLoading(true);
     try {
       // Cached for 30 s (TTL.SHORT): a joined or created event shows up quickly,
       // and a failed request throws so it is never stored.
@@ -250,9 +318,19 @@ export default function ChatPage() {
           TTL.SHORT,
         ).catch(() => ({})),
       ]);
-      const joinedRows = Array.isArray(joinedBody) ? joinedBody : Array.isArray(joinedBody?.data) ? joinedBody.data : [];
-      const organizedRows = Array.isArray(organizedBody?.data) ? organizedBody.data : [];
-      const joinedEvents = joinedRows.map((row: Record<string, unknown>) => row?.events as Record<string, unknown>).filter(Boolean);
+      const joinedRows = Array.isArray(joinedBody)
+        ? joinedBody
+        : Array.isArray(joinedBody?.data)
+          ? joinedBody.data
+          : [];
+      const organizedRows = Array.isArray(organizedBody?.data)
+        ? organizedBody.data
+        : Array.isArray(organizedBody)
+          ? organizedBody
+          : [];
+      const joinedEvents = joinedRows
+        .map((row: Record<string, unknown>) => (row?.events || row) as Record<string, unknown>)
+        .filter((row) => row && (row.id || row.title));
       const allEvents = [...joinedEvents, ...organizedRows];
 
       const byId = new Map<string, ChatEvent>();
@@ -268,7 +346,7 @@ export default function ChatPage() {
             avatar: evt.image,
             lastMsg: 'Open conversation',
             time: evt.time || '',
-            unread: 0,
+            unread: isChatUnread(user.id, evt.id) ? 1 : 0,
             isPast: !isEventUpcoming(evt),
             isCancelled,
             eventDate: evt.date || '',
@@ -279,7 +357,8 @@ export default function ChatPage() {
       const mapped = Array.from(byId.values());
       setChats(mapped);
 
-      if (activeChat && !mapped.some((entry) => entry.id === activeChat)) {
+      const openId = activeChatRef.current;
+      if (!silent && openId && mapped.length > 0 && !mapped.some((entry) => entry.id === openId)) {
         setActiveChat(null);
         setChatUnavailable(true);
         setMessages([]);
@@ -305,7 +384,7 @@ export default function ChatPage() {
                 avatar: singleItem.image,
                 lastMsg: 'Open conversation',
                 time: singleItem.time || '',
-                unread: 0,
+                unread: isChatUnread(user.id, singleItem.id) ? 1 : 0,
                 isPast: !isEventUpcoming(singleItem),
                 isCancelled: isCanc,
                 eventDate: singleItem.date || '',
@@ -325,12 +404,13 @@ export default function ChatPage() {
         setHandledSelectedParam(true);
       }
     } catch {
-      setChats([]);
+      if (!silent && chatsRef.current.length === 0) setChats([]);
     } finally {
       if (!silent) setChatListLoading(false);
     }
-  }, [token, user.id, activeChat, selectedEventFromUrl, handledSelectedParam, navigate]);
+  }, [token, user.id, selectedEventFromUrl, handledSelectedParam, navigate]);
 
+  loadChatListRef.current = loadChatList;
   useEffect(() => { void loadChatList(); }, [loadChatList]);
 
   const normalizeMessageList = (body: unknown): Record<string, unknown>[] => {
@@ -347,8 +427,11 @@ export default function ChatPage() {
       const requestId = ++messagesRequestRef.current;
       const isCurrent = () => requestId === messagesRequestRef.current;
       const cacheKey = chatMessagesCacheKey(eventId, user.id);
-      const showRows = (rows: Record<string, unknown>[]) =>
-        setMessages(rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[]);
+      const showRows = (rows: Record<string, unknown>[]) => {
+        const next = rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[];
+        if (next.length) rememberSeen(user.id, eventId, next[next.length - 1].id);
+        setMessages((prev) => (sameVisibleMessages(prev, next) ? prev : next));
+      };
 
       // Show the saved copy at once (whatever its age), then always refresh from the server below.
       const saved = peekCache<Record<string, unknown>[]>(cacheKey);
@@ -363,7 +446,10 @@ export default function ChatPage() {
       }
       try {
         const primaryUrl = `${getApiUrl(chatMessagesPath(eventId))}?limit=100&page=1`;
-        const res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+        const res = await fetch(primaryUrl, {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        });
         // Never keep messages from a chat you can no longer access, even if you have moved on.
         if (res.status === 403) invalidate(cacheKey);
         if (!isCurrent()) return;
@@ -396,6 +482,7 @@ export default function ChatPage() {
     },
     [token, user.id],
   );
+  loadMessagesRef.current = loadMessages;
 
   useEffect(() => {
     if (!activeChat) return;
@@ -404,15 +491,125 @@ export default function ChatPage() {
 
   useEffect(() => {
     const onChange = (event: Event) => {
-      const eventId = (event as CustomEvent<{ eventId?: string | null }>).detail?.eventId;
-      if (activeChat && (!eventId || eventId === activeChat)) {
-        void loadMessages(activeChat, true);
+      const detail = (event as CustomEvent<{ eventId?: string | null; row?: Record<string, unknown> | null }>).detail;
+      const row = detail?.row ?? null;
+      const eventId =
+        detail?.eventId ??
+        (row ? eventIdFromRealtimeRow({ new: row }) : null);
+      const openId = activeChatRef.current;
+      const matchesOpen =
+        Boolean(openId && eventId && String(eventId).toLowerCase() === String(openId).toLowerCase());
+      if (openId && (matchesOpen || !eventId)) {
+        if (row) {
+          const mapped = mapMessageRowRef.current(row);
+          if (mapped) {
+            setMessages((prev) => (prev.some((m) => m.id === mapped.id) ? prev : [...prev, mapped]));
+          }
+        }
+        invalidate(chatMessagesCacheKey(openId, user.id));
+        void loadMessagesRef.current(openId, true);
       }
-      void loadChatList(true);
+      // List and other threads must still light up after the first chat was opened.
+      // Do not require `activeChat` — going back to the list used to drop every later tag.
+      if (eventId && !matchesOpen) {
+        const sender = row?.sender_id ?? row?.user_id;
+        noteIncomingChatMessage(user.id, eventId, sender == null ? null : String(sender));
+      }
+      void loadChatListRef.current(true);
     };
     window.addEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
     return () => window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
-  }, [activeChat, loadMessages, loadChatList]);
+  }, [user.id]);
+
+  useEffect(() => {
+    if (!token || !activeChat) return;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void loadMessages(activeChat, true);
+    };
+    const id = window.setInterval(tick, CHAT_LIVE_POLL_MS);
+    window.addEventListener('focus', tick);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', tick);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [activeChat, token, loadMessages]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const peek = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const openId = activeChatRef.current;
+      const others = chatsRef.current.filter((chat) => chat.id !== openId);
+      await Promise.allSettled(
+        others.map(async (chat) => {
+          if (cancelled) return;
+          try {
+            const res = await fetch(`${getApiUrl(chatMessagesPath(chat.id))}?limit=100&page=1`, {
+              cache: 'no-store',
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            });
+            if (!res.ok) return;
+            const body = await res.json().catch(() => null);
+            const latest = latestMessageMeta(normalizeMessageList(body));
+            if (latest) {
+              noteNewerChatMessage(user.id, chat.id, latest.createdAt, latest.senderId, latest.messageId);
+            }
+          } catch {
+            /* ignore a single chat peek */
+          }
+        }),
+      );
+    };
+    let interval = 0;
+    const timeout = window.setTimeout(() => {
+      void peek();
+      interval = window.setInterval(() => { void peek(); }, CHAT_LIVE_POLL_MS);
+    }, CHAT_LIVE_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [token, user.id]);
+
+  const closeActiveChat = () => {
+    const openId = activeChatRef.current;
+    if (openId) {
+      const lastId = messages.length ? messages[messages.length - 1].id : null;
+      markChatRead(user.id, openId, lastId);
+    }
+    setViewingChatId(null);
+    setActiveChat(null);
+  };
+
+  useEffect(() => {
+    setViewingChatId(activeChat);
+    if (!activeChat) return;
+    const lastId = messages.length ? messages[messages.length - 1].id : null;
+    markChatRead(user.id, activeChat, lastId);
+    setChats((prev) => prev.map((c) => (c.id === activeChat ? { ...c, unread: 0 } : c)));
+  }, [activeChat, messages, user.id]);
+
+  useEffect(() => {
+    return () => setViewingChatId(null);
+  }, []);
+
+  useEffect(() => {
+    const syncUnread = () => {
+      setChats((prev) =>
+        prev.map((c) => ({
+          ...c,
+          unread: activeChat === c.id ? 0 : isChatUnread(user.id, c.id) ? 1 : 0,
+        })),
+      );
+    };
+    window.addEventListener(CHAT_UNREAD_CHANGED_EVENT, syncUnread);
+    return () => window.removeEventListener(CHAT_UNREAD_CHANGED_EVENT, syncUnread);
+  }, [activeChat, user.id]);
 
   const sendMessage = async (explicitContent?: string) => {
     const chat = activeChatObj;
@@ -438,6 +635,7 @@ export default function ChatPage() {
         return;
       }
       setInput(''); setShowEmoji(false); setChatApiMissing(false);
+      pinToBottomRef.current = true;
       await loadMessages(activeChat, true); // always reads the server and replaces the saved copy
     } catch {
       setToast({ show: true, message: 'Unable to send message right now.', type: 'error' });
@@ -446,9 +644,8 @@ export default function ChatPage() {
     }
   };
 
-  if (activeChat) {
+  if (activeChat && activeChatObj) {
     const chat = activeChatObj;
-    if (!chat) return null;
     const isReadOnly = Boolean(chat.isPast || chat.isCancelled);
     return (
       <div className="flex min-h-screen flex-col bg-background pb-20">
@@ -465,7 +662,7 @@ export default function ChatPage() {
             <button
               type="button"
               aria-label="Back to chats"
-              onClick={() => setActiveChat(null)}
+              onClick={closeActiveChat}
               className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90 shrink-0"
             >
               <ArrowLeft className="h-4 w-4 text-foreground" />
@@ -500,7 +697,14 @@ export default function ChatPage() {
         )}
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 custom-scrollbar">
+          <div
+            ref={scrollerRef}
+            onScroll={() => {
+              const el = scrollerRef.current;
+              if (el) pinToBottomRef.current = isNearBottom(el);
+            }}
+            className="flex-1 space-y-1 overflow-y-auto px-4 py-4 custom-scrollbar"
+          >
             {messagesLoading && (
               <div className="space-y-3 pt-4">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -785,7 +989,7 @@ export default function ChatPage() {
           })}
         </div>
 
-        {chatListLoading && (
+        {chatListLoading && visibleChats.length === 0 && (
           <div className="space-y-2">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3.5">
@@ -817,7 +1021,7 @@ export default function ChatPage() {
           </div>
         )}
 
-        {!chatListLoading && visibleChats.length > 0 && (
+        {visibleChats.length > 0 && (
           <div className="space-y-2.5">
             {visibleChats.map((chat) => (
               <motion.button
@@ -836,7 +1040,17 @@ export default function ChatPage() {
                   <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-background ${chat.isCancelled ? 'bg-amber-500' : chat.isPast ? 'bg-muted-foreground' : 'bg-green-500'}`} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-foreground">{chat.name}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-sm font-semibold text-foreground">{chat.name}</p>
+                    {(chat.unread > 0 || isChatUnread(user.id, chat.id)) && (
+                      <span
+                        data-testid="new-messages-tag"
+                        className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold leading-none text-accent-foreground animate-pulse"
+                      >
+                        New messages
+                      </span>
+                    )}
+                  </div>
                   <p className="line-clamp-1 text-xs text-muted-foreground mt-0.5">
                     {chat.isCancelled ? 'Cancelled · Read-only' : chat.isPast ? `Ended · ${chat.eventDate}` : chat.lastMsg}
                   </p>

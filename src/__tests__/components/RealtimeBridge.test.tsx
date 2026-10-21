@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import RealtimeBridge from '@/components/RealtimeBridge';
 import { FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
+import { isChatUnread, setViewingChatId } from '@/lib/chatUnread';
 import { CHAT_MESSAGES_CHANGED_EVENT } from '@/lib/realtimeEvents';
 import { setAuthToken } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/storage';
 
 const { invalidateNotificationsMock, invalidateEventsMock } = vi.hoisted(() => ({
   invalidateNotificationsMock: vi.fn(),
@@ -30,9 +32,11 @@ describe('RealtimeBridge', () => {
     invalidateNotificationsMock.mockClear();
     invalidateEventsMock.mockClear();
     setAuthToken('bridge-token');
+    setViewingChatId(null);
+    localStorage.clear();
   });
 
-  it('refreshes notifications, friends, chat, and events from table changes', () => {
+  it('refreshes notifications, friends, chat, and events from table changes', async () => {
     const chatChanged = vi.fn();
     const friendsChanged = vi.fn();
     window.addEventListener(CHAT_MESSAGES_CHANGED_EVENT, chatChanged);
@@ -40,8 +44,11 @@ describe('RealtimeBridge', () => {
 
     render(<RealtimeBridge />);
 
-    const tables = handlers.map((h) => h.table);
-    expect(tables).toEqual(expect.arrayContaining(['notifications', 'friend_requests', 'messages', 'events', 'posts', 'participants']));
+    await waitFor(() => {
+      expect(handlers.map((h) => h.table)).toEqual(
+        expect.arrayContaining(['notifications', 'friend_requests', 'messages', 'events', 'posts', 'participants']),
+      );
+    });
 
     handlers.find((h) => h.table === 'notifications')?.onData({});
     handlers.find((h) => h.table === 'friend_requests')?.onData({});
@@ -52,6 +59,7 @@ describe('RealtimeBridge', () => {
     expect(invalidateNotificationsMock).toHaveBeenCalled();
     expect(friendsChanged).toHaveBeenCalled();
     expect(chatChanged).toHaveBeenCalled();
+    expect(isChatUnread(getCurrentUser()?.id, 'evt-9')).toBe(true);
     expect(invalidateEventsMock).toHaveBeenCalledTimes(2);
 
     window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, chatChanged);

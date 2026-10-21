@@ -62,6 +62,7 @@ describe('ProfilePage identity', () => {
     expect(usernames[0]).toHaveTextContent('john_42');
 
     expect(screen.getByTestId('profile-full-name')).toHaveTextContent('John Smith');
+    expect(screen.getByTestId('plan-badge')).toHaveTextContent('Basic');
     expect(screen.getByTestId('profile-picture')).toHaveAttribute('data-avatar-kind', 'icon');
     expect(screen.getByTestId('profile-banner').style.backgroundImage).toBe('');
 

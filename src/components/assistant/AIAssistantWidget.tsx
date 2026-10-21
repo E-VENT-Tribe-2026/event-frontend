@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Sparkles,
   Send,
@@ -16,6 +16,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { getAuthToken } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/storage';
+import { accountPlanFrom } from '@/lib/accountPlan';
+import { assistantQuota, consumeAssistantAsk, BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
 import {
   sendAssistantChat,
   searchAssistantEvents,
@@ -91,6 +94,7 @@ export const AIAssistantWidget: React.FC = () => {
     status?: number;
     canRetry: boolean;
   } | null>(null);
+  const [quotaTick, setQuotaTick] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -137,6 +141,12 @@ export const AIAssistantWidget: React.FC = () => {
     return null;
   }
 
+  const viewer = getCurrentUser();
+  const isPro = accountPlanFrom(viewer) === 'pro';
+  const quota = assistantQuota(viewer?.id, isPro);
+  const outOfAsks = !quota.unlimited && quota.remaining <= 0;
+  void quotaTick;
+
   const handleOpen = () => {
     setIsOpen(true);
     setIsMinimized(false);
@@ -178,6 +188,17 @@ export const AIAssistantWidget: React.FC = () => {
       return;
     }
 
+    const viewer = getCurrentUser();
+    const isPro = accountPlanFrom(viewer) === 'pro';
+    if (!isPro && assistantQuota(viewer?.id, false).remaining <= 0) {
+      setBannerError({
+        message: `You've used your ${BASIC_ASSISTANT_ASKS_PER_DAY} free AI asks today. Upgrade to Pro for unlimited.`,
+        canRetry: false,
+      });
+      setQuotaTick((n) => n + 1);
+      return;
+    }
+
     setBannerError(null);
     lastFailedPromptRef.current = trimmed;
 
@@ -204,6 +225,7 @@ export const AIAssistantWidget: React.FC = () => {
         content: m.content,
       }));
 
+    let charged = false;
     try {
       // If user specifically clicks quick search chip
       if (trimmed.startsWith('🔍 Search upcoming') || trimmed.toLowerCase().startsWith('/search ')) {
@@ -219,8 +241,8 @@ export const AIAssistantWidget: React.FC = () => {
           events: searchRes.events,
         };
         setMessages((prev) => [...prev, assistantMsg]);
-        setIsLoading(false);
         lastFailedPromptRef.current = null;
+        charged = true;
         return;
       }
 
@@ -237,8 +259,8 @@ export const AIAssistantWidget: React.FC = () => {
           validationIssues: draftRes.validation_issues,
         };
         setMessages((prev) => [...prev, assistantMsg]);
-        setIsLoading(false);
         lastFailedPromptRef.current = null;
+        charged = true;
         return;
       }
 
@@ -258,6 +280,7 @@ export const AIAssistantWidget: React.FC = () => {
 
       setMessages((prev) => [...prev, assistantMsg]);
       lastFailedPromptRef.current = null;
+      charged = true;
     } catch (err: unknown) {
       let errorMsg = 'Failed to get a response from the AI assistant.';
       let status: number | undefined;
@@ -277,6 +300,10 @@ export const AIAssistantWidget: React.FC = () => {
         canRetry,
       });
     } finally {
+      if (charged) {
+        consumeAssistantAsk(viewer?.id, isPro);
+        setQuotaTick((n) => n + 1);
+      }
       setIsLoading(false);
     }
   };
@@ -439,7 +466,13 @@ export const AIAssistantWidget: React.FC = () => {
                         isLoading ? 'bg-accent animate-ping' : 'bg-emerald-400'
                       }`}
                     />
-                    <span>{isLoading ? 'Thinking...' : 'Online & ready'}</span>
+                    <span>
+                      {isLoading
+                        ? 'Thinking...'
+                        : quota.unlimited
+                          ? 'Pro · unlimited asks'
+                          : `${quota.remaining} of ${quota.limit} asks left today`}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -486,7 +519,17 @@ export const AIAssistantWidget: React.FC = () => {
               >
                 <div className="flex items-start gap-1.5 min-w-0">
                   <AlertCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
-                  <p className="text-xs leading-snug">{bannerError.message}</p>
+                  <p className="text-xs leading-snug">
+                    {bannerError.message}
+                    {outOfAsks ? (
+                      <>
+                        {' '}
+                        <Link to="/premium" className="font-bold underline underline-offset-2">
+                          Upgrade to Pro
+                        </Link>
+                      </>
+                    ) : null}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   {bannerError.canRetry && (
@@ -541,7 +584,8 @@ export const AIAssistantWidget: React.FC = () => {
                           key={idx}
                           type="button"
                           onClick={() => sendMessage(promptText)}
-                          className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-left text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5 hover:text-primary transition-all text-ellipsis overflow-hidden"
+                          disabled={outOfAsks}
+                          className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-left text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5 hover:text-primary transition-all text-ellipsis overflow-hidden disabled:opacity-50"
                         >
                           {promptText}
                         </button>
@@ -640,7 +684,7 @@ export const AIAssistantWidget: React.FC = () => {
               <button
                 type="button"
                 onClick={() => sendMessage('🔍 Search upcoming events')}
-                disabled={isLoading}
+                disabled={isLoading || outOfAsks}
                 className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-50"
               >
                 <Search className="h-3 w-3" />
@@ -649,7 +693,7 @@ export const AIAssistantWidget: React.FC = () => {
               <button
                 type="button"
                 onClick={() => sendMessage('✨ Draft a new event')}
-                disabled={isLoading}
+                disabled={isLoading || outOfAsks}
                 className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-50"
               >
                 <CalendarPlus className="h-3 w-3" />
@@ -665,7 +709,7 @@ export const AIAssistantWidget: React.FC = () => {
                   data-testid="ai-chat-input"
                   rows={1}
                   value={input}
-                  disabled={isLoading}
+                  disabled={isLoading || outOfAsks}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={
@@ -678,7 +722,7 @@ export const AIAssistantWidget: React.FC = () => {
                   type="button"
                   data-testid="ai-chat-send"
                   aria-label="Send message"
-                  disabled={!input.trim() || isLoading}
+                  disabled={!input.trim() || isLoading || outOfAsks}
                   onClick={() => sendMessage(input)}
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg gradient-primary text-white shadow-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                 >

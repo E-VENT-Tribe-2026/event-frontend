@@ -2,23 +2,25 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { getCurrentUser, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ALL_INTERESTS } from '@/lib/interests';
+import { categoryEmoji } from '@/lib/categoryStyle';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import EventCard from '@/components/EventCard';
 import InterestEventCard from '@/components/InterestEventCard';
+import FriendActivityMarquee from '@/components/FriendActivityMarquee';
 import AppToast from '@/components/AppToast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { Sparkles, Users, MapPin, Calendar, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2, Film, BookOpen, Plane, Coffee, Network, Leaf, LayoutGrid, SlidersHorizontal, X, ArrowRight, UserPlus, Trophy } from 'lucide-react';
+import { Sparkles, Users, MapPin, Calendar, SlidersHorizontal, X, ArrowRight, UserPlus } from 'lucide-react';
+import CategoryPills from '@/components/CategoryPills';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidate, invalidatePrefix, cachedFetch, TTL } from '@/lib/queryCache';
-import { parseFriendsError, sendFriendRequest, userProfilePath } from '@/lib/friendsApi';
-import FriendsGoing from '@/components/FriendsGoing';
+import { FRIENDS_CHANGED_EVENT, fetchSentRequests, sendFriendRequest, userProfilePath } from '@/lib/friendsApi';
 import { useFriendsGoingEvents } from '@/hooks/useFriendsGoing';
 
 const EMPTY_EVENTS: EventItem[] = [];
@@ -28,6 +30,7 @@ const INTEREST_PROMPT_DISMISSED_KEY = 'event_interest_prompt_dismissed';
 const SUGGESTIONS_PATH = '/api/friends/suggestions';
 const MAX_SUGGESTIONS = 5;
 const PAGE = 6;
+const UPCOMING_PREVIEW = 4;
 
 type SuggestedUser = {
   id: string;
@@ -38,29 +41,11 @@ type SuggestedUser = {
 };
 
 const FRIEND_LIST_PATHS = ['/api/friends', '/api/blocks'];
-const REQUEST_PATHS = ['/api/friends/requests/sent', '/api/friends/requests/incoming'];
+const REQUEST_PATHS = [
+  '/api/friends/requests/sent?page=1&limit=50',
+  '/api/friends/requests/incoming?page=1&limit=50',
+];
 
-const INTEREST_EMOJI: Record<string, string> = {
-  Music: '🎵', Sports: '⚽', Gaming: '🎮', Movies: '🎬', Study: '📚', Travel: '✈️', Tech: '💻',
-  Art: '🎨', Fitness: '💪', Coffee: '☕', Networking: '🤝', Food: '🍕', Wellness: '🧘',
-};
-
-const CATS = [
-  { id: 'All',       icon: LayoutGrid, iconColor: '#94a3b8', activeBg: 'rgba(148,163,184,0.15)', activeBorderColor: 'rgba(148,163,184,0.5)' },
-  { id: 'Music',     icon: Music,      iconColor: '#a78bfa', activeBg: 'rgba(167,139,250,0.15)', activeBorderColor: 'rgba(167,139,250,0.5)' },
-  { id: 'Tech',      icon: Cpu,        iconColor: '#60a5fa', activeBg: 'rgba(96,165,250,0.15)',  activeBorderColor: 'rgba(96,165,250,0.5)'  },
-  { id: 'Food',      icon: Utensils,   iconColor: '#fb923c', activeBg: 'rgba(251,146,60,0.15)',  activeBorderColor: 'rgba(251,146,60,0.5)'  },
-  { id: 'Fitness',   icon: Dumbbell,   iconColor: '#4ade80', activeBg: 'rgba(74,222,128,0.15)',  activeBorderColor: 'rgba(74,222,128,0.5)'  },
-  { id: 'Art',       icon: Palette,    iconColor: '#f472b6', activeBg: 'rgba(244,114,182,0.15)', activeBorderColor: 'rgba(244,114,182,0.5)' },
-  { id: 'Gaming',    icon: Gamepad2,   iconColor: '#818cf8', activeBg: 'rgba(129,140,248,0.15)', activeBorderColor: 'rgba(129,140,248,0.5)' },
-  { id: 'Sports',    icon: Trophy,     iconColor: '#34d399', activeBg: 'rgba(52,211,153,0.15)',  activeBorderColor: 'rgba(52,211,153,0.5)'  },
-  { id: 'Movies',    icon: Film,       iconColor: '#f87171', activeBg: 'rgba(248,113,113,0.15)', activeBorderColor: 'rgba(248,113,113,0.5)' },
-  { id: 'Study',     icon: BookOpen,   iconColor: '#facc15', activeBg: 'rgba(250,204,21,0.15)',  activeBorderColor: 'rgba(250,204,21,0.5)'  },
-  { id: 'Travel',    icon: Plane,      iconColor: '#38bdf8', activeBg: 'rgba(56,189,248,0.15)',  activeBorderColor: 'rgba(56,189,248,0.5)'  },
-  { id: 'Coffee',    icon: Coffee,     iconColor: '#fbbf24', activeBg: 'rgba(251,191,36,0.15)',  activeBorderColor: 'rgba(251,191,36,0.5)'  },
-  { id: 'Networking',icon: Network,    iconColor: '#22d3ee', activeBg: 'rgba(34,211,238,0.15)',  activeBorderColor: 'rgba(34,211,238,0.5)'  },
-  { id: 'Wellness',  icon: Leaf,       iconColor: '#2dd4bf', activeBg: 'rgba(45,212,191,0.15)',  activeBorderColor: 'rgba(45,212,191,0.5)'  },
-] as const;
 
 function toArray(body: unknown): any[] {
   if (Array.isArray(body)) return body;
@@ -79,8 +64,10 @@ function collectUserIds(body: unknown, selfId: string | undefined, rowsAreUsers:
     const o = item as Record<string, any>;
     const found = [
       o.user?.id, o.friend?.id, o.sender?.id, o.receiver?.id, o.requester?.id, o.addressee?.id,
+      o.to_user?.id, o.target?.id,
       o.user_id, o.friend_id, o.sender_id, o.receiver_id, o.requester_id, o.addressee_id,
-    ].filter((v): v is string => typeof v === 'string');
+      o.to_user_id, o.target_id, o.receiver_user_id,
+    ].filter((v): v is string => typeof v === 'string' && v.trim() !== '');
     if (found.length === 0 && rowsAreUsers && typeof o.id === 'string') found.push(o.id);
     for (const id of found) if (id !== selfId) ids.push(id);
   }
@@ -146,6 +133,7 @@ export default function HomePage() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleAll, setVisibleAll] = useState(PAGE);
+  const [upcomingLimit, setUpcomingLimit] = useState(UPCOMING_PREVIEW);
   const [showFilterModal, setShowFilterModal] = useState(false);
 
   const today = new Date();
@@ -197,7 +185,7 @@ export default function HomePage() {
     const token = getAuthToken();
     if (!token || !userId) { setSuggestedUsers([]); setSuggestionsLoading(false); return; }
     try {
-      const [body, excludedIds] = await Promise.all([
+      const [body, excludedIds, sent] = await Promise.all([
         cachedFetch(
           `${SUGGESTIONS_PATH}:${userId}`,
           async () => {
@@ -210,11 +198,16 @@ export default function HomePage() {
           TTL.MEDIUM,
         ),
         cachedFetch(`/api/friends/excluded:${userId}`, () => fetchExcludedIds(token, userId), TTL.MEDIUM),
+        fetchSentRequests(1, 50).catch(() => ({ data: [] as Array<{ user?: { id?: string } }> })),
       ]);
 
       const blocked = new Set<string>(excludedIds as string[]);
       blocked.add(userId);
       friendsKey.split(',').filter(Boolean).forEach((id) => blocked.add(id));
+      for (const row of sent.data) {
+        const id = row.user?.id;
+        if (typeof id === 'string' && id.trim()) blocked.add(id);
+      }
 
       const users: SuggestedUser[] = toArray(body)
         .map((item) => (item && typeof item === 'object' && 'user' in item ? item.user : item))
@@ -232,6 +225,15 @@ export default function HomePage() {
   useEffect(() => {
     if (userId) loadSuggestions();
     else { setSuggestedUsers([]); setSuggestionsLoading(false); }
+    const refresh = () => {
+      if (userId) {
+        invalidate(`/api/friends/excluded:${userId}`);
+        invalidatePrefix('/api/friends/requests');
+        void loadSuggestions();
+      }
+    };
+    window.addEventListener(FRIENDS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(FRIENDS_CHANGED_EVENT, refresh);
   }, [userId, loadSuggestions]);
 
   const handleAddFriend = async (receiverId: string) => {
@@ -431,21 +433,19 @@ export default function HomePage() {
     [interestRecommendations, applyFilters],
   );
 
-  const tonightEvents = useMemo(() => {
+  const friendActivityEvents = useMemo(() => {
     const byId = new Map<string, EventItem>();
-    for (const event of [...events, ...interestRecommendations]) {
+    for (const event of [...events, ...interestRecommendations, ...upcomingForYou]) {
       if (!isEventUpcoming(event) || String(event.status || '').toLowerCase() === 'cancelled') continue;
       byId.set(event.id, event);
     }
-    return Array.from(byId.values())
-      .sort((a, b) => eventStartMs(a) - eventStartMs(b))
-      .slice(0, 24);
-  }, [events, interestRecommendations]);
+    return Array.from(byId.values()).sort((a, b) => eventStartMs(a) - eventStartMs(b));
+  }, [events, interestRecommendations, upcomingForYou]);
   const {
     rows: friendsGoingEvents,
     loading: friendsGoingLoading,
     friendCount,
-  } = useFriendsGoingEvents(user ? tonightEvents : EMPTY_EVENTS);
+  } = useFriendsGoingEvents(user ? friendActivityEvents : EMPTY_EVENTS);
 
   const handleJoin = (id: string) => {
     if (!user) { navigate('/login'); return; }
@@ -477,25 +477,13 @@ export default function HomePage() {
 
         <div className="mx-auto max-w-7xl px-4 pt-2 pb-3">
           <div className="flex items-center gap-2">
-            <div className="flex flex-wrap flex-1 gap-1.5">
-              {CATS.map(({ id, icon: Icon, iconColor, activeBg, activeBorderColor }) => {
-                const active = category === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setCategory(id)}
-                    style={active ? { background: activeBg, borderColor: activeBorderColor, color: iconColor } : { background: activeBg.replace('0.15', '0.08'), borderColor: activeBorderColor.replace('0.5', '0.25') }}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all active:scale-95 ${
-                      active ? 'border-transparent shadow-sm' : 'border-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: iconColor }} />
-                    {id}
-                  </button>
-                );
-              })}
-            </div>
+            <CategoryPills
+              includeAll
+              value={category}
+              onChange={setCategory}
+              className="flex-1"
+              aria-label="Filter by category"
+            />
 
             <button
               type="button"
@@ -536,7 +524,7 @@ export default function HomePage() {
             )}
 
             {user && (
-              <div className="rounded-2xl bg-secondary/40 border border-border/80 p-4 space-y-3.5 shadow-lg shadow-black/5 backdrop-blur-sm">
+              <div data-testid="upcoming-events" className="rounded-2xl bg-secondary/40 border border-border/80 p-4 space-y-3.5 shadow-lg shadow-black/5 backdrop-blur-sm">
                 <div className="flex items-center justify-between pb-1 border-b border-border/40">
                   <div className="flex items-center gap-2">
                     <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/20">
@@ -549,7 +537,7 @@ export default function HomePage() {
 
                 {upcomingForYou.length > 0 ? (
                   <div className="space-y-2">
-                    {upcomingForYou.slice(0, 3).map((event) => (
+                    {upcomingForYou.slice(0, upcomingLimit).map((event) => (
                       <button
                         type="button"
                         key={event.id}
@@ -562,6 +550,23 @@ export default function HomePage() {
                         </p>
                       </button>
                     ))}
+                    {upcomingForYou.length > upcomingLimit ? (
+                      <button
+                        type="button"
+                        onClick={() => setUpcomingLimit(upcomingForYou.length)}
+                        className="w-full rounded-xl py-2 text-[11px] font-semibold text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        See all · {upcomingForYou.length - upcomingLimit} more
+                      </button>
+                    ) : upcomingForYou.length > UPCOMING_PREVIEW ? (
+                      <button
+                        type="button"
+                        onClick={() => setUpcomingLimit(UPCOMING_PREVIEW)}
+                        className="w-full rounded-xl py-2 text-[11px] font-semibold text-muted-foreground hover:bg-secondary/50 transition-colors"
+                      >
+                        Show less
+                      </button>
+                    ) : null}
                   </div>
                 ) : upcomingInitialLoading ? (
                   <div className="h-16 shimmer rounded-xl" />
@@ -649,45 +654,42 @@ export default function HomePage() {
           {/* Right Main Area */}
           <div className="space-y-6 min-w-0">
             {user && (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <SectionHeader
                   icon={Users}
-                  title="Tonight with friends"
+                  title="See what your friends are up to"
                   collapsed={!!collapsed['friends']}
                   onToggle={() => toggleSection('friends')}
                   iconClassName="text-orange-500"
                   iconWrapClassName="bg-orange-500/15 group-hover:bg-orange-500/25"
                 />
                 {!collapsed['friends'] && (
-                  <div className="space-y-2.5 rounded-2xl glass-card p-4">
-                    {friendsGoingLoading && friendsGoingEvents.length === 0 ? (
-                      <div className="space-y-2" aria-busy="true">
-                        <span className="sr-only">Looking for events your friends joined</span>
-                        {Array.from({ length: 2 }).map((_, i) => (
-                          <div key={i} className="h-16 rounded-xl shimmer" />
-                        ))}
-                      </div>
-                    ) : friendsGoingEvents.length > 0 ? (
-                      friendsGoingEvents.map((item) => (
-                        <button
-                          key={item.event.id}
-                          type="button"
-                          onClick={() => navigate(`/event/${item.event.id}`, { state: { event: item.event } })}
-                          className="w-full rounded-xl bg-secondary/40 px-3 py-2.5 text-left transition-colors hover:bg-secondary/70"
-                        >
-                          <p className="text-sm font-semibold text-foreground truncate">{item.event.title}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{item.event.date} · {item.event.time}</p>
-                          <FriendsGoing friends={item.friends} compact />
-                        </button>
-                      ))
-                    ) : (
-                      <p className="text-xs text-muted-foreground text-center py-2">
+                  friendsGoingLoading && friendsGoingEvents.length === 0 ? (
+                    <div className="flex gap-4 overflow-hidden pt-1" aria-busy="true">
+                      <span className="sr-only">Looking for events your friends joined</span>
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <div key={i} className="h-24 w-56 shrink-0 animate-pulse rounded-2xl border border-border/40 bg-secondary/40" />
+                      ))}
+                    </div>
+                  ) : friendsGoingEvents.length > 0 ? (
+                    <FriendActivityMarquee items={friendsGoingEvents} />
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 rounded-2xl glass-card px-4 py-5 text-center">
+                      <p className="text-xs text-muted-foreground max-w-[16rem]">
                         {friendCount === 0
                           ? 'Add friends to see the events they join.'
                           : 'None of your friends have joined an upcoming event yet.'}
                       </p>
-                    )}
-                  </div>
+                      {friendCount === 0 && (
+                        <Link
+                          to="/friends"
+                          className="rounded-full bg-orange-500/15 px-3 py-1.5 text-[11px] font-semibold text-orange-500 hover:bg-orange-500/25 transition-colors"
+                        >
+                          Find friends
+                        </Link>
+                      )}
+                    </div>
+                  )
                 )}
               </div>
             )}
@@ -703,17 +705,15 @@ export default function HomePage() {
                 />
                 {user.interests?.length ? (
                   recsInitialLoading ? (
-                    <div className="flex gap-2.5 overflow-hidden pt-1">
+                    <div className="space-y-2 pt-1">
                       {Array.from({ length: 4 }).map((_, i) => (
-                        <div key={i} className="h-[156px] w-[168px] shrink-0 animate-pulse rounded-xl border border-border/40 bg-secondary/40" />
+                        <div key={i} className="h-16 w-full animate-pulse rounded-2xl border border-border/40 bg-secondary/40" />
                       ))}
                     </div>
                   ) : filteredRecommendations.length > 0 ? (
-                    <div className="flex gap-2.5 overflow-x-auto pb-3 pt-1 snap-x custom-scrollbar">
+                    <div className="space-y-2" data-testid="interest-event-list">
                       {filteredRecommendations.map((event) => (
-                        <div key={event.id} className="snap-start">
-                          <InterestEventCard event={event} />
-                        </div>
+                        <InterestEventCard key={event.id} event={event} variant="row" />
                       ))}
                     </div>
                   ) : (
@@ -963,7 +963,7 @@ export default function HomePage() {
                           : 'border-border/40 bg-secondary/50 text-muted-foreground hover:border-border hover:text-foreground'
                       }`}
                     >
-                      <span className="text-xl leading-none">{INTEREST_EMOJI[interest] ?? '✨'}</span>
+                      <span className="text-xl leading-none">{categoryEmoji(interest)}</span>
                       <span className="text-[11px] font-medium leading-tight">{interest}</span>
                     </button>
                   );

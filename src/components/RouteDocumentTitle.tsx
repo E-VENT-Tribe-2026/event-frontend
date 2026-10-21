@@ -19,6 +19,8 @@ const ROUTES: Array<{ pattern: string; title: string }> = [
   { pattern: '/dashboard', title: 'Organizer dashboard' },
   { pattern: '/notifications', title: 'Notifications' },
   { pattern: '/profile', title: 'Profile' },
+  { pattern: '/account', title: 'Manage account' },
+  { pattern: '/premium', title: 'Pro' },
   { pattern: '/chat', title: 'Messages' },
   { pattern: '/friends', title: 'Friends' },
   { pattern: '/admin/events/:eventId', title: 'Event details (administrator)' },

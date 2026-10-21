@@ -157,6 +157,7 @@ describe('UserProfilePage', () => {
 
     expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
     expect(screen.getByText('@jane_doe')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-badge')).toHaveTextContent('Basic');
     expect(screen.getByText('I love live music.')).toBeInTheDocument();
     expect(screen.getByText('Music')).toBeInTheDocument();
     expect(screen.getByTestId('profile-banner')).toBeInTheDocument();
@@ -166,6 +167,12 @@ describe('UserProfilePage', () => {
     fireEvent.click(screen.getByTestId('user-tab-past'));
     expect(screen.getByText('Organized Past')).toBeInTheDocument();
     expect(screen.getByText('Joined Past')).toBeInTheDocument();
+  });
+
+  it('shows a Pro tag when the profile is on Pro', async () => {
+    mockBackend({ status: 'none', request_id: null }, { profile: { is_premium: true } });
+    renderPage();
+    expect(await screen.findByTestId('plan-badge')).toHaveTextContent('Pro');
   });
 
   it('shows no owner-only parts or cancelled events', async () => {

@@ -3,26 +3,30 @@ import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { Link, useNavigate } from 'react-router-dom';
 import { getCurrentUser, updateUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
-import { getAuthToken, clearAuthToken } from '@/lib/auth';
-import { fetchNotifications, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
+import { AUTH_TOKEN_EVENT, getAuthToken, clearAuthToken } from '@/lib/auth';
+import { countBellUnreads, fetchNotifications, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
 import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
+import { invalidatePrefix } from '@/lib/queryCache';
 import { useEffect, useState, useRef } from 'react';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import AppLogo from '@/components/AppLogo';
 import TopNavProfile from '@/components/TopNavProfile';
+import PlanBadge from '@/components/PlanBadge';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TopBarProps {
   search?: string;
   onSearchChange?: (v: string) => void;
   searchPlaceholder?: string;
+  showSearch?: boolean;
 }
 
 export default function TopBar({
   search = '',
   onSearchChange,
   searchPlaceholder = 'Search events...',
+  showSearch = true,
 }: TopBarProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState(getCurrentUser);
@@ -64,6 +68,8 @@ export default function TopBar({
         if (!profile.id) return;
         updateUser({
           name: String(profile.full_name || profile.name || ''),
+          ...(typeof profile.email === 'string' && profile.email.trim() ? { email: profile.email.trim() } : {}),
+          ...(typeof profile.username === 'string' && profile.username.trim() ? { username: profile.username.trim() } : {}),
           avatar: String(profile.avatar_url || ''),
           profilePhoto: String(profile.avatar_url || ''),
           bio: String(profile.bio || ''),
@@ -76,29 +82,33 @@ export default function TopBar({
   }, []);
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) return;
-
-    // Badge count is unread notifications; pending friend requests still light the
-    // bell when the notification list itself is empty.
     let cancelled = false;
     const check = () => {
+      const token = getAuthToken();
+      if (!token) {
+        if (!cancelled) setUnreadCount(0);
+        return;
+      }
+      // Drop the 30s cache so realtime / friend-request events show immediately.
+      invalidatePrefix('/api/notifications');
       Promise.all([
-        fetchNotifications(token).then((rows) => rows.filter((n) => !n.read).length).catch(() => 0),
+        fetchNotifications(token).catch(() => [] as Awaited<ReturnType<typeof fetchNotifications>>),
         fetchIncomingRequestCount().catch(() => 0),
-      ]).then(([unread, pending]) => {
-        if (!cancelled) setUnreadCount(unread || pending);
+      ]).then(([rows, pending]) => {
+        if (!cancelled) setUnreadCount(countBellUnreads(rows, pending));
       });
     };
 
     check();
     window.addEventListener(FRIENDS_CHANGED_EVENT, check);
     window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, check);
+    window.addEventListener(AUTH_TOKEN_EVENT, check);
     window.addEventListener('focus', check);
     return () => {
       cancelled = true;
       window.removeEventListener(FRIENDS_CHANGED_EVENT, check);
       window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, check);
+      window.removeEventListener(AUTH_TOKEN_EVENT, check);
       window.removeEventListener('focus', check);
     };
   }, [user?.id]);
@@ -115,18 +125,21 @@ export default function TopBar({
         {/* Logo */}
         <AppLogo size="sm" linkTo="/home" className="shrink-0 hover:opacity-90 transition-opacity" />
 
-        {/* Search */}
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
-            value={search}
-            onChange={e => onSearchChange?.(e.target.value)}
-            className="w-full rounded-full border border-border/50 bg-secondary pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all"
-          />
-        </div>
+        {showSearch ? (
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+              value={search}
+              onChange={e => onSearchChange?.(e.target.value)}
+              className="w-full rounded-full border border-border/50 bg-secondary pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all"
+            />
+          </div>
+        ) : (
+          <div className="flex-1" />
+        )}
 
         {/* Notifications */}
         <Link
@@ -150,59 +163,93 @@ export default function TopBar({
           <button
             type="button"
             onClick={() => setShowSettingsMenu(!showSettingsMenu)}
-            className="shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors"
             aria-label="Settings"
+            aria-expanded={showSettingsMenu}
+            aria-haspopup="menu"
             title="Settings"
+            className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all active:scale-95 ${
+              showSettingsMenu
+                ? 'gradient-primary text-primary-foreground shadow-glow'
+                : 'glass-card text-muted-foreground hover:text-foreground hover:bg-secondary'
+            }`}
           >
-            <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
+            <motion.span
+              className="flex"
+              animate={{ rotate: showSettingsMenu ? 90 : 0 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+            >
+              <Settings className="h-4 w-4" strokeWidth={2.4} />
+            </motion.span>
           </button>
 
           <AnimatePresence>
             {showSettingsMenu && (
               <motion.div
-                initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                role="menu"
+                initial={{ opacity: 0, y: 8, scale: 0.96 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                transition={{ duration: 0.15 }}
-                className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-xl z-50 space-y-1"
+                exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                transition={{ duration: 0.16 }}
+                className="absolute right-0 z-50 mt-2 w-72 origin-top-right overflow-hidden rounded-2xl border border-border/70 bg-background/95 p-0 shadow-xl backdrop-blur-xl"
               >
-                <div className="px-3 py-2 border-b border-border/40 mb-1">
-                  <p className="text-xs font-bold text-foreground truncate">{user?.name || 'My Account'}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">Manage preferences</p>
+                <div className="flex items-center gap-3 border-b border-border/50 px-3.5 py-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl gradient-primary shadow-glow shrink-0">
+                    <Settings className="h-4 w-4 text-primary-foreground" strokeWidth={2.4} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-foreground leading-tight">Settings</p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {user?.name || 'Preferences'}
+                      </p>
+                      {user ? <PlanBadge plan={user} /> : null}
+                    </div>
+                  </div>
                 </div>
 
-                <Link
-                  to="/profile"
-                  onClick={() => setShowSettingsMenu(false)}
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-foreground hover:bg-secondary transition-colors"
-                >
-                  <User className="h-4 w-4 text-primary" />
-                  Profile
-                </Link>
+                <div className="p-2 space-y-0.5">
+                  <Link
+                    role="menuitem"
+                    to="/profile"
+                    onClick={() => setShowSettingsMenu(false)}
+                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground hover:bg-secondary/80 transition-colors"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 text-primary shrink-0">
+                      <User className="h-4 w-4" />
+                    </span>
+                    Profile
+                  </Link>
 
-                <button
-                  type="button"
-                  onClick={() => { setShowSettingsMenu(false); navigate('/profile'); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-foreground hover:bg-secondary transition-colors text-left"
-                >
-                  <ShieldCheck className="h-4 w-4 text-accent" />
-                  Manage Account
-                </button>
+                  <Link
+                    role="menuitem"
+                    to="/account"
+                    onClick={() => setShowSettingsMenu(false)}
+                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground hover:bg-secondary/80 transition-colors"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent/15 text-accent shrink-0">
+                      <ShieldCheck className="h-4 w-4" />
+                    </span>
+                    Manage account
+                  </Link>
+                </div>
 
-                <div className="my-1 border-t border-border/40" />
+                <div className="border-t border-border/50 px-3 py-3">
+                  <ColorSchemePicker compact />
+                </div>
 
-                <ColorSchemePicker compact />
-
-                <div className="my-1 border-t border-border/40" />
-
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors text-left"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Logout
-                </button>
+                <div className="border-t border-border/50 p-2">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors text-left"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-destructive/10 shrink-0">
+                      <LogOut className="h-4 w-4" />
+                    </span>
+                    Log out
+                  </button>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

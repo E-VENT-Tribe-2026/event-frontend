@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useFriendsGoing } from '@/hooks/useFriendsGoing';
+import { useFriendsGoing, useFriendsGoingEvents } from '@/hooks/useFriendsGoing';
 import { setAuthToken } from '@/lib/auth';
 import { notifyEventsChanged } from '@/lib/realtimeEvents';
 import type { UserSummary } from '@/lib/friendsApi';
+import type { EventItem } from '@/lib/storage';
 
-const { fetchAllFriendsMock, fetchEventParticipantsMock } = vi.hoisted(() => ({
+const { fetchAllFriendsMock, fetchEventParticipantsMock, fetchFriendsAttendingMock, fetchUserProfileMock } = vi.hoisted(() => ({
   fetchAllFriendsMock: vi.fn(),
   fetchEventParticipantsMock: vi.fn(),
+  fetchFriendsAttendingMock: vi.fn(),
+  fetchUserProfileMock: vi.fn(),
 }));
 
 vi.mock('@/lib/eventSocial', async (importOriginal) => {
@@ -16,6 +19,22 @@ vi.mock('@/lib/eventSocial', async (importOriginal) => {
     ...mod,
     fetchAllFriends: () => fetchAllFriendsMock(),
     fetchEventParticipants: (eventId: string) => fetchEventParticipantsMock(eventId),
+  };
+});
+
+vi.mock('@/lib/eventAttendeesApi', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/eventAttendeesApi')>();
+  return {
+    ...mod,
+    fetchFriendsAttending: (eventId: string, token: string | null) => fetchFriendsAttendingMock(eventId, token),
+  };
+});
+
+vi.mock('@/lib/userProfileApi', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/userProfileApi')>();
+  return {
+    ...mod,
+    fetchUserProfile: (userId: string) => fetchUserProfileMock(userId),
   };
 });
 
@@ -53,5 +72,99 @@ describe('useFriendsGoing', () => {
       expect(result.current.friends.map((f) => f.id)).toEqual(['f1']);
     });
     expect(fetchEventParticipantsMock.mock.calls.length).toBeGreaterThan(1);
+  });
+});
+
+const event = {
+  id: 'evt-jazz',
+  title: 'Quiet Jazz Night',
+  description: '',
+  category: 'Music',
+  date: '2030-06-15',
+  time: '18:00',
+  location: 'Paris',
+  lat: 0,
+  lng: 0,
+  budget: 0,
+  participantsLimit: 20,
+  participants: [],
+  image: '',
+  organizer: 'Maya',
+  organizerId: 'u1',
+  organizerAvatar: '',
+  isPrivate: false,
+  isDraft: false,
+  requiresApproval: false,
+  reviews: [],
+  reports: [],
+  collaborators: [],
+  friendsAttendingCount: 1,
+} as EventItem;
+
+describe('useFriendsGoingEvents', () => {
+  beforeEach(() => {
+    setAuthToken('going-token');
+    fetchAllFriendsMock.mockReset();
+    fetchFriendsAttendingMock.mockReset();
+    fetchUserProfileMock.mockReset();
+    fetchAllFriendsMock.mockResolvedValue([friend]);
+    fetchFriendsAttendingMock.mockResolvedValue([]);
+    fetchUserProfileMock.mockResolvedValue({ id: 'f1', avatar_url: null, avatar_kind: null, icon_id: null });
+  });
+
+  it('uses the friends-attending endpoint so events you have not joined still appear', async () => {
+    fetchFriendsAttendingMock.mockResolvedValue([
+      { user_id: 'f1', is_friend: true, user: friend },
+    ]);
+    const { result } = renderHook(() => useFriendsGoingEvents([event]));
+
+    await waitFor(() => {
+      expect(result.current.rows).toHaveLength(1);
+    });
+    expect(fetchFriendsAttendingMock).toHaveBeenCalledWith('evt-jazz', 'going-token');
+    expect(result.current.rows[0].event.title).toBe('Quiet Jazz Night');
+    expect(result.current.rows[0].friends.map((f) => f.full_name)).toEqual(['Maya']);
+  });
+
+  it('still lists an event when the friends-attending count is set even if names fail to parse', async () => {
+    fetchFriendsAttendingMock.mockResolvedValue([{ not: 'a user' }]);
+    const { result } = renderHook(() => useFriendsGoingEvents([event]));
+
+    await waitFor(() => {
+      expect(result.current.rows).toHaveLength(1);
+    });
+    expect(result.current.rows[0].event.title).toBe('Quiet Jazz Night');
+    expect(result.current.rows[0].friends).toEqual([]);
+    expect(fetchUserProfileMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to friends' upcoming joined events when the homepage list has no friends-attending counts", async () => {
+    fetchUserProfileMock.mockResolvedValue({
+      id: 'f1',
+      avatar_url: null,
+      avatar_kind: null,
+      icon_id: null,
+      events: {
+        joined: {
+          upcoming: [{
+            id: 'evt-brunch',
+            title: 'Sunday Brunch',
+            category: 'Food',
+            start_datetime: '2030-06-20T11:00:00.000Z',
+            location_name: 'Paris',
+          }],
+        },
+      },
+    });
+    const quietNight = { ...event, friendsAttendingCount: 0 };
+    const { result } = renderHook(() => useFriendsGoingEvents([quietNight]));
+
+    await waitFor(() => {
+      expect(result.current.rows).toHaveLength(1);
+    });
+    expect(fetchFriendsAttendingMock).not.toHaveBeenCalled();
+    expect(fetchUserProfileMock).toHaveBeenCalledWith('f1');
+    expect(result.current.rows[0].event.title).toBe('Sunday Brunch');
+    expect(result.current.rows[0].friends.map((f) => f.id)).toEqual(['f1']);
   });
 });

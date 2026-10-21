@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
+import PlanBadge from '@/components/PlanBadge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -401,7 +402,10 @@ export default function UserProfilePage() {
 
           <div className="space-y-3 px-4 pt-8">
             <div>
-              <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+                <PlanBadge plan={profile} />
+              </div>
               {profile.username && <p className="text-sm text-muted-foreground">@{profile.username}</p>}
             </div>
 
