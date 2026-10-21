@@ -12,7 +12,7 @@ import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
-import { friendsAttendingHtml } from '@/lib/friendsAttendingPopup';
+import { buildMapEventPopup } from '@/lib/mapEventPopup';
 import { fetchMapEvents } from '@/lib/mapEventsApi';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
@@ -26,14 +26,6 @@ function clampToWorld(lat: number, lng: number): [number, number] {
     Math.max(south, Math.min(north, lat)),
     Math.max(west, Math.min(east, lng)),
   ];
-}
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 /** Spread markers that share the same rounded coordinates so popups stay tappable. */
@@ -264,36 +256,33 @@ export default function MapPage() {
       const organizerUsername = rawUsername ? `@${rawUsername.replace(/^@/, '')}` : null;
       const organizerAvatar = prof?.avatar_url || event.organizerAvatar;
 
-      const organizerInitial = escapeHtml((organizerFullName || 'O').charAt(0).toUpperCase());
+      // Built with DOM nodes + textContent so user text is never parsed as HTML (#245).
+      const popup = buildMapEventPopup({
+        id: event.id,
+        title: event.title,
+        date: event.date,
+        time: event.time,
+        location: event.location,
+        budget: event.budget,
+        friendsAttendingCount: event.friendsAttendingCount,
+        organizerFullName,
+        const organizerAvatar = prof?.avatar_url || event.organizerAvatar;
 
-      const avatarHtml = organizerAvatar
-        ? `<img src="${escapeHtml(organizerAvatar)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid #6d28d9;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'" /><span style="display:none;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`
-        : `<span style="display:flex;width:28px;height:28px;border-radius:50%;background:#6d28d9;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;flex-shrink:0">${organizerInitial}</span>`;
-
-      const costBadge = event.budget === 0
-        ? `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#22c55e20;color:#16a34a;font-size:10px;font-weight:700">Free</span>`
-        : `<span style="display:inline-block;padding:2px 8px;border-radius:99px;background:#6d28d920;color:#6d28d9;font-size:10px;font-weight:700">€${escapeHtml(String(event.budget))}</span>`;
-
-      const preview = `
-        <div style="font-family:system-ui,sans-serif;min-width:200px;max-width:260px">
-          <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;line-height:1.3;color:#0f172a">${escapeHtml(event.title)}</h3>
-          <p style="margin:0 0 2px;font-size:11px;color:#64748b">${escapeHtml(event.date)} · ${escapeHtml(event.time)}</p>
-          <p style="margin:0 0 10px;font-size:11px;color:#64748b">${escapeHtml(event.location || '—')}</p>
-          ${friendsAttendingHtml(event.friendsAttendingCount)}
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f8fafc;border-radius:8px">
-            ${avatarHtml}
-            <div style="min-width:0;line-height:1.2">
-              <p style="margin:0;font-size:11px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(organizerFullName)}</p>
-              ${organizerUsername ? `<p style="margin:0;font-size:10px;color:#64748b">${escapeHtml(organizerUsername)}</p>` : ''}
-            </div>
-            <div style="margin-left:auto">${costBadge}</div>
-          </div>
-          <button type="button" data-map-event-id="${escapeHtml(event.id)}" style="width:100%;padding:8px 10px;border:none;border-radius:8px;background:#6d28d9;color:#fff;font-size:12px;font-weight:600;cursor:pointer">
-            View event details
-          </button>
-        </div>
-      `;
-      marker.bindPopup(preview, { maxWidth: 280 });
+      // Built with DOM nodes + textContent so user text is never parsed as HTML (#245).
+      const popup = buildMapEventPopup({
+        id: event.id,
+        title: event.title,
+        date: event.date,
+        time: event.time,
+        location: event.location,
+        budget: event.budget,
+        friendsAttendingCount: event.friendsAttendingCount,
+        organizerFullName,
+        organizerUsername,
+        organizerAvatar,
+      });
+      marker.bindPopup(popup, { maxWidth: 280 });
+    });
     });
 
     const eventIds = spread.map((s) => s.item.id).sort().join(',');
