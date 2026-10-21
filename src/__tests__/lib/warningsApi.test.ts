@@ -12,37 +12,41 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-describe('parsePendingWarnings — placeholder contract (#191)', () => {
+describe('parsePendingWarnings — backend contract (event-backend #191)', () => {
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('reads a bare array', () => {
-    expect(parsePendingWarnings([{ id: 'w1', reason: 'Spam', created_at: '2026-10-01T10:00:00Z' }])).toEqual([
-      { id: 'w1', reason: 'Spam' },
-    ]);
+  it('reads items and keeps the numeric id as a string', () => {
+    const body = { items: [{ id: 7, created_at: '2026-10-01T10:00:00Z', reason: 'Spam', about: 'event' }] };
+    expect(parsePendingWarnings(body)).toEqual([{ id: '7', reason: 'Spam' }]);
   });
 
-  it('reads { data: [...] } and { warnings: [...] } envelopes', () => {
-    expect(parsePendingWarnings({ data: [{ id: 1, reason: 'A' }] })).toEqual([{ id: '1', reason: 'A' }]);
-    expect(parsePendingWarnings({ warnings: [{ id: 'w2', reason: 'B' }] })).toEqual([{ id: 'w2', reason: 'B' }]);
+  it('keeps the server order (oldest first)', () => {
+    const body = { items: [{ id: 1, reason: 'Older' }, { id: 2, reason: 'Newer' }] };
+    expect(parsePendingWarnings(body).map((w) => w.id)).toEqual(['1', '2']);
   });
 
-  it('drops rows without an id and treats unknown shapes as no warnings', () => {
-    expect(parsePendingWarnings([{ reason: 'no id' }, null, { id: '  ', reason: 'blank' }])).toEqual([]);
-    expect(parsePendingWarnings({ unexpected: true })).toEqual([]);
+  it('reads only items, nothing else', () => {
+    expect(parsePendingWarnings([{ id: 1, reason: 'bare array' }])).toEqual([]);
+    expect(parsePendingWarnings({ data: [{ id: 1, reason: 'A' }] })).toEqual([]);
+    expect(parsePendingWarnings({ items: 'not a list' })).toEqual([]);
     expect(parsePendingWarnings(null)).toEqual([]);
   });
 
+  it('drops rows without an id', () => {
+    expect(parsePendingWarnings({ items: [{ reason: 'no id' }, null, { id: '  ', reason: 'blank' }] })).toEqual([]);
+  });
+
   it('keeps a row without a reason (it must still be acknowledged) and logs it', () => {
-    expect(parsePendingWarnings([{ id: 'w1' }])).toEqual([{ id: 'w1', reason: '' }]);
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('without a reason'), 'w1');
+    expect(parsePendingWarnings({ items: [{ id: 1 }] })).toEqual([{ id: '1', reason: '' }]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('without a reason'), '1');
   });
 
   it('keeps the reason as the raw string (no HTML handling)', () => {
-    const [w] = parsePendingWarnings([{ id: 'w1', reason: '<b>bold</b>' }]);
+    const [w] = parsePendingWarnings({ items: [{ id: 1, reason: '<b>bold</b>' }] });
     expect(w.reason).toBe('<b>bold</b>');
   });
 });
@@ -65,33 +69,34 @@ describe('warnings requests', () => {
   });
 
   it('loads pending warnings with the bearer token and without any caching', async () => {
-    fetchMock.mockResolvedValue(jsonResponse([{ id: 'w1', reason: 'Spam' }]));
+    fetchMock.mockResolvedValue(jsonResponse({ items: [{ id: 1, created_at: '2026-10-01T10:00:00Z', reason: 'Spam', about: 'event' }] }));
     const result = await fetchPendingWarnings('token-abc');
-    expect(result).toEqual([{ id: 'w1', reason: 'Spam' }]);
+    expect(result).toEqual([{ id: '1', reason: 'Spam' }]);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain(WARNINGS_ENDPOINTS.PENDING);
+    expect(String(url)).toContain('/api/warnings/pending');
+    expect(init?.method ?? 'GET').toBe('GET');
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer token-abc');
     expect(init?.cache).toBe('no-store');
   });
 
   it('passes the abort signal through', async () => {
-    fetchMock.mockResolvedValue(jsonResponse([]));
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }));
     const controller = new AbortController();
     await fetchPendingWarnings('token-abc', controller.signal);
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
   });
 
   it('asks the server every time (no client cache)', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse([]));
+    fetchMock.mockImplementation(async () => jsonResponse({ items: [] }));
     await fetchPendingWarnings('token-abc');
     await fetchPendingWarnings('token-abc');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('treats 404 (endpoint not shipped yet) as no warnings', async () => {
+  it('rejects on 404 when loading (no longer means "no warnings")', async () => {
     fetchMock.mockResolvedValue(new Response('Not Found', { status: 404 }));
-    await expect(fetchPendingWarnings('token-abc')).resolves.toEqual([]);
+    await expect(fetchPendingWarnings('token-abc')).rejects.toMatchObject({ status: 404 });
     expect(onExpired).not.toHaveBeenCalled();
   });
 
@@ -147,19 +152,19 @@ describe('warnings requests', () => {
   });
 
   it('acknowledges a warning with POST and no caching', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    await acknowledgeWarning('token-abc', 'w/1');
+    fetchMock.mockResolvedValue(jsonResponse({}, 200));
+    await acknowledgeWarning('token-abc', '7');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain(WARNINGS_ENDPOINTS.ACKNOWLEDGE('w/1'));
-    expect(String(url)).toContain('w%2F1');
+    expect(String(url)).toContain('/api/warnings/7/acknowledge');
+    expect(String(url)).toContain(WARNINGS_ENDPOINTS.ACKNOWLEDGE('7'));
     expect(init?.method).toBe('POST');
     expect(init?.cache).toBe('no-store');
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer token-abc');
   });
 
   it('passes the abort signal through when acknowledging', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    fetchMock.mockResolvedValue(jsonResponse({}, 200));
     const controller = new AbortController();
     await acknowledgeWarning('token-abc', 'w1', controller.signal);
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
@@ -175,12 +180,13 @@ describe('warnings requests', () => {
     expect(onExpired).not.toHaveBeenCalled();
   });
 
-  it.each([409, 410])('treats %i (no longer pending) as done', async (status) => {
-    fetchMock.mockResolvedValue(new Response('', { status }));
-    await expect(acknowledgeWarning('token-abc', 'w1')).resolves.toBeUndefined();
+  it('succeeds again when the same warning is acknowledged twice', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({}, 200));
+    await expect(acknowledgeWarning('token-abc', '7')).resolves.toBeUndefined();
+    await expect(acknowledgeWarning('token-abc', '7')).resolves.toBeUndefined();
   });
 
-  it('does not treat 404 as done (it could be a wrong route), so the user can retry', async () => {
+  it('rejects on 404 (warning not found) so the user can retry', async () => {
     fetchMock.mockResolvedValue(new Response('', { status: 404 }));
     await expect(acknowledgeWarning('token-abc', 'w1')).rejects.toMatchObject({ status: 404 });
     expect(onExpired).not.toHaveBeenCalled();

@@ -4,42 +4,25 @@ import { notifyAuthExpired } from '@/lib/auth';
 // ─────────────────────────────────────────────────────────────────────────────
 // User-side warnings API (ticket #294, Stage A).
 //
-// ⚠ PLACEHOLDER CONTRACT — replace when backend issue #191 ships.
-// The backend has not published the user-side warning endpoints yet. Every
-// detail below that depends on the real contract is OUR GUESS, not a
-// documented format:
-//   - the endpoint paths,
-//   - the HTTP methods (GET for pending, POST for acknowledge),
-//   - the response envelopes and field names of the pending list,
-//   - the success statuses (any 2xx; the acknowledge response body is ignored),
-//   - the "no longer pending" statuses on acknowledge (409 / 410),
-//   - the assumption that an unshipped endpoint answers 404.
-// Everything that depends on the real contract lives in this one file so it
-// can be swapped in a single place.
-//
-// While the endpoints do not exist the server is expected to answer 404, which
-// we treat as "no warnings", so real users never see a dialog. Never add
-// sample or mock warnings here.
+// Backend contract (event-backend #191):
+//   - GET  /api/warnings/pending
+//       → 200 { items: [{ id: number, created_at, reason, about }] }, oldest first.
+//   - POST /api/warnings/{id}/acknowledge
+//       → 200, also when repeated (acknowledging twice is safe).
+//       → 404 when the warning is not found; the user can retry.
+// Everything that depends on the backend contract lives in this one file.
+// Never add sample or mock warnings here.
 //
 // Pending warnings are deliberately NOT cached: no cachedFetch, no React Query
 // (React Query is persisted to localStorage in this app). Every request uses
 // a plain fetch with cache: 'no-store'.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** PLACEHOLDER (#191): paths are guesses until the backend publishes them. */
+/** Backend contract (event-backend #191). */
 export const WARNINGS_ENDPOINTS = {
-  PENDING: '/api/me/warnings/pending',
-  ACKNOWLEDGE: (warningId: string) => `/api/me/warnings/${encodeURIComponent(warningId)}/acknowledge`,
+  PENDING: '/api/warnings/pending',
+  ACKNOWLEDGE: (warningId: string) => `/api/warnings/${encodeURIComponent(warningId)}/acknowledge`,
 } as const;
-
-/**
- * PLACEHOLDER (#191): acknowledge statuses we assume mean "this warning is no
- * longer pending" — already acknowledged elsewhere (409 / 410). Retrying could
- * never succeed, so they count as done. 404 is NOT in this list: it could also
- * mean a wrong route, and a silent "done" would hide that the backend never
- * recorded the acknowledgement. Re-check when #191 ships.
- */
-const NO_LONGER_PENDING_STATUSES = new Set([409, 410]);
 
 export type UserWarning = {
   id: string;
@@ -84,18 +67,14 @@ async function request(url: string, init: RequestInit, what: string): Promise<Re
 }
 
 /**
- * PLACEHOLDER (#191): field names (`id`, `reason`) and the envelope shapes
- * (bare array, `{ data: [...] }`, `{ warnings: [...] }`) are guesses.
+ * Backend contract (event-backend #191): reads only `items`, in the order the
+ * server sends them (oldest first). The numeric `id` is kept as a string.
  * Rows without an id cannot be acknowledged, so they are dropped. Rows without
- * a reason are kept (the user must still acknowledge them) and logged, since
- * that usually means the real field name differs from our guess.
+ * a reason are kept (the user must still acknowledge them) and logged.
  */
 export function parsePendingWarnings(body: unknown): UserWarning[] {
-  const b = body as { data?: unknown; warnings?: unknown } | null;
-  const rows: unknown[] = Array.isArray(body) ? body
-    : Array.isArray(b?.data) ? b.data
-    : Array.isArray(b?.warnings) ? b.warnings
-    : [];
+  const items = (body as { items?: unknown } | null)?.items;
+  const rows: unknown[] = Array.isArray(items) ? items : [];
   return rows.flatMap((raw) => {
     const row = (raw ?? {}) as Record<string, unknown>;
     const id = row.id == null ? '' : String(row.id).trim();
@@ -108,8 +87,7 @@ export function parsePendingWarnings(body: unknown): UserWarning[] {
 
 /**
  * Loads the signed-in user's warnings that still wait for acknowledgement.
- * Resolves to [] when the endpoint answers 404 (not shipped yet), or when a
- * 2xx body is not valid JSON (logged).
+ * Resolves to [] when a 2xx body is not valid JSON (logged).
  * Rejects with WarningsApiError on HTTP and network failures (status 0 =
  * network); an aborted request rejects with the abort error unchanged.
  * Callers must not block the app on a rejection. A 401 also fires the
@@ -121,7 +99,6 @@ export async function fetchPendingWarnings(token: string, signal?: AbortSignal):
     cache: 'no-store',
     signal,
   }, 'load warnings');
-  if (res.status === 404) return [];
   if (!res.ok) failOnStatus(res, 'load warnings', signal);
   let body: unknown;
   try {
@@ -135,10 +112,9 @@ export async function fetchPendingWarnings(token: string, signal?: AbortSignal):
 }
 
 /**
- * PLACEHOLDER (#191): POST, any 2xx = acknowledged (response body ignored),
- * 409 / 410 = no longer pending (acknowledged elsewhere), which also counts as done. 
- * Any other status, 404 included, can be retried.
- * Once the backend records it, the warning is meant to stop appearing on all devices.
+ * Backend contract (event-backend #191): POST, 200 = acknowledged, also when
+ * repeated (the response body is ignored). Any other status, 404 included,
+ * can be retried. Once acknowledged, the warning stops appearing on all devices.
  * Rejects with WarningsApiError on HTTP and network failures (status 0 =
  * network); an aborted request rejects with the abort error unchanged.
  */
@@ -149,6 +125,6 @@ export async function acknowledgeWarning(token: string, warningId: string, signa
     cache: 'no-store',
     signal,
   }, 'acknowledge warning');
-  if (res.ok || NO_LONGER_PENDING_STATUSES.has(res.status)) return;
+  if (res.ok) return;
   failOnStatus(res, 'acknowledge warning', signal);
 }
