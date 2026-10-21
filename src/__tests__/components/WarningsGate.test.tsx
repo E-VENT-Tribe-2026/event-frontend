@@ -5,7 +5,7 @@ import WarningsGate from '@/components/WarningsGate';
 import { setAuthToken, clearAuthToken } from '@/lib/auth';
 import { acknowledgeWarning, fetchPendingWarnings, WarningsApiError, type UserWarning } from '@/lib/warningsApi';
 
-// The wire contract is a #191 placeholder tested in warningsApi.test.ts; here the
+// The wire contract is the backend contract tested in warningsApi.test.ts; here the
 // gate is tested against the API module's interface only.
 vi.mock('@/lib/warningsApi', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/warningsApi')>()),
