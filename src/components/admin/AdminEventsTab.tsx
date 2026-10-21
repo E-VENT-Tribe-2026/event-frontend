@@ -336,7 +336,7 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
   return (
     <div className="space-y-6">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Event counts">
         {statCards.map((card) => (
           <div key={card.label} className="rounded-[16px] border p-4 space-y-2"
             style={{ background: 'var(--adm-grad-card)', borderColor: 'var(--adm-border)', boxShadow: '0 4px 20px hsl(213 61% 5% / .5)' }}>
@@ -367,7 +367,7 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
           onFocus={() => setSearchFocused(true)}
           onBlur={() => setSearchFocused(false)}
           placeholder="Search events by title..."
-          aria-label="Search events by title"
+          aria-label="Search by event title"
           className="w-full rounded-[12px] border text-sm outline-none transition-colors"
           style={{
             background: 'var(--adm-card)',

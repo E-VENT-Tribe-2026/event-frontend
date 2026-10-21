@@ -2,6 +2,13 @@ import { getApiUrl } from './api';
 import { API_ENDPOINTS } from './apiUrls';
 import { getAuthToken } from './auth';
 import { getPendingAdminVerification } from './adminAuth';
+import { getCurrentUser } from './storage';
+
+export function isAdministratorRole(role: unknown): boolean {
+  if (typeof role !== 'string') return false;
+  const normalized = role.trim().toLowerCase();
+  return normalized === 'administrator' || normalized === 'admin';
+}
 
 export interface AdminCountsResponse {
   total_users: number;
@@ -306,6 +313,12 @@ export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; 
     return { isVerifiedAdmin: false };
   }
 
+  const current = getCurrentUser();
+  if (current && !isAdministratorRole(current.role)) {
+    console.debug('[AdminAuth] Admin verify skipped: user role is not administrator');
+    return { isVerifiedAdmin: false };
+  }
+
   try {
     const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_VERIFY), {
       method: 'GET',
@@ -486,20 +499,23 @@ export async function liftSuspension(userId: string): Promise<AdminActionRespons
 
 /**
  * Fetches paginated events for the admin panel.
+ * GET /api/admin/events?status_filter=&page=&limit=&search=
  */
 export async function fetchAdminEvents(
+  statusFilter: AdminEventStatusFilter = 'all',
   page = 1,
   limit = 20,
   search?: string,
   catParam?: string,
 ): Promise<AdminEventsResponse> {
   const params = new URLSearchParams();
+  params.set('status_filter', statusFilter);
   params.set('page', String(page));
   params.set('limit', String(limit));
-  if (search?.trim()) {
+  if (typeof search === 'string' && search.trim()) {
     params.set('search', search.trim());
   }
-  if (catParam?.trim()) {
+  if (typeof catParam === 'string' && catParam.trim()) {
     params.set('category', catParam.trim());
   }
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_EVENTS)}?${params.toString()}`;

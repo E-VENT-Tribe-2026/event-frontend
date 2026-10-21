@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, ShieldCheck, Type, Calendar, MapPin, Users } from 'lucide-react';
 import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
@@ -7,13 +7,14 @@ import { ALL_INTERESTS } from '@/lib/interests';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
+import TopNavProfile from '@/components/TopNavProfile';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
-import { invalidatePrefix } from '@/lib/queryCache';
+import { invalidateEvents } from '@/lib/queries';
 import { sanitizeText } from '@/lib/sanitize';
 
 function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
@@ -45,6 +46,7 @@ const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
 
 export default function CreateEventPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const user = getCurrentUser();
 
   const [form, setForm] = useState({
@@ -69,6 +71,56 @@ export default function CreateEventPage() {
   const [pickedLat, setPickedLat] = useState<number | null>(null);
   const [pickedLng, setPickedLng] = useState<number | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>(GERMANY_DEFAULT);
+
+  // Pre-fill form if an AI Assistant draft payload is provided via state or sessionStorage
+  useEffect(() => {
+    let draftData = (location.state as { draft?: Record<string, unknown> } | undefined)?.draft;
+    if (!draftData) {
+      try {
+        const stored = window.sessionStorage.getItem('event_assistant_draft_prefill');
+        if (stored) {
+          draftData = JSON.parse(stored);
+          window.sessionStorage.removeItem('event_assistant_draft_prefill');
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (draftData) {
+      let dateVal = '';
+      let timeVal = '';
+      if (typeof draftData.start_datetime === 'string') {
+        try {
+          const d = new Date(draftData.start_datetime);
+          if (!isNaN(d.getTime())) {
+            dateVal = d.toISOString().slice(0, 10);
+            timeVal = d.toTimeString().slice(0, 5);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        title: typeof draftData.title === 'string' ? draftData.title : prev.title,
+        description: typeof draftData.description === 'string' ? draftData.description : prev.description,
+        category: typeof draftData.category === 'string' ? draftData.category : prev.category,
+        date: dateVal || prev.date,
+        time: timeVal || prev.time,
+        location: typeof draftData.location_name === 'string' ? draftData.location_name : prev.location,
+        budget: draftData.cost !== undefined ? String(draftData.cost) : prev.budget,
+        limit: draftData.max_capacity !== undefined ? String(draftData.max_capacity) : prev.limit,
+      }));
+
+      if (typeof draftData.latitude === 'number' && typeof draftData.longitude === 'number') {
+        setPickedLat(draftData.latitude);
+        setPickedLng(draftData.longitude);
+        setMapCenter({ lat: draftData.latitude, lng: draftData.longitude });
+      }
+    }
+  }, [location.state]);
 
   const update = (key: string, value: string | boolean) => {
     setForm(f => ({ ...f, [key]: value }));
@@ -247,7 +299,7 @@ export default function CreateEventPage() {
 
       addEvent(localEvent);
       setToast({ show: true, message: 'Event Published Successfully!', type: 'success' });
-      invalidatePrefix('/api/events?');
+      invalidateEvents();
       setTimeout(() => navigate('/home'), 1500);
     } catch (err: any) {
       clearTimeout(timeoutId);
@@ -286,10 +338,11 @@ export default function CreateEventPage() {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold text-gradient leading-tight">Create Event</h1>
           <p className="text-[11px] text-muted-foreground leading-none">Fill in the details below</p>
         </div>
+        <TopNavProfile />
       </header>
 
       <motion.form

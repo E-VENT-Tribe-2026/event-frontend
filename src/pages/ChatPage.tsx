@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Send, Smile, AlertTriangle, Calendar, Clock, Ban } from 'lucide-react';
+import { ArrowLeft, Send, Smile, AlertTriangle, Calendar, Clock, Ban, ListChecks, MapPinned } from 'lucide-react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentUser } from '@/lib/storage';
 import BottomNav from '@/components/BottomNav';
+import TopBar from '@/components/TopBar';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
@@ -11,7 +12,16 @@ import AppToast from '@/components/AppToast';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
-import { formatUserIdentity } from '@/lib/userIdentity';
+import { userProfilePath } from '@/lib/friendsApi';
+import { cachedFetch, invalidate, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
+import { CHAT_MESSAGES_CHANGED_EVENT } from '@/lib/realtimeEvents';
+import EventPollCard from '@/components/EventPollCard';
+import { addCheckin, isCheckedIn } from '@/lib/checkin';
+import {
+  chatMessagesPath,
+  encodeChatPayload,
+  parseChatPayload,
+} from '@/lib/chatPayload';
 
 type ChatEvent = {
   id: string;
@@ -33,14 +43,17 @@ type ChatMessage = {
   time: string;
   dateKey: string;
   kind?: 'user' | 'system';
-  messageType?: 'text' | 'file' | 'voice' | 'notification';
+  messageType?: 'text' | 'file' | 'voice' | 'notification' | 'poll' | 'poll_vote' | 'checkin';
   fileName?: string;
   mimeType?: string;
   dataUrl?: string;
   senderName?: string;
-  senderUsername?: string;
   senderAvatar?: string;
   senderId?: string;
+  pollId?: string;
+  question?: string;
+  options?: string[];
+  optionIndex?: number;
 };
 
 function isExpiredOver48h(eventDate: string): boolean {
@@ -65,17 +78,18 @@ function formatDateSeparator(dateKey: string): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-type EncodedChatPayload = {
-  v: 1;
-  type: 'text' | 'file' | 'voice';
-  text?: string;
-  fileName?: string;
-  mimeType?: string;
-  dataUrl?: string;
-};
+/** Cache key for one user's saved copy of one event chat's messages. */
+function chatMessagesCacheKey(eventId: string, userId: string) {
+  return `${chatMessagesPath(eventId)}:${userId}`;
+}
 
-function chatMessagesPath(eventId: string) {
-  return `/api/chats/${eventId}/messages`;
+/** Thrown inside a cached fetcher so a failed response is never stored in the cache. */
+class ChatHttpError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`Chat request failed with status ${status}`);
+    this.status = status;
+  }
 }
 
 export default function ChatPage() {
@@ -98,7 +112,14 @@ export default function ChatPage() {
   const [handledSelectedParam, setHandledSelectedParam] = useState(false);
   const [chatApiMissing, setChatApiMissing] = useState(false);
   const [chatTab, setChatTab] = useState<'active' | 'past' | 'cancelled'>('active');
+  const [search, setSearch] = useState('');
+  const [showPoll, setShowPoll] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Only the newest loadMessages call may update the screen, so a slow response
+  // for a chat you already left cannot overwrite the chat you are looking at.
+  const messagesRequestRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,29 +146,31 @@ export default function ChatPage() {
 
   const resolveMeId = () => authUserId || user.id;
 
-  const parsePayload = (raw: string) => {
-    try {
-      const parsed = JSON.parse(raw) as EncodedChatPayload;
-      if (parsed && parsed.v === 1 && (parsed.type === 'text' || parsed.type === 'file' || parsed.type === 'voice')) return parsed;
-    } catch { /* plain text */ }
-    return null;
-  };
-
-  const encodePayload = (payload: EncodedChatPayload) => JSON.stringify(payload);
-
   const mapMessageRow = useCallback(
     (row: Record<string, unknown>): ChatMessage | null => {
       const rawContent = String(row.content || row.message || row.text || '').trim();
-      const parsed = rawContent ? parsePayload(rawContent) : null;
+      const parsed = rawContent ? parseChatPayload(rawContent) : null;
       const text = parsed
-        ? String(parsed.text || (parsed.type === 'voice' ? 'Voice message' : parsed.fileName || 'Attachment'))
+        ? String(
+            parsed.text ||
+              parsed.question ||
+              (parsed.type === 'voice'
+                ? 'Voice message'
+                : parsed.type === 'poll_vote'
+                  ? `vote:${parsed.optionIndex ?? 0}`
+                  : parsed.type === 'checkin'
+                    ? 'is here'
+                    : parsed.fileName || 'Attachment'),
+          )
         : rawContent;
-      if (!text) return null;
+      if (!text && parsed?.type !== 'poll') return null;
       const senderId = String(row.sender_id || row.user_id || row.created_by || '');
       const sentAtRaw = row.created_at || row.sent_at || row.timestamp;
       const sentAt = sentAtRaw ? new Date(String(sentAtRaw)) : new Date();
       const rawType = String(row.type || row.message_type || row.kind || '').toLowerCase();
+      const isCheckin = parsed?.type === 'checkin';
       const isSystem =
+        isCheckin ||
         Boolean(row.is_system) ||
         rawType === 'system' || rawType === 'notification' ||
         rawType === 'join' || rawType === 'leave' ||
@@ -161,15 +184,13 @@ export default function ChatPage() {
       const senderObj = row.sender as Record<string, unknown> | undefined;
       const senderName =
         String(profiles?.full_name || senderObj?.full_name || senderObj?.name || row.sender_name || '').trim() || undefined;
-      const senderUsername =
-        String(profiles?.username || senderObj?.username || row.sender_username || '').trim() || undefined;
       const senderAvatar =
         String(profiles?.avatar_url || senderObj?.avatar_url || senderObj?.avatar || row.sender_avatar || '').trim() || undefined;
 
       return {
         id: String(row.id || crypto.randomUUID()),
         from: isMe ? 'me' : 'them',
-        text,
+        text: isCheckin ? `${senderName || 'Someone'} is here` : text,
         time: sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         dateKey: sentAt.toISOString().slice(0, 10),
         kind: isSystem ? 'system' : 'user',
@@ -178,9 +199,12 @@ export default function ChatPage() {
         mimeType: parsed?.mimeType,
         dataUrl: parsed?.dataUrl,
         senderName,
-        senderUsername,
         senderAvatar,
         senderId: senderId || undefined,
+        pollId: parsed?.pollId,
+        question: parsed?.question,
+        options: parsed?.options,
+        optionIndex: parsed?.optionIndex,
       };
     },
     [authUserId, user.id],
@@ -189,18 +213,43 @@ export default function ChatPage() {
   const mapMessageRowRef = useRef(mapMessageRow);
   useEffect(() => { mapMessageRowRef.current = mapMessageRow; }, [mapMessageRow]);
 
+  useEffect(() => {
+    if (!activeChat) return;
+    for (const m of messages) {
+      if (m.messageType === 'checkin' && m.senderId && !isCheckedIn(activeChat, m.senderId)) {
+        addCheckin(activeChat, { userId: m.senderId, name: m.senderName || 'Someone' });
+      }
+    }
+  }, [messages, activeChat]);
+
   const activeChatObj = chats.find((entry) => entry.id === activeChat) || null;
 
   const loadChatList = useCallback(async (silent = false) => {
     if (!token) { if (!silent) setChatListLoading(false); return; }
     if (!silent) setChatListLoading(true);
     try {
-      const [joinedRes, organizedRes] = await Promise.all([
-        fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(getApiUrl('/api/events/my-events'), { headers: { Authorization: `Bearer ${token}` } }),
+      // Cached for 30 s (TTL.SHORT): a joined or created event shows up quickly,
+      // and a failed request throws so it is never stored.
+      const [joinedBody, organizedBody] = await Promise.all([
+        cachedFetch(
+          `/api/participants/my/events:chat:${user.id}`,
+          async () => {
+            const res = await fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } });
+            if (!res.ok) throw new ChatHttpError(res.status);
+            return res.json(); // an unreadable body rejects, so it is not stored
+          },
+          TTL.SHORT,
+        ).catch(() => []),
+        cachedFetch(
+          `/api/events/my-events:chat:${user.id}`,
+          async () => {
+            const res = await fetch(getApiUrl('/api/events/my-events'), { headers: { Authorization: `Bearer ${token}` } });
+            if (!res.ok) throw new ChatHttpError(res.status);
+            return res.json(); // an unreadable body rejects, so it is not stored
+          },
+          TTL.SHORT,
+        ).catch(() => ({})),
       ]);
-      const joinedBody = joinedRes.ok ? await joinedRes.json().catch(() => []) : [];
-      const organizedBody = organizedRes.ok ? await organizedRes.json().catch(() => ({})) : {};
       const joinedRows = Array.isArray(joinedBody) ? joinedBody : Array.isArray(joinedBody?.data) ? joinedBody.data : [];
       const organizedRows = Array.isArray(organizedBody?.data) ? organizedBody.data : [];
       const joinedEvents = joinedRows.map((row: Record<string, unknown>) => row?.events as Record<string, unknown>).filter(Boolean);
@@ -280,7 +329,7 @@ export default function ChatPage() {
     } finally {
       if (!silent) setChatListLoading(false);
     }
-  }, [token, activeChat, selectedEventFromUrl, handledSelectedParam, navigate]);
+  }, [token, user.id, activeChat, selectedEventFromUrl, handledSelectedParam, navigate]);
 
   useEffect(() => { void loadChatList(); }, [loadChatList]);
 
@@ -295,35 +344,57 @@ export default function ChatPage() {
   const loadMessages = useCallback(
     async (eventId: string, silent = false) => {
       if (!token) return;
+      const requestId = ++messagesRequestRef.current;
+      const isCurrent = () => requestId === messagesRequestRef.current;
+      const cacheKey = chatMessagesCacheKey(eventId, user.id);
+      const showRows = (rows: Record<string, unknown>[]) =>
+        setMessages(rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[]);
+
+      // Show the saved copy at once (whatever its age), then always refresh from the server below.
+      const saved = peekCache<Record<string, unknown>[]>(cacheKey);
       if (!silent) {
-        setMessagesLoading(true);
-        setMessages([]); // Clears old messages immediately to prevent bleed-over
+        if (saved) {
+          showRows(saved);
+          setMessagesLoading(false);
+        } else {
+          setMessagesLoading(true);
+          setMessages([]); // Clears old messages immediately to prevent bleed-over
+        }
       }
       try {
         const primaryUrl = `${getApiUrl(chatMessagesPath(eventId))}?limit=100&page=1`;
-        let res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-        let rows: Record<string, unknown>[] = [];
-        let anyEndpointSupported = false;
-        if (res.ok) {
-          const body = await res.json().catch(() => ({}));
-          rows = normalizeMessageList(body);
-          anyEndpointSupported = true;
-        } else if (res.status === 403) {
+        const res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+        // Never keep messages from a chat you can no longer access, even if you have moved on.
+        if (res.status === 403) invalidate(cacheKey);
+        if (!isCurrent()) return;
+        if (res.status === 403) {
           setChatUnavailable(true);
           setMessages([]);
           setToast({ show: true, message: 'You can no longer access this chat.', type: 'error' });
           return;
         }
-        setMessages(rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[]);
+        // Failed or unreadable responses are never saved; keep the saved copy on screen if there is one.
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        if (!isCurrent()) return;
+        if (body === null) {
+          if (!saved) setMessages([]);
+          setChatUnavailable(false);
+          setChatApiMissing(true);
+          return;
+        }
+        const rows = normalizeMessageList(body);
+        setCacheEntry(cacheKey, rows, TTL.SHORT);
+        showRows(rows);
         setChatUnavailable(false);
-        setChatApiMissing(!anyEndpointSupported);
+        setChatApiMissing(false);
       } catch {
-        setMessages([]);
+        if (isCurrent() && !saved) setMessages([]); // network error
       } finally {
-        if (!silent) setMessagesLoading(false);
+        // The newest request ends loading, silent or not, so a send during a load cannot leave it stuck.
+        if (isCurrent()) setMessagesLoading(false);
       }
     },
-    [token],
+    [token, user.id],
   );
 
   useEffect(() => {
@@ -331,11 +402,23 @@ export default function ChatPage() {
     void loadMessages(activeChat);
   }, [activeChat, loadMessages]);
 
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      const eventId = (event as CustomEvent<{ eventId?: string | null }>).detail?.eventId;
+      if (activeChat && (!eventId || eventId === activeChat)) {
+        void loadMessages(activeChat, true);
+      }
+      void loadChatList(true);
+    };
+    window.addEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
+  }, [activeChat, loadMessages, loadChatList]);
+
   const sendMessage = async (explicitContent?: string) => {
     const chat = activeChatObj;
     if (chat?.isCancelled || chat?.isPast) return; // Prevent sending on cancelled/past chats
 
-    const content = explicitContent ?? encodePayload({ v: 1, type: 'text', text: input.trim() });
+    const content = explicitContent ?? encodeChatPayload({ v: 1, type: 'text', text: input.trim() });
     const plainInput = input.trim();
     if (!content || !activeChat || !token || sending || chatUnavailable) return;
     if (!explicitContent && !plainInput) return;
@@ -355,7 +438,7 @@ export default function ChatPage() {
         return;
       }
       setInput(''); setShowEmoji(false); setChatApiMissing(false);
-      await loadMessages(activeChat, true);
+      await loadMessages(activeChat, true); // always reads the server and replaces the saved copy
     } catch {
       setToast({ show: true, message: 'Unable to send message right now.', type: 'error' });
     } finally {
@@ -371,8 +454,14 @@ export default function ChatPage() {
       <div className="flex min-h-screen flex-col bg-background pb-20">
         <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
 
-        <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-          <div className="flex items-center gap-3">
+        <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-lg">
+          <TopBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search chats..."
+          />
+          <header className="border-b border-border px-4 py-3">
+            <div className="flex items-center gap-3">
             <button
               type="button"
               aria-label="Back to chats"
@@ -391,10 +480,17 @@ export default function ChatPage() {
               <h1 className="truncate text-sm font-bold text-foreground">{chat.name}</h1>
               <p className={`text-[10px] ${chatUnavailable ? 'text-destructive' : chat.isCancelled ? 'text-amber-500 font-medium' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
                 {chatUnavailable ? 'Chat unavailable' : chat.isCancelled ? 'Cancelled event · read-only' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
+                {!chatUnavailable && messages.filter((m) => m.messageType === 'checkin').length > 0 && (
+                  <span className="ml-2 inline-flex items-center gap-0.5 text-primary">
+                    <MapPinned className="h-3 w-3" />
+                    {new Set(messages.filter((m) => m.messageType === 'checkin' && m.senderId).map((m) => m.senderId)).size} here
+                  </span>
+                )}
               </p>
             </div>
-          </div>
-        </header>
+            </div>
+          </header>
+        </div>
 
         {chat.isCancelled && !chatUnavailable && (
           <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
@@ -424,8 +520,8 @@ export default function ChatPage() {
                 <p className="text-xs text-muted-foreground">History is empty for this chat</p>
               </div>
             )}
-            {messages.map((m, i) => {
-              const showDateSep = i === 0 || messages[i - 1].dateKey !== m.dateKey;
+            {messages.filter((m) => m.messageType !== 'poll_vote').map((m, i, visible) => {
+              const showDateSep = i === 0 || visible[i - 1].dateKey !== m.dateKey;
               return (
                 <div key={m.id}>
                   {showDateSep && (
@@ -447,13 +543,24 @@ export default function ChatPage() {
                   ) : (
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex items-end gap-2 mb-1 ${m.from === 'me' ? 'justify-end' : 'justify-start'}`}>
                       {m.from === 'them' && (
-                        <UserAvatar src={m.senderAvatar} seed={m.senderId || m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
+                        m.senderId ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(userProfilePath(m.senderId as string, resolveMeId()))}
+                            aria-label={`Open ${m.senderName || 'this user'}'s profile`}
+                            className="shrink-0 mb-1 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          >
+                            <UserAvatar src={m.senderAvatar} seed={m.senderId} name={m.senderName || '?'} size="sm" />
+                          </button>
+                        ) : (
+                          <UserAvatar src={m.senderAvatar} seed={m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
+                        )
                       )}
                       <div className={`max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}>
                         {m.from === 'them' && (
                           <div className="flex items-center gap-1.5 px-1">
                             <span className="text-[11px] font-semibold text-foreground">
-                              {formatUserIdentity({ username: m.senderUsername, fullName: m.senderName || 'Unknown' })}
+                              {m.senderName || 'Unknown'}
                             </span>
                           </div>
                         )}
@@ -462,7 +569,30 @@ export default function ChatPage() {
                             ? 'gradient-primary text-primary-foreground rounded-br-sm'
                             : 'glass-card text-foreground rounded-bl-sm'
                         }`}>
-                          <p className="whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
+                          {m.messageType === 'poll' && m.pollId && (m.options?.length || 0) > 1 ? (
+                            <EventPollCard
+                              question={m.question || m.text}
+                              options={m.options || []}
+                              votesByUser={Object.fromEntries(
+                                messages
+                                  .filter((vote) => vote.messageType === 'poll_vote' && vote.pollId === m.pollId && vote.senderId && vote.optionIndex != null)
+                                  .map((vote) => [vote.senderId as string, vote.optionIndex as number]),
+                              )}
+                              myId={resolveMeId()}
+                              disabled={chatUnavailable || isReadOnly || sending}
+                              onVote={(optionIndex) => {
+                                void sendMessage(encodeChatPayload({
+                                  v: 1,
+                                  type: 'poll_vote',
+                                  pollId: m.pollId,
+                                  optionIndex,
+                                  text: `vote:${optionIndex}`,
+                                }));
+                              }}
+                            />
+                          ) : (
+                            <p className="whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
+                          )}
                           <p className={`mt-1 text-[10px] ${m.from === 'me' ? 'text-primary-foreground/60 text-right' : 'text-muted-foreground'}`}>{m.time}</p>
                         </div>
                       </div>
@@ -478,6 +608,59 @@ export default function ChatPage() {
           </div>
         </div>
 
+        {showPoll && !isReadOnly && !chatUnavailable && (
+          <div className="border-t border-border bg-background px-4 py-3 space-y-2">
+            <p className="text-xs font-semibold text-foreground">New poll</p>
+            <input
+              value={pollQuestion}
+              onChange={(e) => setPollQuestion(e.target.value)}
+              placeholder="Ask a question…"
+              aria-label="Poll question"
+              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            {pollOptions.map((opt, i) => (
+              <input
+                key={i}
+                value={opt}
+                onChange={(e) => setPollOptions((prev) => prev.map((item, idx) => (idx === i ? e.target.value : item)))}
+                placeholder={`Option ${i + 1}`}
+                aria-label={`Poll option ${i + 1}`}
+                className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            ))}
+            {pollOptions.length < 4 && (
+              <button
+                type="button"
+                onClick={() => setPollOptions((prev) => [...prev, ''])}
+                className="text-[11px] font-semibold text-primary"
+              >
+                Add option
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={sending || !pollQuestion.trim() || pollOptions.filter((o) => o.trim()).length < 2}
+              onClick={() => {
+                const options = pollOptions.map((o) => o.trim()).filter(Boolean);
+                void sendMessage(encodeChatPayload({
+                  v: 1,
+                  type: 'poll',
+                  pollId: crypto.randomUUID(),
+                  question: pollQuestion.trim(),
+                  options,
+                  text: pollQuestion.trim(),
+                }));
+                setPollQuestion('');
+                setPollOptions(['', '']);
+                setShowPoll(false);
+              }}
+              className="w-full rounded-xl gradient-primary py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40"
+            >
+              Post poll
+            </button>
+          </div>
+        )}
+
         <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3">
           <div className="flex items-center gap-2">
             <button
@@ -488,6 +671,15 @@ export default function ChatPage() {
               aria-label="Emoji"
             >
               <Smile className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              disabled={chatUnavailable || isReadOnly}
+              onClick={() => setShowPoll((v) => !v)}
+              className={`shrink-0 rounded-full p-2 transition-all disabled:opacity-40 ${showPoll ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:bg-secondary/80 hover:text-foreground'}`}
+              aria-label="Create poll"
+            >
+              <ListChecks className="h-5 w-5" />
             </button>
             <input
               value={input}
@@ -531,18 +723,30 @@ export default function ChatPage() {
       ? pastChats
       : cancelledChats;
 
+  const searchQuery = search.trim().toLowerCase();
+  const visibleChats = searchQuery
+    ? currentTabChats.filter(
+        (c) =>
+          c.name.toLowerCase().includes(searchQuery) ||
+          c.lastMsg.toLowerCase().includes(searchQuery),
+      )
+    : currentTabChats;
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
 
-      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gradient">Chats</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
-          </div>
-        </div>
-      </header>
+      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-lg">
+        <TopBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search chats..."
+        />
+        <header className="border-b border-border px-4 py-3">
+          <h1 className="text-xl font-bold text-gradient">Chats</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
+        </header>
+      </div>
 
       <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
         {/* Chat Tabs with Circular Badge Counters */}
@@ -595,21 +799,27 @@ export default function ChatPage() {
           </div>
         )}
 
-        {!chatListLoading && currentTabChats.length === 0 && (
+        {!chatListLoading && visibleChats.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
               <Send className="h-7 w-7 text-primary" />
             </div>
-            <p className="text-sm font-semibold text-foreground">No {chatTab} conversations</p>
+            <p className="text-sm font-semibold text-foreground">
+              {searchQuery ? 'No matching conversations' : `No ${chatTab} conversations`}
+            </p>
             <p className="text-xs text-muted-foreground max-w-xs">
-              {chatTab === 'active' ? "You don't have any active event chats right now." : `No ${chatTab} event chats found.`}
+              {searchQuery
+                ? 'Try a different search.'
+                : chatTab === 'active'
+                  ? "You don't have any active event chats right now."
+                  : `No ${chatTab} event chats found.`}
             </p>
           </div>
         )}
 
-        {!chatListLoading && currentTabChats.length > 0 && (
+        {!chatListLoading && visibleChats.length > 0 && (
           <div className="space-y-2.5">
-            {currentTabChats.map((chat) => (
+            {visibleChats.map((chat) => (
               <motion.button
                 key={chat.id}
                 type="button"

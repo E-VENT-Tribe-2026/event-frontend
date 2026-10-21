@@ -12,6 +12,7 @@ import {
 } from "@/lib/storage";
 
 import { clearCache } from "@/lib/queryCache";
+import { COLOR_SCHEME_STORAGE_KEY } from "@/lib/colorScheme";
 
 afterEach(() => {
   cleanup();
@@ -26,6 +27,16 @@ afterEach(() => {
     sessionStorage.clear();
   } catch {
     /* ignore */
+  }
+  try {
+    window.localStorage.removeItem(COLOR_SCHEME_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (typeof document !== "undefined") {
+    document.documentElement.removeAttribute("data-color-scheme");
+    document.documentElement.classList.remove("dark");
+    document.documentElement.style.colorScheme = "";
   }
   clearCache();
   vi.clearAllMocks();

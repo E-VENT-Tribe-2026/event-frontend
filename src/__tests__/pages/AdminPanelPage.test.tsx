@@ -249,12 +249,13 @@ describe('Admin Panel — Ticket #248', () => {
     const eventsTabBtn = screen.getByRole('tab', { name: /Events/i });
     fireEvent.click(eventsTabBtn);
 
-    expect(await screen.findByText(/Events Management/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ticket #249 Integration Point/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText('Search by event title')).toBeInTheDocument();
+    expect(screen.getByText('Total Events')).toBeInTheDocument();
+    expect(eventsTabBtn).toHaveAttribute('aria-selected', 'true');
   });
 
   describe('BottomNav & AdminGuard', () => {
-    it('BottomNav shows Admin button immediately left of Profile for verified admin', async () => {
+    it('BottomNav shows Admin after Friends and keeps Profile out of the tab bar', async () => {
       render(
         <MemoryRouter initialEntries={['/home']}>
           <BottomNav />
@@ -263,12 +264,10 @@ describe('Admin Panel — Ticket #248', () => {
 
       const adminLink = await screen.findByRole('link', { name: /Admin/i });
       expect(adminLink).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /^Profile$/i })).not.toBeInTheDocument();
 
-      const profileLink = screen.getByRole('link', { name: /Profile/i });
-      expect(profileLink).toBeInTheDocument();
-
-      // Ensure Admin is immediately before Profile in document order
-      expect(adminLink.compareDocumentPosition(profileLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const friendsLink = screen.getByRole('link', { name: /Friends/i });
+      expect(friendsLink.compareDocumentPosition(adminLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     });
 
     it('BottomNav hides Admin button when user is not a verified admin', async () => {

@@ -50,6 +50,8 @@ vi.mock('@/lib/supabase', () => ({
       getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
     },
   },
+  syncSupabaseSession: vi.fn(() => Promise.resolve()),
+  clearSupabaseSession: vi.fn(),
 }));
 
 vi.mock('@/lib/storage', async (importOriginal) => {
