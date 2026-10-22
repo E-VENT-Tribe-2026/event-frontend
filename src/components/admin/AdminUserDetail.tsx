@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   fetchAdminUserDetails,
+  fetchUserWarnings,
   grantAdminRole,
   warnUser,
   withdrawWarning,
@@ -441,10 +442,16 @@ export default function AdminUserDetail({
     setLoading(true);
     setError('');
 
-    fetchAdminUserDetails(userId)
-      .then((data) => {
+    Promise.all([
+      fetchAdminUserDetails(userId),
+      fetchUserWarnings(userId).catch(() => [] as AdminUserWarning[]),
+    ])
+      .then(([data, warnings]) => {
         if (!cancelled) {
-          setUser(data);
+          setUser({
+            ...data,
+            warnings: warnings.length ? warnings : (data.warnings ?? []),
+          });
           setLoading(false);
         }
       })

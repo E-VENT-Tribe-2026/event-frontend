@@ -410,7 +410,8 @@ export async function fetchAdminUserDetails(userId: string): Promise<AdminUserDe
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminUserDetailsFull>(res);
+  const data = await handleAdminResponse<AdminUserDetailsFull>(res);
+  return { ...data, warnings: Array.isArray(data.warnings) ? data.warnings : [] };
 }
 
 /**
@@ -430,8 +431,30 @@ export async function grantAdminRole(userId: string): Promise<GrantAdminResponse
   return handleAdminResponse<GrantAdminResponse>(res);
 }
 
+function warningRowsFromBody(body: unknown): AdminUserWarning[] {
+  if (Array.isArray(body)) return body as AdminUserWarning[];
+  if (!body || typeof body !== 'object') return [];
+  const row = body as Record<string, unknown>;
+  const nested = row.warnings ?? row.items ?? row.data;
+  return Array.isArray(nested) ? (nested as AdminUserWarning[]) : [];
+}
+
 /**
- * Issues a warning to a user.
+ * GET /api/admin/users/{user_id}/warnings
+ */
+export async function fetchUserWarnings(userId: string): Promise<AdminUserWarning[]> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WARNINGS(userId));
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<unknown>(res);
+  return warningRowsFromBody(body);
+}
+
+/**
+ * POST /api/admin/users/{user_id}/warnings
  */
 export async function warnUser(userId: string, reason: string): Promise<AdminWarnResponse> {
   const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WARN(userId));
@@ -448,17 +471,13 @@ export async function warnUser(userId: string, reason: string): Promise<AdminWar
 }
 
 /**
- * Withdraws (removes) a previously issued warning from a user.
+ * POST /api/admin/warnings/{warning_id}/withdraw
  */
-export async function withdrawWarning(userId: string, warningId: string): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WITHDRAW_WARNING(userId));
+export async function withdrawWarning(_userId: string, warningId: string): Promise<AdminActionResponse> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_WARNING_WITHDRAW(warningId));
   const res = await fetch(url, {
-    method: 'DELETE',
-    headers: {
-      ...getAdminHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ warning_id: warningId }),
+    method: 'POST',
+    headers: getAdminHeaders(),
     cache: 'no-store',
   });
   return handleAdminResponse<AdminActionResponse>(res);
@@ -570,7 +589,7 @@ export async function removeEvent(eventId: string): Promise<AdminActionResponse>
 }
 
 /**
- * Fetches the paginated admin audit log.
+ * GET /api/admin/audit-log
  */
 export async function fetchAdminAudit(
   page = 1,
@@ -585,7 +604,21 @@ export async function fetchAdminAudit(
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminAuditResponse>(res);
+  const body = await handleAdminResponse<AdminAuditResponse & { entries?: AdminAuditEntry[]; data?: AdminAuditEntry[] }>(res);
+  const items = Array.isArray(body.items)
+    ? body.items
+    : Array.isArray(body.entries)
+      ? body.entries
+      : Array.isArray(body.data)
+        ? body.data
+        : [];
+  return {
+    items,
+    total: Number(body.total ?? items.length),
+    page: Number(body.page ?? page),
+    limit: Number(body.limit ?? limit),
+    total_pages: Number(body.total_pages ?? 1),
+  };
 }
 
 /**

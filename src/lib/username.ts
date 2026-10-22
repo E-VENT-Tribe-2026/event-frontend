@@ -76,13 +76,19 @@ export function getFullNameValidationError(raw: string): string | null {
   return null;
 }
 
+function isAdministratorRole(role?: string | null): boolean {
+  const normalized = String(role || '').trim().toLowerCase();
+  return normalized === 'administrator' || normalized === 'admin';
+}
+
 /** Accounts without a username must pick one, and a full name, before the app.
- *  Administrator accounts with a username go directly to the admin panel. */
+ *  Administrator accounts go to the admin panel — they must not be sent to
+ *  choose-username or a password-setup screen after verification. */
 export function destinationAfterSignIn(
   username?: string | null,
   role?: string | null,
 ): '/admin' | '/home' | '/choose-username' {
+  if (isAdministratorRole(role)) return '/admin';
   if (!hasChosenUsername(username)) return '/choose-username';
-  if (role === 'administrator') return '/admin';
   return '/home';
 }

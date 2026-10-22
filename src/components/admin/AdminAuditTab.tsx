@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ClipboardList,
   Loader2,
@@ -142,6 +142,9 @@ export default function AdminAuditTab({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  const onErrorToastRef = useRef(onErrorToast);
+  onErrorToastRef.current = onErrorToast;
+
   const loadAudit = useCallback(
     async (targetPage: number, append = false) => {
       if (append) {
@@ -156,13 +159,13 @@ export default function AdminAuditTab({
         setTotalPages(res.total_pages);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to load audit log';
-        onErrorToast(msg);
+        onErrorToastRef.current(msg);
       } finally {
         setLoading(false);
         setLoadingMore(false);
       }
     },
-    [onErrorToast],
+    [],
   );
 
   useEffect(() => {

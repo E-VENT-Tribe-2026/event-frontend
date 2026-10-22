@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Shield, Users, Calendar, ClipboardList, Flag, LogOut, Eye } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AppToast from '@/components/AppToast';
@@ -61,9 +61,9 @@ export default function AdminPanelPage() {
     type: 'success' | 'error' | 'info';
   }>({ show: false, message: '', type: 'success' });
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'error') => {
     setToast({ show: true, message, type });
-  };
+  }, []);
 
   // Fetch the admin's name and avatar from the profile endpoint
   useEffect(() => {

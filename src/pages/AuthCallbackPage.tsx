@@ -10,6 +10,7 @@ import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
 import { fetchMfaStatus, needsAdminVerification, setPendingAdminVerification } from '@/lib/adminAuth';
 import { consumeOAuthNextPath } from '@/lib/oauthRedirect';
+import { isPasswordResetAuthType, readAuthLinkType } from '@/lib/authLink';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -34,14 +35,14 @@ export default function AuthCallbackPage() {
     const handleCallback = async () => {
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
       const queryParams = new URLSearchParams(window.location.search);
-      const recoveryType = hashParams.get('type') || queryParams.get('type');
+      const recoveryType = readAuthLinkType();
       const nextPath = normalizeNextPath(queryParams.get('next') || consumeOAuthNextPath());
       const recoveryToken =
         hashParams.get('access_token') ||
         queryParams.get('access_token') ||
         queryParams.get('token');
 
-      if (recoveryType === 'recovery' && recoveryToken) {
+      if (isPasswordResetAuthType(recoveryType) && recoveryToken) {
         navigate(`/reset-password?token=${encodeURIComponent(recoveryToken)}`, { replace: true });
         return;
       }
@@ -63,7 +64,7 @@ export default function AuthCallbackPage() {
         session = exchanged.session;
       } else {
         const { data, error } = await supabase.auth.getSession();
-        if (recoveryType === 'recovery' && data?.session?.access_token) {
+        if (isPasswordResetAuthType(recoveryType) && data?.session?.access_token) {
           navigate(`/reset-password?token=${encodeURIComponent(data.session.access_token)}`, { replace: true });
           return;
         }
@@ -74,7 +75,7 @@ export default function AuthCallbackPage() {
         session = data.session;
       }
 
-      if (recoveryType === 'recovery' && session?.access_token) {
+      if (isPasswordResetAuthType(recoveryType) && session?.access_token) {
         navigate(`/reset-password?token=${encodeURIComponent(session.access_token)}`, { replace: true });
         return;
       }

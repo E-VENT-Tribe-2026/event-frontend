@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   checkAdminVerified,
+  fetchAdminAudit,
   fetchAdminCounts,
   fetchAdminUsers,
   fetchAdminUserDetails,
+  fetchUserWarnings,
   grantAdminRole,
+  warnUser,
+  withdrawWarning,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 import * as storageModule from '@/lib/storage';
@@ -203,5 +207,50 @@ describe('adminApi service', () => {
     );
 
     await expect(grantAdminRole('u1')).rejects.toThrow('Account is already an administrator.');
+  });
+
+  it('fetches warnings from GET /api/admin/users/{id}/warnings', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ warnings: [{ id: 'w1', reason: 'Spam', issued_at: '2026-01-01T00:00:00Z', issued_by: 'ada' }] }),
+    );
+
+    const rows = await fetchUserWarnings('u1');
+    expect(rows).toHaveLength(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/users/u1/warnings');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('posts a warning to /api/admin/users/{id}/warnings', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Warned', warning_id: 'w2' }));
+
+    const res = await warnUser('u1', 'Be kind');
+    expect(res.warning_id).toBe('w2');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/users/u1/warnings');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reason: 'Be kind' });
+  });
+
+  it('withdraws a warning via POST /api/admin/warnings/{id}/withdraw', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Withdrawn' }));
+
+    await withdrawWarning('u1', 'w2');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/warnings/w2/withdraw');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+  });
+
+  it('loads the audit log from GET /api/admin/audit-log', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [{ id: 'a1', action: 'warn', admin_id: 'ada', admin_name: 'Ada', created_at: '2026-01-01T00:00:00Z' }],
+        total: 1,
+        page: 1,
+        limit: 20,
+        total_pages: 1,
+      }),
+    );
+
+    const data = await fetchAdminAudit(1, 20);
+    expect(data.items).toHaveLength(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/audit-log?page=1&limit=20');
   });
 });
