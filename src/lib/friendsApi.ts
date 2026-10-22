@@ -9,6 +9,8 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { PROFILE_ICONS } from '@/lib/profileAssets';
 import { cachedFetch, invalidatePrefix, TTL } from '@/lib/queryCache';
+import { queryClient } from '@/lib/queryClient';
+import { invalidateNotifications } from '@/lib/queries';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,10 +27,11 @@ export type UserSummary = {
 
 export type FriendItem = { friend_since: string; user: UserSummary };
 export type FriendRequestItem = { request_id: number; created_at: string; user: UserSummary };
+export type BlockedUserItem = { blocked_at?: string | null; user: UserSummary };
 
 export type Page<T> = { page: number; limit: number; has_more: boolean; data: T[] };
 
-/** Row from GET /api/profile/search (no display_name; full_name is not shown in search). */
+/** Row from GET /api/profile/search; matched on username, shown with the full name. */
 export type UserSearchResult = {
   id: string;
   username: string;
@@ -41,6 +44,7 @@ export type UserSearchResult = {
 export type FriendshipErrorCode =
   | 'cannot_friend_self'
   | 'user_not_found'
+  | 'user_blocked'
   | 'already_friends'
   | 'request_already_sent'
   | 'request_already_received'
@@ -69,6 +73,9 @@ export class FriendsApiError extends Error {
 
 export const FRIENDS_CHANGED_EVENT = 'eventapp:friends-changed';
 
+/** The Friends screen opened on its Requests tab (incoming requests with Accept / Decline). */
+export const FRIEND_REQUESTS_PATH = '/friends?tab=incoming';
+
 /** Path of a user's profile page; one's own account opens the Profile tab. */
 export function userProfilePath(userId: string, currentUserId?: string | null): string {
   return currentUserId && userId === currentUserId ? '/profile' : `/user/${userId}`;
@@ -84,22 +91,33 @@ export function userAvatarUrl(user: Pick<UserSummary, 'avatar_kind' | 'icon_id' 
 /** Turn any backend error body into a sentence the user can read. */
 export function parseFriendsError(status: number, body: unknown): FriendsApiError {
   const detail = (body as { detail?: unknown } | null)?.detail;
+  const fallback =
+    status === 401 ? 'Your session has expired. Please sign in again.'
+    : status === 403 ? 'You cannot send a friend request to this user.'
+    : status === 404 ? 'This user could not be found.'
+    : status === 422 ? 'The request was not valid. Please try again.'
+    : status === 429 ? 'Too many requests. Please wait a moment and try again.'
+    : 'Something went wrong. Please try again.';
 
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
     const d = detail as { code?: unknown; message?: unknown; request_id?: unknown };
-    const message = typeof d.message === 'string' && d.message.trim() ? d.message : 'Something went wrong. Please try again.';
+    const code = typeof d.code === 'string' ? d.code : null;
+    const rawMessage = typeof d.message === 'string' && d.message.trim() ? d.message : null;
+    const message =
+      rawMessage
+      ?? (code === 'user_blocked' ? 'You cannot send a friend request to this user.' : fallback);
     return new FriendsApiError(
       message,
       status,
-      typeof d.code === 'string' ? d.code : null,
+      code,
       typeof d.request_id === 'number' ? d.request_id : null,
     );
   }
   if (typeof detail === 'string' && detail.trim()) return new FriendsApiError(detail, status);
-  if (status === 401) return new FriendsApiError('Your session has expired. Please sign in again.', status);
-  if (status === 422) return new FriendsApiError('The request was not valid. Please try again.', status);
-  if (status === 429) return new FriendsApiError('You have sent too many friend requests. Please try again later.', status);
-  return new FriendsApiError('Something went wrong. Please try again.', status);
+  // The rate limiter answers with { error: "Rate limit exceeded: ..." } instead of a detail.
+  const error = (body as { error?: unknown } | null)?.error;
+  if (status === 429 && typeof error === 'string' && error.trim()) return new FriendsApiError(error, status);
+  return new FriendsApiError(fallback, status);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -127,9 +145,49 @@ function friendsKey(path: string): string {
   return `/api/friends:${cacheScope()}:${path}`;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** request_id from a send/cancel payload that may be wrapped or a string. */
+export function readRequestId(body: unknown): number | null {
+  if (typeof body === 'number' && Number.isFinite(body)) return body;
+  const root = asRecord(body);
+  if (!root) return null;
+  const inner = asRecord(root.data) || root;
+  const raw = inner.request_id ?? root.request_id;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && /^\d+$/.test(raw)) return Number(raw);
+  return null;
+}
+
+function readCount(body: unknown): number {
+  const root = asRecord(body);
+  if (!root) return 0;
+  const inner = asRecord(root.data) || root;
+  const raw = inner.count ?? root.count;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
 function onMutated(): void {
   invalidatePrefix('/api/friends');
+  invalidatePrefix('/api/blocks');
   invalidatePrefix('/api/profile/search');
+  invalidatePrefix('/api/events');
+  invalidatePrefix('/api/notifications');
+  queryClient.invalidateQueries({ queryKey: ['events'] });
+  queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+  queryClient.invalidateQueries({ queryKey: ['event'] });
+  queryClient.invalidateQueries({ queryKey: ['favorites'] });
+  queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+  invalidateNotifications();
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FRIENDS_CHANGED_EVENT));
 }
 
@@ -150,10 +208,29 @@ export function fetchSentRequests(page = 1, limit = 20): Promise<Page<FriendRequ
   return cachedFetch(friendsKey(path), () => request<Page<FriendRequestItem>>(path), TTL.SHORT);
 }
 
-/** Pending incoming requests. Not cached: the badge must be correct on every screen load. */
+export function fetchBlockedUsers(page = 1, limit = 20): Promise<Page<BlockedUserItem>> {
+  const path = `/api/blocks?page=${page}&limit=${limit}`;
+  return cachedFetch(`/api/blocks:${cacheScope()}:${path}`, () => request<Page<BlockedUserItem>>(path), TTL.MEDIUM);
+}
+
+/** Pending incoming requests. Cached briefly; friendship mutations clear this prefix. */
 export async function fetchIncomingRequestCount(): Promise<number> {
-  const body = await request<{ count?: number }>('/api/friends/requests/count');
-  return typeof body.count === 'number' ? body.count : 0;
+  const path = '/api/friends/requests/count';
+  const body = await cachedFetch(
+    `${path}:${cacheScope()}`,
+    () => request<unknown>(path),
+    TTL.SHORT,
+  );
+  return readCount(body);
+}
+
+/** Find a sent request's id when the profile payload omitted it. */
+export async function findSentRequestId(userId: string): Promise<number | null> {
+  const needle = userId.trim().toLowerCase();
+  if (!needle) return null;
+  const sent = await fetchSentRequests(1, 50);
+  const match = sent.data.find((row) => row.user.id.trim().toLowerCase() === needle);
+  return typeof match?.request_id === 'number' ? match.request_id : readRequestId(match);
 }
 
 export function searchUsers(q: string, page = 1, limit = 10): Promise<Page<UserSearchResult>> {
@@ -181,8 +258,9 @@ export async function sendFriendRequest(receiverId: string): Promise<FriendReque
     method: 'POST',
     body: JSON.stringify({ receiver_id: receiverId }),
   });
+  const request_id = readRequestId(res) ?? res.request_id;
   onMutated();
-  return res;
+  return { ...res, request_id };
 }
 
 export async function acceptFriendRequest(requestId: number): Promise<FriendItem> {
@@ -197,11 +275,29 @@ export async function declineFriendRequest(requestId: number): Promise<void> {
 }
 
 export async function cancelFriendRequest(requestId: number): Promise<void> {
-  await request(`/api/friends/requests/${requestId}`, { method: 'DELETE' });
+  const id = readRequestId(requestId) ?? requestId;
+  if (typeof id !== 'number' || !Number.isFinite(id)) {
+    throw new FriendsApiError('Friend request not found.', 404, 'request_not_found');
+  }
+  await request(`/api/friends/requests/${id}`, { method: 'DELETE' });
   onMutated();
 }
 
 export async function removeFriend(friendId: string): Promise<void> {
   await request(`/api/friends/${friendId}`, { method: 'DELETE' });
+  onMutated();
+}
+
+export async function blockUser(userId: string): Promise<BlockedUserItem> {
+  const res = await request<BlockedUserItem>('/api/blocks', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+  onMutated();
+  return res;
+}
+
+export async function unblockUser(userId: string): Promise<void> {
+  await request(`/api/blocks/${encodeURIComponent(userId)}`, { method: 'DELETE' });
   onMutated();
 }

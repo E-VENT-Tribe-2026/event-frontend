@@ -36,13 +36,20 @@ import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import ChooseUsernamePage from '@/pages/ChooseUsernamePage';
 import AdminVerifyPage from '@/pages/AdminVerifyPage';
 import RequireUsername from '@/components/RequireUsername';
+import ManageAccountPage from '@/pages/ManageAccountPage';
+import PremiumPage from '@/pages/PremiumPage';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
+import WarningsGate from '@/components/WarningsGate';
+import AccountRefusalGate from '@/components/AccountRefusalGate';
+import type { SuspensionNotice } from '@/lib/suspension';
+import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
+import RealtimeBridge from '@/components/RealtimeBridge';
 import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
-import { logout, getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
+import { syncSupabaseSession } from '@/lib/supabase';
+import { logout } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
 import { clearCache } from '@/lib/queryCache';
-import { getApiUrl } from '@/lib/api';
-import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
 
 const persister = typeof window !== 'undefined'
   ? createSyncStoragePersister({
@@ -62,22 +69,10 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
-    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    })
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then((data: Record<string, unknown>) => {
-        const profile = (data.data || data.user || data) as Record<string, unknown>;
-        if (!profile.id) return;
-        setCurrentUserFromOAuth({
-          id: String(profile.id),
-          email: String(profile.email || getCurrentUser()?.email || ''),
-          name: String(profile.full_name || profile.name || getCurrentUser()?.name || ''),
-          avatar: String(profile.avatar_url || ''),
-          bio: String(profile.bio || ''),
-          interests: Array.isArray(profile.interests) ? profile.interests as string[] : [],
-        });
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+    void syncSupabaseSession(token);
+    void fetchMyProfile(token)
+      .then((body) => {
+        applyMyProfileToSession(body);
       })
       .catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,6 +127,18 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     navigate('/login', { replace: true });
   };
 
+  // Same sign-out as handleLogout, for a request refused because the account is
+  // suspended or became an administrator; the login page shows a suspension notice.
+  const handleAccountRefused = (state?: { suspension: SuspensionNotice }) => {
+    stopSessionTimeout();
+    setShowWarning(false);
+    logout();
+    clearAuthToken();
+    clearCache();
+    clearAllQueries();
+    navigate('/login', state ? { replace: true, state } : { replace: true });
+  };
+
   // Kick the user out immediately whenever any API call receives a 401 (expired token)
   useEffect(() => {
     const onExpired = () => {
@@ -152,6 +159,8 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
+      <WarningsGate yieldFocus={showWarning} />
+      <AccountRefusalGate onSignOut={handleAccountRefused} />
       <SessionTimeoutModal
         show={showWarning}
         secondsLeft={secondsLeft}
@@ -173,6 +182,7 @@ const App = () => (
       <BrowserRouter>
         <RouteDocumentTitle />
         <SessionGuard>
+          <RealtimeBridge />
           <Routes>
             <Route path="/" element={<WelcomePage />} />
             <Route path="/login" element={<LoginPage />} />
@@ -188,6 +198,8 @@ const App = () => (
             <Route path="/create" element={<RequireUsername><CreateEventPage /></RequireUsername>} />
             <Route path="/map" element={<RequireUsername><MapPage /></RequireUsername>} />
             <Route path="/profile" element={<RequireUsername><ProfilePage /></RequireUsername>} />
+            <Route path="/account" element={<RequireUsername><ManageAccountPage /></RequireUsername>} />
+            <Route path="/premium" element={<RequireUsername><PremiumPage /></RequireUsername>} />
             <Route path="/user/:userId" element={<RequireUsername><UserProfilePage /></RequireUsername>} />
             <Route path="/chat" element={<RequireUsername><ChatPage /></RequireUsername>} />
             <Route path="/friends" element={<RequireUsername><FriendsPage /></RequireUsername>} />
@@ -199,6 +211,7 @@ const App = () => (
             <Route path="/ticket/:ticketId" element={<RequireUsername><TicketPage /></RequireUsername>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          <AIAssistantWidget />
         </SessionGuard>
       </BrowserRouter>
     </TooltipProvider>

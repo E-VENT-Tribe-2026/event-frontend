@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import { getAuthToken } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
 import {
   FULL_NAME_RULES_HINT,
   USERNAME_RULES_HINT,
@@ -13,6 +14,7 @@ import {
   hasChosenUsername,
   normalizeFullName,
   normalizeUsername,
+  profileFromMeResponse,
 } from '@/lib/username';
 
 const GOOGLE_NAME_KEY = 'eventapp:google-name';
@@ -46,12 +48,13 @@ export default function ChooseUsernamePage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(getApiUrl('/api/profile/me'), {
+        const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
-        const profile = await res.json().catch(() => ({} as { username?: string; full_name?: string }));
+        const profile = profileFromMeResponse(await res.json().catch(() => ({})));
         if (cancelled) return;
-        if (res.ok && hasChosenUsername(profile.username)) {
+        const username = typeof profile.username === 'string' ? profile.username : null;
+        if (res.ok && hasChosenUsername(username)) {
           navigate('/home', { replace: true });
           return;
         }
@@ -86,24 +89,9 @@ export default function ChooseUsernamePage() {
     }
     setSaving(true);
     try {
-      const nameRes = await fetch(getApiUrl('/api/profile/me'), {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ full_name: normalizeFullName(fullName) }),
-      });
-      const nameData = await nameRes.json().catch(() => ({} as { detail?: string }));
-      if (!nameRes.ok) {
-        const detail = String(nameData.detail || 'Full name could not be saved');
-        setErrors({ fullName: detail });
-        setToast({ show: true, message: detail, type: 'error' });
-        return;
-      }
-
-      const usernameRes = await fetch(getApiUrl('/api/profile/username'), {
+      // PUT /api/profile/me is blocked until setup is complete. Use the
+      // dedicated bootstrap endpoint so username and full name land together.
+      const usernameRes = await fetch(getApiUrl(API_ENDPOINTS.CHOOSE_USERNAME), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -118,7 +106,10 @@ export default function ChooseUsernamePage() {
       const usernameData = await usernameRes.json().catch(() => ({} as { detail?: string }));
       if (!usernameRes.ok) {
         const detail = String(usernameData.detail || 'Username could not be saved');
-        setErrors({ username: detail });
+        const lowered = detail.toLowerCase();
+        setErrors(lowered.includes('name') && !lowered.includes('username')
+          ? { fullName: detail }
+          : { username: detail });
         setToast({ show: true, message: detail, type: 'error' });
         return;
       }

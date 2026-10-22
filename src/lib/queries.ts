@@ -11,7 +11,9 @@ import { queryClient } from './queryClient';
 import { getApiUrl } from './api';
 import { getAuthToken, notifyAuthExpired } from './auth';
 import { mapApiEventToItem, parseEventsApiList } from './mapApiEvent';
-import { fetchNotifications, type ApiNotification } from './notificationsApi';
+import { fetchNotifications, notifyNotificationsChanged, type ApiNotification } from './notificationsApi';
+import { invalidatePrefix } from './queryCache';
+import { notifyEventsChanged } from './realtimeEvents';
 import { fetchUserProfile } from './userProfileApi';
 import type { EventItem } from './storage';
 
@@ -201,6 +203,16 @@ export function useParticipantCount(eventId: string | undefined) {
 // ── Invalidation helpers ──────────────────────────────────────────────────────
 export function invalidateEvents() {
   queryClient.invalidateQueries({ queryKey: ['events'] });
+  queryClient.invalidateQueries({ queryKey: ['event'] });
+  queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+  queryClient.invalidateQueries({ queryKey: ['myEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['joinedEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['participants'] });
+  queryClient.invalidateQueries({ queryKey: ['maxPrice'] });
+  invalidatePrefix('/api/events');
+  invalidatePrefix('/api/participants');
+  invalidatePrefix('/api/recommendations');
+  notifyEventsChanged();
 }
 
 export function invalidateEventDetail(id: string) {
@@ -214,6 +226,7 @@ export function invalidateFavorites(userId: string) {
 
 export function invalidateNotifications() {
   queryClient.invalidateQueries({ queryKey: QK.notifications() });
+  notifyNotificationsChanged();
 }
 
 export function invalidateProfile(userId: string) {

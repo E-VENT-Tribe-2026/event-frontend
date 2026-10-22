@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import AdminEventsTab from '@/components/admin/AdminEventsTab';
 import * as adminApi from '@/lib/adminApi';
 
@@ -8,58 +8,71 @@ const organizer = {
   id: 'org-1',
   username: 'alex_smith',
   full_name: 'Alex Smith',
-  avatar_url: null,
+  display_name: null,
 };
 
-function page(
-  items: adminApi.AdminEventListItem[],
-  over: Partial<adminApi.AdminEventsResponse> = {},
-): adminApi.AdminEventsResponse {
-  return { items, total: items.length, page: 1, limit: 20, total_pages: 1, ...over };
-}
-
-const summit: adminApi.AdminEventListItem = {
+const summit = {
   id: 'e1',
   title: 'Community Tech Summit',
-  date: '2026-11-20T09:00:00Z',
+  category: 'Technology',
   status: 'active',
   is_cancelled: false,
+  start_datetime: '2026-11-20T09:00:00Z',
+  end_datetime: '2026-11-20T17:00:00Z',
   organizer,
 };
 
-const hackathon: adminApi.AdminEventListItem = {
+const hackathon = {
   id: 'e2',
   title: 'Cancelled Hackathon',
-  date: '2026-08-15T09:00:00Z',
+  category: 'Tech',
   status: 'cancelled',
   is_cancelled: true,
-  organizer: { id: 'org-2', username: null, full_name: 'Jordan Doe', avatar_url: null },
+  start_datetime: '2026-08-15T09:00:00Z',
+  end_datetime: '2026-08-15T18:00:00Z',
+  organizer: { id: 'org-2', username: null, full_name: 'Jordan Doe', display_name: null },
 };
 
-function renderTab() {
-  return render(
-    <MemoryRouter initialEntries={['/admin']}>
-      <Routes>
-        <Route path="/admin" element={<AdminEventsTab onErrorToast={vi.fn()} />} />
-        <Route path="/admin/events/:eventId" element={<div>Event page opened</div>} />
-      </Routes>
-    </MemoryRouter>
-  );
+function jsonResponse(body: unknown, init: ResponseInit = {}) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    ...init,
+  });
+}
+
+function renderTab(onOpenEvent = vi.fn()) {
+  return {
+    onOpenEvent,
+    ...render(
+      <MemoryRouter>
+        <AdminEventsTab onOpenEvent={onOpenEvent} onErrorToast={vi.fn()} />
+      </MemoryRouter>,
+    ),
+  };
+}
+
+function statusFromCall(call: unknown[] | undefined): string | null {
+  const url = new URL(String(call?.[0]), 'http://localhost');
+  return url.searchParams.get('status');
 }
 
 describe('AdminEventsTab (ticket #249)', () => {
-  let listSpy: ReturnType<typeof vi.spyOn>;
+  const fetchMock = vi.fn<typeof fetch>();
 
   beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(jsonResponse({ data: [summit, hackathon] }));
+    vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(adminApi, 'fetchAdminCounts').mockResolvedValue({
       total_users: 150,
       events: { total: 42, upcoming: 18, past: 20, cancelled: 4 },
     });
-    listSpy = vi.spyOn(adminApi, 'fetchAdminEvents').mockResolvedValue(page([summit, hackathon]));
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -76,7 +89,6 @@ describe('AdminEventsTab (ticket #249)', () => {
     renderTab();
     expect(await screen.findByText('Community Tech Summit')).toBeInTheDocument();
     expect(screen.getByText('Alex Smith')).toBeInTheDocument();
-    expect(screen.getByText('@alex_smith')).toBeInTheDocument();
     expect(screen.getByText(/Nov 20, 2026/)).toBeInTheDocument();
   });
 
@@ -89,26 +101,30 @@ describe('AdminEventsTab (ticket #249)', () => {
 
   it('marks a cancelled event with a "Cancelled" label and no other event', async () => {
     renderTab();
-    const row = await screen.findByRole('button', { name: /View details for Cancelled Hackathon/i });
+    const row = await screen.findByRole('button', { name: /View event Cancelled Hackathon/i });
     expect(row).toHaveTextContent('Cancelled');
-    const normal = screen.getByRole('button', { name: /View details for Community Tech Summit/i });
+    const normal = screen.getByRole('button', { name: /View event Community Tech Summit/i });
     expect(normal).not.toHaveTextContent('Cancelled');
   });
 
   it('starts on All and asks the backend for each tab when it is chosen', async () => {
     renderTab();
     await screen.findByText('Community Tech Summit');
-    expect(listSpy).toHaveBeenLastCalledWith('all', 1, 20, '');
+    expect(statusFromCall(fetchMock.mock.calls[0])).toBeNull();
 
     for (const [label, key] of [
       ['Upcoming', 'upcoming'],
       ['Past', 'past'],
       ['Cancelled', 'cancelled'],
-      ['All', 'all'],
     ] as const) {
       fireEvent.click(screen.getByRole('tab', { name: label }));
-      await waitFor(() => expect(listSpy).toHaveBeenLastCalledWith(key, 1, 20, ''));
+      await waitFor(() => expect(statusFromCall(fetchMock.mock.calls.at(-1))).toBe(key));
     }
+
+    const callsBeforeAll = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole('tab', { name: 'All' }));
+    expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
+    expect(fetchMock.mock.calls.length).toBe(callsBeforeAll);
   });
 
   it('keeps the search text when the tab changes', async () => {
@@ -118,59 +134,62 @@ describe('AdminEventsTab (ticket #249)', () => {
 
     fireEvent.change(screen.getByLabelText('Search by event title'), { target: { value: 'summit' } });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(300);
     });
-    expect(listSpy).toHaveBeenLastCalledWith('all', 1, 20, 'summit');
+    expect(screen.getByLabelText('Search by event title')).toHaveValue('summit');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Past' }));
-    await waitFor(() => expect(listSpy).toHaveBeenLastCalledWith('past', 1, 20, 'summit'));
+    await waitFor(() => expect(statusFromCall(fetchMock.mock.calls.at(-1))).toBe('past'));
+    expect(screen.getByLabelText('Search by event title')).toHaveValue('summit');
   });
 
   it('waits for the user to stop typing before searching', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     renderTab();
     await screen.findByText('Community Tech Summit');
-    listSpy.mockClear();
 
     const input = screen.getByLabelText('Search by event title');
-    fireEvent.change(input, { target: { value: 's' } });
-    fireEvent.change(input, { target: { value: 'su' } });
-    fireEvent.change(input, { target: { value: 'sum' } });
-    expect(listSpy).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'h' } });
+    fireEvent.change(input, { target: { value: 'ha' } });
+    fireEvent.change(input, { target: { value: 'hack' } });
+    expect(screen.getByText('Community Tech Summit')).toBeInTheDocument();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(300);
     });
-    expect(listSpy).toHaveBeenCalledTimes(1);
-    expect(listSpy).toHaveBeenCalledWith('all', 1, 20, 'sum');
+    expect(screen.queryByText('Community Tech Summit')).not.toBeInTheDocument();
+    expect(screen.getByText('Cancelled Hackathon')).toBeInTheDocument();
   });
 
   it('says so when nothing matches the search', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     renderTab();
     await screen.findByText('Community Tech Summit');
-    listSpy.mockResolvedValue(page([]));
 
     fireEvent.change(screen.getByLabelText('Search by event title'), { target: { value: 'zzz' } });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(300);
     });
     expect(await screen.findByText('No events found')).toBeInTheDocument();
-    expect(screen.getByText(/matched "zzz"/)).toBeInTheDocument();
+    expect(screen.getByText(/No events match your current filters or search/i)).toBeInTheDocument();
   });
 
-  it('loads the next page and appends it when "Load More Events" is pressed', async () => {
-    listSpy.mockResolvedValueOnce(page([summit], { page: 1, total_pages: 2, total: 2 }));
+  it('loads the next page and appends it when the first page is full', async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      ...summit,
+      id: `p1-${i}`,
+      title: `Paged Event ${i}`,
+    }));
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: page1 }))
+      .mockResolvedValueOnce(jsonResponse({ data: [hackathon] }));
+
     renderTab();
-    await screen.findByText('Community Tech Summit');
-
-    listSpy.mockResolvedValueOnce(page([hackathon], { page: 2, total_pages: 2, total: 2 }));
-    fireEvent.click(screen.getByRole('button', { name: 'Load More Events' }));
-
     expect(await screen.findByText('Cancelled Hackathon')).toBeInTheDocument();
-    expect(screen.getByText('Community Tech Summit')).toBeInTheDocument();
-    expect(listSpy).toHaveBeenLastCalledWith('all', 2, 20, '');
-    expect(screen.queryByRole('button', { name: 'Load More Events' })).not.toBeInTheDocument();
+    expect(screen.getByText('Paged Event 0')).toBeInTheDocument();
+    const urls = fetchMock.mock.calls.map((call) => new URL(String(call[0]), 'http://localhost'));
+    expect(urls[0].searchParams.get('page')).toBe('1');
+    expect(urls[1].searchParams.get('page')).toBe('2');
   });
 
   it('hides "Load More" when there is only one page', async () => {
@@ -180,20 +199,22 @@ describe('AdminEventsTab (ticket #249)', () => {
   });
 
   it('opens the panel event page when a row is pressed', async () => {
-    renderTab();
-    fireEvent.click(await screen.findByRole('button', { name: /View details for Community Tech Summit/i }));
-    expect(await screen.findByText('Event page opened')).toBeInTheDocument();
+    const { onOpenEvent } = renderTab();
+    fireEvent.click(await screen.findByRole('button', { name: /View event Community Tech Summit/i }));
+    expect(onOpenEvent).toHaveBeenCalledWith('e1');
   });
 
   it('shows hostile text as plain text, not as markup', async () => {
-    listSpy.mockResolvedValue(
-      page([
-        {
-          ...summit,
-          title: '<img src=x onerror=alert(1)>',
-          organizer: { ...organizer, full_name: '<b>Bold</b>', username: '<script>x</script>' },
-        },
-      ])
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        data: [
+          {
+            ...summit,
+            title: '<img src=x onerror=alert(1)>',
+            organizer: { ...organizer, full_name: '<b>Bold</b>', username: '<script>x</script>' },
+          },
+        ],
+      }),
     );
     const { container } = renderTab();
     expect(await screen.findByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();

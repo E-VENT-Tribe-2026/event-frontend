@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { EventItem, User } from '@/lib/storage';
@@ -184,6 +184,67 @@ describe('HomePage — Upcoming For You section (#244)', () => {
     renderHome();
 
     expect(await screen.findByText(EMPTY_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('lists events friends joined under See what your friends are up to', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
+      if (url.includes('/api/events/my-events')) return Promise.resolve(jsonOk({ data: [] }));
+      if (url.includes('/api/participants/my/events')) return Promise.resolve(jsonOk([]));
+      if (url.includes('/participants/friends')) {
+        return Promise.resolve(jsonOk([{
+          user_id: 'f1',
+          is_friend: true,
+          user: {
+            id: 'f1', username: 'maya', full_name: 'Maya', display_name: 'Maya',
+            avatar_kind: 'icon', icon_id: 'sun', avatar_url: null,
+          },
+        }]));
+      }
+      if (url.includes('/api/friends')) {
+        return Promise.resolve(jsonOk({
+          data: [{
+            id: 'f1', username: 'maya', full_name: 'Maya', display_name: 'Maya',
+            avatar_kind: 'icon', icon_id: 'sun', avatar_url: null,
+          }],
+          has_more: false,
+        }));
+      }
+      if (url.includes('/api/events')) {
+        return Promise.resolve(jsonOk({
+          data: [apiEventRow({ id: 'jazz-1', title: 'Quiet Jazz Night', friends_attending_count: 1 })],
+        }));
+      }
+      return Promise.reject(new Error(`unmocked: ${url}`));
+    });
+
+    renderHome();
+
+    expect(await screen.findByRole('heading', { name: 'See what your friends are up to' })).toBeInTheDocument();
+    expect(await screen.findByTestId('friends-marquee')).toBeInTheDocument();
+    expect(screen.getAllByText('Quiet Jazz Night').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Maya is going').length).toBeGreaterThan(0);
+  });
+
+  it('shows at most four upcoming events until See all is pressed', async () => {
+    mockFetch({
+      myEvents: [1, 2, 3, 4, 5].map((n) =>
+        apiEventRow({ id: `up-${n}`, title: `Upcoming ${n}`, start_datetime: `2030-07-0${n}T15:00:00.000Z` }),
+      ),
+    });
+
+    renderHome();
+
+    const section = await screen.findByTestId('upcoming-events');
+    await waitFor(() => {
+      expect(within(section).getByText('Upcoming 1')).toBeInTheDocument();
+    });
+    expect(within(section).getByText('Upcoming 4')).toBeInTheDocument();
+    expect(within(section).queryByText('Upcoming 5')).not.toBeInTheDocument();
+
+    fireEvent.click(within(section).getByRole('button', { name: /See all/i }));
+    expect(within(section).getByText('Upcoming 5')).toBeInTheDocument();
   });
 
   it('does not flash the empty state while upcoming events are still loading', async () => {

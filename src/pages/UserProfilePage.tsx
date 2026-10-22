@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
+import PlanBadge from '@/components/PlanBadge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,27 +21,29 @@ import { getCurrentUser } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
-import { useUserProfile, invalidateUserProfile, invalidateNotifications } from '@/lib/queries';
+import { useUserProfile, invalidateUserProfile, invalidateNotifications, QK } from '@/lib/queries';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { queryClient } from '@/lib/queryClient';
 import {
   FriendsApiError,
   acceptFriendRequest,
+  blockUser,
   cancelFriendRequest,
   declineFriendRequest,
+  findSentRequestId,
+  readRequestId,
   removeFriend,
   sendFriendRequest,
+  unblockUser,
   userAvatarUrl,
   userProfilePath,
-  type FriendItem,
+  type UserSummary,
 } from '@/lib/friendsApi';
 import {
   PROFILE_UNAVAILABLE_MESSAGE,
   ProfileLoadError,
-  blockUser,
   fetchUserFriends,
   isProfileUnavailable,
-  unblockUser,
   type ProfileEventGroup,
   type UserProfile,
 } from '@/lib/userProfileApi';
@@ -50,7 +53,8 @@ type EventTab = 'upcoming' | 'past';
 type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove';
 type BlockAction = 'block' | 'unblock';
 
-const FRIENDS_PAGE_SIZE = 20;
+// The profile carries the first 10 friends; later pages use the same size so offsets line up.
+const FRIENDS_PAGE_SIZE = 10;
 
 function errorMessage(error: unknown): string {
   if (error instanceof FriendsApiError) return error.message;
@@ -114,7 +118,7 @@ export default function UserProfilePage() {
   const [confirmBlock, setConfirmBlock] = useState<BlockAction | null>(null);
 
   // Friends of the viewed user beyond the first page, which comes with the profile.
-  const [moreFriends, setMoreFriends] = useState<FriendItem[]>([]);
+  const [moreFriends, setMoreFriends] = useState<UserSummary[]>([]);
   const [friendsPage, setFriendsPage] = useState(1);
   const [friendsHasMore, setFriendsHasMore] = useState(false);
   const [friendsLoadingMore, setFriendsLoadingMore] = useState(false);
@@ -148,7 +152,8 @@ export default function UserProfilePage() {
   useEffect(() => {
     setMoreFriends([]);
     setFriendsPage(1);
-    setFriendsHasMore(Boolean(firstFriendsPage?.has_more));
+    // A full first page may have more behind it; an empty next page then hides "Load more".
+    setFriendsHasMore((firstFriendsPage?.length ?? 0) >= FRIENDS_PAGE_SIZE);
   }, [firstFriendsPage]);
 
   const refreshProfile = async () => {
@@ -159,12 +164,17 @@ export default function UserProfilePage() {
   const action = useMutation({
     mutationFn: async (kind: FriendshipAction) => {
       if (!profile) return;
-      const requestId = profile.friendship?.request_id ?? null;
+      const requestId = readRequestId(profile.friendship) ?? profile.friendship?.request_id ?? null;
       switch (kind) {
         case 'send':
           return sendFriendRequest(profile.id);
-        case 'cancel':
-          return cancelFriendRequest(requestId as number);
+        case 'cancel': {
+          const id = typeof requestId === 'number' ? requestId : await findSentRequestId(profile.id);
+          if (typeof id !== 'number') {
+            throw new FriendsApiError('Friend request not found.', 404, 'request_not_found');
+          }
+          return cancelFriendRequest(id);
+        }
         case 'accept':
           return acceptFriendRequest(requestId as number);
         case 'decline':
@@ -173,7 +183,15 @@ export default function UserProfilePage() {
           return removeFriend(profile.id);
       }
     },
-    onSuccess: async () => {
+    onSuccess: async (data, kind) => {
+      if (kind === 'send') {
+        const sentId = readRequestId(data);
+        if (sentId != null && viewer?.id) {
+          queryClient.setQueryData(QK.userProfile(viewer.id, userId), (old: UserProfile | undefined) =>
+            old ? { ...old, friendship: { status: 'request_sent', request_id: sentId } } : old,
+          );
+        }
+      }
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
       await refreshProfile();
@@ -185,7 +203,10 @@ export default function UserProfilePage() {
   });
 
   const block = useMutation({
-    mutationFn: (kind: BlockAction) => (kind === 'block' ? blockUser(userId) : unblockUser(userId)),
+    mutationFn: async (kind: BlockAction) => {
+      if (kind === 'block') await blockUser(userId);
+      else await unblockUser(userId);
+    },
     onSuccess: async (_data, kind) => {
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
@@ -223,7 +244,7 @@ export default function UserProfilePage() {
   const run = (kind: FriendshipAction) => action.mutate(kind);
   const busy = action.isPending || block.isPending;
 
-  const friends = [...(profile?.friends?.data ?? []), ...moreFriends];
+  const friends = [...(profile?.friends ?? []), ...moreFriends];
 
   const loadMoreFriends = async () => {
     const next = friendsPage + 1;
@@ -282,7 +303,7 @@ export default function UserProfilePage() {
   };
 
   const renderActions = (p: UserProfile) => {
-    if (p.is_blocked) {
+    if (p.blocked_by_me || p.friendship?.status === 'blocked') {
       return (
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setConfirmBlock('unblock')} disabled={busy} className={outline}>
@@ -381,7 +402,10 @@ export default function UserProfilePage() {
 
           <div className="space-y-3 px-4 pt-8">
             <div>
-              <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+                <PlanBadge plan={profile} />
+              </div>
               {profile.username && <p className="text-sm text-muted-foreground">@{profile.username}</p>}
             </div>
 
@@ -468,22 +492,22 @@ export default function UserProfilePage() {
                   ) : (
                     <ul className="space-y-2">
                       {friends.map((f) => {
-                        const name = f.user.full_name || f.user.display_name || f.user.username || 'User';
+                        const name = f.full_name || f.display_name || f.username || 'User';
                         return (
                           <motion.li
-                            key={f.user.id}
+                            key={f.id}
                             layout
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0 }}
                             className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3 cursor-pointer hover:border-primary/40 transition-all"
-                            onClick={() => navigate(userProfilePath(f.user.id, viewer?.id ?? null))}
+                            onClick={() => navigate(userProfilePath(f.id, viewer?.id ?? null))}
                           >
-                            <UserAvatar src={userAvatarUrl(f.user)} seed={f.user.id} name={name} size="md" />
+                            <UserAvatar src={userAvatarUrl(f)} seed={f.id} name={name} size="md" />
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-semibold text-foreground">{name}</p>
-                              {f.user.username && (
-                                <p className="truncate text-xs text-muted-foreground">@{f.user.username}</p>
+                              {f.username && (
+                                <p className="truncate text-xs text-muted-foreground">@{f.username}</p>
                               )}
                             </div>
                           </motion.li>

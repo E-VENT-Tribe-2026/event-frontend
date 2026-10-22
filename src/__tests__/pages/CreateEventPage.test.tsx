@@ -4,9 +4,26 @@ import type { User } from '@/lib/storage';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import CreateEventPage from '@/pages/CreateEventPage';
 
-const { addEventMock, mockNavigate } = vi.hoisted(() => ({
+const { addEventMock, mockNavigate, currentUser } = vi.hoisted(() => ({
   addEventMock: vi.fn(),
   mockNavigate: vi.fn(),
+  currentUser: {
+    id: 'u1',
+    name: 'Organizer',
+    email: 'o@example.com',
+    role: 'organizer' as const,
+    password: '',
+    avatar: '',
+    profilePhoto: '',
+    coverPhoto: '',
+    bio: '',
+    interests: [],
+    dob: '',
+    gender: '',
+    isPremium: false,
+    friends: [],
+    createdAt: '',
+  } satisfies User,
 }));
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -18,6 +35,10 @@ vi.mock('react-router-dom', async (importOriginal) => {
 });
 
 vi.mock('@/components/BottomNav', () => ({
+  default: () => null,
+}));
+
+vi.mock('@/components/TopBar', () => ({
   default: () => null,
 }));
 
@@ -39,10 +60,14 @@ vi.mock('@/components/LocationPickerMap', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/auth', () => ({
-  getAuthToken: () => 'test-token',
-  setAuthToken: vi.fn(),
-}));
+vi.mock('@/lib/auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/auth')>();
+  return {
+    ...actual,
+    getAuthToken: () => 'test-token',
+    setAuthToken: vi.fn(),
+  };
+});
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
@@ -50,30 +75,15 @@ vi.mock('@/lib/supabase', () => ({
       getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
     },
   },
+  syncSupabaseSession: vi.fn(() => Promise.resolve()),
+  clearSupabaseSession: vi.fn(),
 }));
 
 vi.mock('@/lib/storage', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/storage')>();
-  const minimalUser = {
-    id: 'u1',
-    name: 'Organizer',
-    email: 'o@example.com',
-    role: 'organizer' as const,
-    password: '',
-    avatar: '',
-    profilePhoto: '',
-    coverPhoto: '',
-    bio: '',
-    interests: [],
-    dob: '',
-    gender: '',
-    isPremium: false,
-    friends: [],
-    createdAt: '',
-  } satisfies User;
   return {
     ...mod,
-    getCurrentUser: () => minimalUser,
+    getCurrentUser: () => currentUser,
     addEvent: addEventMock,
   };
 });
@@ -91,6 +101,7 @@ describe('CreateEventPage', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     addEventMock.mockClear();
+    currentUser.isPremium = false;
     vi.stubGlobal(
       'fetch',
       vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))),
@@ -113,6 +124,15 @@ describe('CreateEventPage', () => {
       </MemoryRouter>,
     );
   }
+
+  it('lets you pick a category from the same pills as the homepage', () => {
+    renderPage();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Music' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: 'Sports' }));
+    expect(screen.getByRole('radio', { name: 'Sports' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Music' })).toHaveAttribute('aria-checked', 'false');
+  });
 
   it('shows validation errors when publishing without required fields', async () => {
     renderPage();
@@ -161,5 +181,53 @@ describe('CreateEventPage', () => {
       },
       { timeout: 3000 },
     );
+  });
+
+  it('gates custom banners and recurrence behind Pro', () => {
+    renderPage();
+    expect(screen.getByRole('link', { name: /Custom banner/i })).toHaveAttribute('href', '/premium');
+    expect(screen.getByRole('link', { name: /Repeat this event/i })).toHaveAttribute('href', '/premium');
+    expect(screen.queryByRole('radiogroup', { name: 'Repeat' })).not.toBeInTheDocument();
+  });
+
+  it('lets Pro create a weekly series in one publish', async () => {
+    currentUser.isPremium = true;
+    let posts = 0;
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/events') && init?.method === 'POST') {
+        posts += 1;
+        return new Response(JSON.stringify({ id: `evt-${posts}`, created_by: 'u1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('not mocked', { status: 500 });
+    });
+
+    renderPage();
+    expect(screen.getByRole('radiogroup', { name: 'Repeat' })).toBeInTheDocument();
+    expect(screen.getByText('Custom banner')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Repeat this event/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Event Title'), { target: { value: 'Weekly jam' } });
+    fireEvent.change(screen.getByPlaceholderText('Description'), { target: { value: 'Bring a guitar' } });
+    const dateInput = screen.getByLabelText(/event date/i) as HTMLInputElement;
+    const timeInput = screen.getByLabelText(/event time/i) as HTMLInputElement;
+    fireEvent.focus(dateInput);
+    fireEvent.change(dateInput, { target: { value: tomorrowIsoDate() } });
+    fireEvent.focus(timeInput);
+    fireEvent.change(timeInput, { target: { value: '19:00' } });
+    fireEvent.change(screen.getByPlaceholderText(/Search venue, address or city/i), { target: { value: 'Studio' } });
+    fireEvent.click(screen.getByRole('button', { name: /set-map-pin/i }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Weekly' }));
+    fireEvent.change(screen.getByLabelText(/How many times/i), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /publish event/i }));
+
+    await waitFor(() => {
+      expect(addEventMock).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.getByText('Published 3 events in the series')).toBeInTheDocument();
   });
 });

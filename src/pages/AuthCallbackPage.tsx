@@ -1,14 +1,16 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { setAuthToken } from '@/lib/auth';
+import { setAuthToken, clearAuthToken } from '@/lib/auth';
+import { readSuspension, type SuspensionNotice } from '@/lib/suspension';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { destinationAfterSignIn } from '@/lib/username';
+import { destinationAfterSignIn, hasChosenUsername } from '@/lib/username';
 import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
 import { fetchMfaStatus, needsAdminVerification, setPendingAdminVerification } from '@/lib/adminAuth';
+import { consumeOAuthNextPath } from '@/lib/oauthRedirect';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -26,6 +28,24 @@ function normalizeNextPath(raw: string | null): string {
   }
 }
 
+/**
+ * Google sign-in never calls /api/auth/login, so a suspension is checked here.
+ * Returns the notice only for a 403 with the suspended code; anything else
+ * (success, other errors, network failure) returns null so sign-in continues.
+ */
+async function fetchSuspension(accessToken: string): Promise<SuspensionNotice | null> {
+  try {
+    const res = await fetch(getApiUrl('/api/auth/me'), {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+    if (res.status !== 403) return null;
+    const body = await res.json().catch(() => null);
+    return readSuspension((body as { detail?: unknown } | null)?.detail);
+  } catch {
+    return null;
+  }
+}
+
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
 
@@ -34,7 +54,7 @@ export default function AuthCallbackPage() {
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
       const queryParams = new URLSearchParams(window.location.search);
       const recoveryType = hashParams.get('type') || queryParams.get('type');
-      const nextPath = normalizeNextPath(queryParams.get('next'));
+      const nextPath = normalizeNextPath(queryParams.get('next') || consumeOAuthNextPath());
       const recoveryToken =
         hashParams.get('access_token') ||
         queryParams.get('access_token') ||
@@ -80,6 +100,13 @@ export default function AuthCallbackPage() {
 
       setAuthToken(session.access_token);
 
+      const suspension = await fetchSuspension(session.access_token);
+      if (suspension) {
+        clearAuthToken();
+        navigate('/login', { replace: true, state: { suspension } });
+        return;
+      }
+
       // Scenario F: Google sign-in never calls /api/auth/login,
       // so an administrator's status is checked separately here.
       const mfaStatus = await fetchMfaStatus(session.access_token);
@@ -118,16 +145,18 @@ export default function AuthCallbackPage() {
 
         if (/googleusercontent|ggpht\.com/i.test(avatarUrl)) {
           const defaultIcon = pickDefaultIconUrl();
-          await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-            method: 'PUT',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({ avatar_url: defaultIcon }),
-          });
           avatarUrl = defaultIcon;
+          if (hasChosenUsername(username)) {
+            await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+              method: 'PUT',
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+              },
+              body: JSON.stringify({ avatar_url: defaultIcon }),
+            });
+          }
         }
       } catch {
         /* use metadata defaults */
@@ -137,6 +166,7 @@ export default function AuthCallbackPage() {
         id: session.user.id,
         email: session.user.email || '',
         name: fullName,
+        username,
         avatar: avatarUrl,
         bio,
         interests,

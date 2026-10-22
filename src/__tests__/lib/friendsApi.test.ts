@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setAuthToken } from '@/lib/auth';
+import { clearCache } from '@/lib/queryCache';
 import {
   FRIENDS_CHANGED_EVENT,
   acceptFriendRequest,
+  blockUser,
+  fetchBlockedUsers,
   fetchFriends,
+  fetchIncomingRequestCount,
   parseFriendsError,
+  readRequestId,
   searchUsers,
+  sendFriendRequest,
+  unblockUser,
   userAvatarUrl,
   userProfilePath,
 } from '@/lib/friendsApi';
@@ -68,6 +75,12 @@ describe('parseFriendsError', () => {
     const err = parseFriendsError(422, { detail: [{ loc: ['query', 'q'], msg: 'too short', type: 'x' }] });
     expect(err.message).toBe('The request was not valid. Please try again.');
   });
+
+  it('explains a blocked friend request without exposing a raw code', () => {
+    const err = parseFriendsError(403, { detail: { code: 'user_blocked' } });
+    expect(err.code).toBe('user_blocked');
+    expect(err.message).toBe('You cannot send a friend request to this user.');
+  });
 });
 
 describe('friendship requests and caching', () => {
@@ -76,6 +89,8 @@ describe('friendship requests and caching', () => {
   beforeEach(() => {
     setAuthToken('token-abc');
     vi.stubGlobal('fetch', fetchMock);
+    clearCache();
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -115,6 +130,61 @@ describe('friendship requests and caching', () => {
     expect(first.has_more).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/profile/search?q=JANE&page=1&limit=10');
+  });
+
+  it('blocks a user via POST /api/blocks and invalidates the friends cache', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ blocked_at: '2026-10-15T12:00:00Z', user: jane }, 201));
+    const result = await blockUser(jane.id);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/blocks');
+    expect(String(url)).not.toContain(`/api/blocks/${jane.id}`);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ user_id: jane.id });
+    expect(result.blocked_at).toBe('2026-10-15T12:00:00Z');
+    expect(result.user.id).toBe(jane.id);
+  });
+
+  it('lists blocked users from GET /api/blocks', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      page: 1, limit: 20, has_more: false,
+      data: [{ blocked_at: '2026-10-15T12:00:00Z', user: jane }],
+    }));
+    const page = await fetchBlockedUsers();
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/blocks?page=1&limit=20');
+    expect(page.data[0].user.username).toBe('jane_doe');
+  });
+
+  it('unblocks a user via DELETE /api/blocks/{user_id}', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ message: 'User unblocked' }));
+    await unblockUser(jane.id);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain(`/api/blocks/${jane.id}`);
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('refuses a friend request to a blocked user with 403 user_blocked', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ detail: { code: 'user_blocked' } }, 403));
+    await expect(sendFriendRequest(jane.id)).rejects.toMatchObject({
+      code: 'user_blocked',
+      status: 403,
+      message: 'You cannot send a friend request to this user.',
+    });
+  });
+
+  it('reads nested and string request ids', () => {
+    expect(readRequestId({ request_id: 7 })).toBe(7);
+    expect(readRequestId({ data: { request_id: '12' } })).toBe(12);
+    expect(readRequestId(null)).toBeNull();
+  });
+
+  it('reads a wrapped incoming request count', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { count: 3 } }));
+    await expect(fetchIncomingRequestCount()).resolves.toBe(3);
+  });
+
+  it('returns the request id from a wrapped send response', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { request_id: '9' } }, 201));
+    await expect(sendFriendRequest(jane.id)).resolves.toMatchObject({ request_id: 9 });
   });
 
   it('throws the backend reason when an action is refused', async () => {

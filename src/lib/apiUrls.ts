@@ -3,6 +3,7 @@ export const API_ENDPOINTS = {
   SIGNUP: '/api/auth/register',
   EVENTS: '/api/events',
   PROFILE_ME: '/api/profile/me',
+  CHOOSE_USERNAME: '/api/profile/choose-username',
   NOTIFICATIONS: '/api/notifications',
   ADMIN_VERIFY: '/api/admin/verify',
   ADMIN_COUNTS: '/api/admin/counts',
@@ -15,8 +16,6 @@ export const API_ENDPOINTS = {
   ADMIN_USER_WITHDRAW_WARNING: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}/warn/withdraw`,
   ADMIN_USER_SUSPEND: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}/suspend`,
   ADMIN_USER_LIFT: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}/lift-suspension`,
-  ADMIN_EVENTS: '/api/admin/events',
-  ADMIN_EVENT_DETAIL: (eventId: string) => `/api/admin/events/${encodeURIComponent(eventId)}`,
   ADMIN_EVENT_REMOVE: (eventId: string) => `/api/admin/events/${encodeURIComponent(eventId)}`,
   ADMIN_AUDIT: '/api/admin/audit',
   ADMIN_REPORTS: '/api/admin/reports',
@@ -24,6 +23,12 @@ export const API_ENDPOINTS = {
   ADMIN_REPORT_DISMISS: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/dismiss`,
   ADMIN_REPORT_ACTION: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/action`,
   MFA_STATUS: '/api/auth/mfa/status',
+  ASSISTANT_CHAT: '/api/assistant/chat',
+  ASSISTANT_TOOL_SEARCH: '/api/assistant/tools/search-events',
+  ASSISTANT_TOOL_EVENT_DETAILS: '/api/assistant/tools/event-details',
+  ASSISTANT_TOOL_DRAFT_EVENT: '/api/assistant/tools/draft-event',
+  BLOCKS: '/api/blocks',
+  BLOCK_USER: (userId: string) => `/api/blocks/${encodeURIComponent(userId)}`,
 } as const;
 
 

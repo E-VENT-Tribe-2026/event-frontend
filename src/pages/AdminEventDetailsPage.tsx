@@ -157,9 +157,7 @@ export default function AdminEventDetailsPage() {
                     <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                     <div>
                       <dt className="sr-only">Capacity</dt>
-                      <dd className="text-foreground">
-                        {participantTotal} of {event.max_capacity} spots taken
-                      </dd>
+                      <dd className="text-foreground">Capacity: {event.max_capacity}</dd>
                     </div>
                   </div>
                 )}

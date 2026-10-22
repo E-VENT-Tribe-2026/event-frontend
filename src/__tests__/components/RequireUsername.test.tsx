@@ -3,12 +3,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import RequireUsername from '@/components/RequireUsername';
 import { setAuthToken, clearAuthToken } from '@/lib/auth';
+import { clearCache } from '@/lib/queryCache';
 import { setPendingAdminVerification, clearPendingAdminVerification } from '@/lib/adminAuth';
 
 function renderGuarded(initialPath = '/home') {
   render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
+        <Route path="/login" element={<div>Login Screen</div>} />
         <Route path="/admin-verify" element={<div>Admin Verify Screen</div>} />
         <Route path="/choose-username" element={<div>Choose Username Screen</div>} />
         <Route
@@ -32,13 +34,15 @@ describe('RequireUsername — ticket #247 admin-verification gate', () => {
     vi.stubGlobal('fetch', fetchMock);
     clearAuthToken();
     clearPendingAdminVerification();
+    clearCache();
+    sessionStorage.clear();
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('passes through when there is no token at all (pre-existing behavior, unaffected)', () => {
+  it('redirects to /login when there is no token at all', () => {
     renderGuarded();
-    expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
+    expect(screen.getByText('Login Screen')).toBeInTheDocument();
   });
 
   it('redirects to /admin-verify when an admin verification is pending, before checking anything else', async () => {
@@ -59,5 +63,35 @@ describe('RequireUsername — ticket #247 admin-verification gate', () => {
     await waitFor(() => {
       expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
     });
+  });
+
+  it('stays on the page when the profile is nested under data', async () => {
+    setAuthToken('verified-token');
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { username: 'alex', role: 'participant' } }), { status: 200 }),
+    );
+    renderGuarded();
+    await waitFor(() => {
+      expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Choose Username Screen')).not.toBeInTheDocument();
+  });
+
+  it('does not bounce to choose-username when profile/me fails with a server error', async () => {
+    setAuthToken('verified-token');
+    fetchMock.mockResolvedValueOnce(new Response('nope', { status: 500 }));
+    renderGuarded();
+    await waitFor(() => {
+      expect(screen.getByText('Protected Home Screen')).toBeInTheDocument();
+    });
+  });
+
+  it('sends accounts without a username to choose-username', async () => {
+    setAuthToken('verified-token');
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ username: null }), { status: 200 }),
+    );
+    renderGuarded();
+    expect(await screen.findByText('Choose Username Screen')).toBeInTheDocument();
   });
 });

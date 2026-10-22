@@ -16,11 +16,14 @@ const event = (id: string, title: string, start: string) => ({
 });
 
 function friend(id: string, username: string, fullName: string) {
-  return {
-    friend_since: '2026-01-01T00:00:00Z',
-    user: { id, username, full_name: fullName, display_name: username, avatar_kind: 'icon', icon_id: 'sun', avatar_url: null },
-  };
+  return { id, username, full_name: fullName, display_name: username, avatar_kind: 'icon', icon_id: 'sun', avatar_url: null };
 }
+
+// The profile carries the first 10 friends as a plain list of UserSummary.
+const FIRST_FRIENDS = [
+  friend('f-1', 'amira', 'Amira Ben Ali'),
+  ...Array.from({ length: 9 }, (_, i) => friend(`f-x${i}`, `friend_${i}`, `Friend ${i}`)),
+];
 
 const baseProfile = {
   id: OTHER_ID,
@@ -42,12 +45,7 @@ const baseProfile = {
       past: [event('j-past', 'Joined Past', '2020-02-01T10:00:00Z')],
     },
   },
-  friends: {
-    page: 1,
-    limit: 20,
-    has_more: true,
-    data: [friend('f-1', 'amira', 'Amira Ben Ali')],
-  },
+  friends: FIRST_FRIENDS,
   friendship: { status: 'none', request_id: null },
 };
 
@@ -59,7 +57,7 @@ function mockBackend(
   overrides: { failWith?: { status: number; detail: unknown }; profile?: Record<string, unknown> } = {},
 ) {
   let friendship = { ...initial };
-  let blocked = Boolean(overrides.profile?.is_blocked);
+  let blocked = Boolean(overrides.profile?.blocked_by_me);
   const calls: Array<{ method: string; url: string; body?: string }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -68,17 +66,28 @@ function mockBackend(
     const json = (status: number, body: unknown) =>
       ({ ok: status < 400, status, json: async () => body }) as Response;
 
+    if (method === 'GET' && url.includes('/api/friends/requests/sent')) {
+      const id = friendship.request_id;
+      return json(200, {
+        page: 1,
+        limit: 50,
+        has_more: false,
+        data: id
+          ? [{ request_id: id, created_at: '2026-01-01T00:00:00Z', user: { id: OTHER_ID, username: 'jane_doe', full_name: 'Jane Doe', display_name: 'Jane Doe', avatar_kind: 'icon', icon_id: 'sun', avatar_url: null } }]
+          : [],
+      });
+    }
     if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}/friends`)) {
-      return json(200, { page: 2, limit: 20, has_more: false, data: [friend('f-2', 'sami', 'Sami Trabelsi')] });
+      return json(200, { page: 2, limit: 10, has_more: false, data: [friend('f-2', 'sami', 'Sami Trabelsi')] });
     }
     if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
       const profile = { ...baseProfile, ...overrides.profile, friendship };
       if (blocked) {
         // The backend leaves out events and the friends list for a user the viewer blocked.
         const { events: _events, friends: _friends, ...top } = profile;
-        return json(200, { ...top, is_blocked: true });
+        return json(200, { ...top, blocked_by_me: true });
       }
-      return json(200, { ...profile, is_blocked: false });
+      return json(200, { ...profile, blocked_by_me: false });
     }
     if (method === 'POST' && url.endsWith('/api/blocks')) {
       blocked = true;
@@ -148,6 +157,7 @@ describe('UserProfilePage', () => {
 
     expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
     expect(screen.getByText('@jane_doe')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-badge')).toHaveTextContent('Basic');
     expect(screen.getByText('I love live music.')).toBeInTheDocument();
     expect(screen.getByText('Music')).toBeInTheDocument();
     expect(screen.getByTestId('profile-banner')).toBeInTheDocument();
@@ -157,6 +167,12 @@ describe('UserProfilePage', () => {
     fireEvent.click(screen.getByTestId('user-tab-past'));
     expect(screen.getByText('Organized Past')).toBeInTheDocument();
     expect(screen.getByText('Joined Past')).toBeInTheDocument();
+  });
+
+  it('shows a Pro tag when the profile is on Pro', async () => {
+    mockBackend({ status: 'none', request_id: null }, { profile: { is_premium: true } });
+    renderPage();
+    expect(await screen.findByTestId('plan-badge')).toHaveTextContent('Pro');
   });
 
   it('shows no owner-only parts or cancelled events', async () => {
@@ -187,6 +203,36 @@ describe('UserProfilePage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /cancel friend request/i }));
 
+    expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/api/friends/requests/7'))).toBe(true);
+  });
+
+  it('still cancels when the profile omitted request_id', async () => {
+    let friendship = { status: 'request_sent', request_id: null as number | null };
+    const calls: Array<{ method: string; url: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+      const json = (status: number, body: unknown) =>
+        ({ ok: status < 400, status, json: async () => body }) as Response;
+      if (method === 'GET' && url.includes('/api/friends/requests/sent')) {
+        return json(200, {
+          page: 1, limit: 50, has_more: false,
+          data: [{ request_id: 7, created_at: '2026-01-01T00:00:00Z', user: { id: OTHER_ID, username: 'jane_doe', full_name: 'Jane Doe', display_name: 'Jane', avatar_kind: 'icon', icon_id: 'sun', avatar_url: null } }],
+        });
+      }
+      if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
+        return json(200, { ...baseProfile, friendship });
+      }
+      if (method === 'DELETE' && url.includes('/api/friends/requests/7')) {
+        friendship = { status: 'none', request_id: null };
+        return json(200, { message: 'ok' });
+      }
+      return json(404, { detail: 'not found' });
+    }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /cancel friend request/i }));
     expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/api/friends/requests/7'))).toBe(true);
   });
@@ -292,7 +338,7 @@ describe('UserProfilePage', () => {
     expect(await screen.findByText('Sami Trabelsi')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
 
-    expect(calls.some((c) => c.url.includes(`/api/profile/${OTHER_ID}/friends?page=2`))).toBe(true);
+    expect(calls.some((c) => c.url.includes(`/api/profile/${OTHER_ID}/friends?page=2&limit=10`))).toBe(true);
     expect(calls.some((c) => /\/api\/friends\?/.test(c.url))).toBe(false);
   });
 
@@ -308,7 +354,7 @@ describe('UserProfilePage', () => {
     expect(await screen.findByRole('button', { name: /unblock/i })).toBeInTheDocument();
 
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/blocks'));
-    expect(JSON.parse(post!.body!)).toEqual({ blocked_id: OTHER_ID });
+    expect(JSON.parse(post!.body!)).toEqual({ user_id: OTHER_ID });
     expect(screen.getByText('I love live music.')).toBeInTheDocument();
     expect(screen.queryByText('Organized Upcoming')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
@@ -316,7 +362,7 @@ describe('UserProfilePage', () => {
   });
 
   it('says the friendship is not restored before unblocking', async () => {
-    const calls = mockBackend({ status: 'none', request_id: null }, { profile: { is_blocked: true } });
+    const calls = mockBackend({ status: 'none', request_id: null }, { profile: { blocked_by_me: true } });
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /unblock/i }));
@@ -328,6 +374,52 @@ describe('UserProfilePage', () => {
 
     expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith(`/api/blocks/${OTHER_ID}`))).toBe(true);
+  });
+
+  it('hides "Load more" when the first page of friends is not full', async () => {
+    mockBackend({ status: 'none', request_id: null }, { profile: { friends: [friend('f-1', 'amira', 'Amira Ben Ali')] } });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('user-main-tab-friends'));
+    expect(screen.getByText('Amira Ben Ali')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the rate limiter message when it answers with an error field', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
+        return { ok: true, status: 200, json: async () => ({ ...baseProfile, blocked_by_me: false }) } as Response;
+      }
+      return { ok: false, status: 429, json: async () => ({ error: 'Rate limit exceeded: 200 per 1 minute' }) } as Response;
+    }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+    expect(await screen.findByText('Rate limit exceeded: 200 per 1 minute')).toBeInTheDocument();
+  });
+
+  it('shows a friendly error when sending a request to a user you blocked', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      { failWith: { status: 403, detail: { code: 'user_blocked' } } },
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+
+    expect(await screen.findByText('You cannot send a friend request to this user.')).toBeInTheDocument();
+  });
+
+  it('treats a "blocked" friendship status as a profile the viewer blocked', async () => {
+    mockBackend(
+      { status: 'blocked', request_id: null },
+      { profile: { events: undefined, friends: undefined } },
+    );
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /^unblock$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^block$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
   it('shows the message the backend returns when the request limit is reached', async () => {

@@ -1,6 +1,6 @@
 import type { EventItem } from '@/lib/storage';
 import { getGeneratedAvatarUrl, pickImageUrl } from '@/lib/avatars';
-import { getCategoryBanner } from '@/lib/categoryBanners';
+import { eventBannerFrom } from '@/lib/eventBanner';
 
 /** @deprecated Use getCategoryBanner() for category-aware defaults. */
 export const DEFAULT_EVENT_IMAGE =
@@ -10,6 +10,12 @@ function parseEventStart(raw: unknown): Date {
   if (typeof raw !== 'string' || !raw.trim()) return new Date();
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+/** The backend sends friends_attending_count with each event; anything else counts as 0. */
+export function friendsAttendingCountFrom(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 /** Map backend event row to frontend EventItem */
@@ -58,7 +64,7 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     budget: Number.isFinite(cost) ? cost : 0,
     participantsLimit: Number.isFinite(capacity) ? capacity : 0,
     participants: [],
-    image: getCategoryBanner(api.category as string | undefined),
+    image: eventBannerFrom(api, api.category as string | undefined),
     organizer: organizerName,
     organizerId: createdBy,
     organizerAvatar,
@@ -66,6 +72,7 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     organizerFullName: organizerFullName || undefined,
     status: rawStatus,
     isCancelled,
+    friendsAttendingCount: friendsAttendingCountFrom(api.friends_attending_count),
     isPrivate: false,
     isDraft: false,
     requiresApproval: false,
