@@ -1,15 +1,14 @@
 import { Search, Bell, Settings, LogOut, User, ShieldCheck } from 'lucide-react';
 import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { Link, useNavigate } from 'react-router-dom';
-import { getCurrentUser, updateUser, logout } from '@/lib/storage';
+import { getCurrentUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { AUTH_TOKEN_EVENT, getAuthToken, clearAuthToken } from '@/lib/auth';
 import { countBellUnreads, fetchNotifications, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
 import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
+import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { useEffect, useState, useRef } from 'react';
-import { getApiUrl } from '@/lib/api';
-import { API_ENDPOINTS } from '@/lib/apiUrls';
 import AppLogo from '@/components/AppLogo';
 import TopNavProfile from '@/components/TopNavProfile';
 import PlanBadge from '@/components/PlanBadge';
@@ -55,42 +54,29 @@ export default function TopBar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch profile on mount to ensure avatar is up to date after refresh
+  // Shared cached profile — TopBar remounts on every page, so do not hit the network each time.
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) return;
-    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    })
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then((data: Record<string, unknown>) => {
-        const profile = (data.data || data.user || data) as Record<string, unknown>;
-        if (!profile.id) return;
-        updateUser({
-          name: String(profile.full_name || profile.name || ''),
-          ...(typeof profile.email === 'string' && profile.email.trim() ? { email: profile.email.trim() } : {}),
-          ...(typeof profile.username === 'string' && profile.username.trim() ? { username: profile.username.trim() } : {}),
-          avatar: String(profile.avatar_url || ''),
-          profilePhoto: String(profile.avatar_url || ''),
-          bio: String(profile.bio || ''),
-          interests: Array.isArray(profile.interests) ? profile.interests as string[] : [],
-        });
+    if (!getAuthToken()) return;
+    void fetchMyProfile()
+      .then((body) => {
+        applyMyProfileToSession(body);
         setUser(getCurrentUser());
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const check = () => {
+    const check = (bust = false) => {
       const token = getAuthToken();
       if (!token) {
         if (!cancelled) setUnreadCount(0);
         return;
       }
-      // Drop the 30s cache so realtime / friend-request events show immediately.
-      invalidatePrefix('/api/notifications');
+      if (bust) {
+        invalidatePrefix('/api/notifications');
+        invalidatePrefix('/api/friends/requests');
+      }
       Promise.all([
         fetchNotifications(token).catch(() => [] as Awaited<ReturnType<typeof fetchNotifications>>),
         fetchIncomingRequestCount().catch(() => 0),
@@ -99,17 +85,19 @@ export default function TopBar({
       });
     };
 
-    check();
-    window.addEventListener(FRIENDS_CHANGED_EVENT, check);
-    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, check);
-    window.addEventListener(AUTH_TOKEN_EVENT, check);
-    window.addEventListener('focus', check);
+    check(false);
+    const onLive = () => check(true);
+    const onFocus = () => check(false);
+    window.addEventListener(FRIENDS_CHANGED_EVENT, onLive);
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onLive);
+    window.addEventListener(AUTH_TOKEN_EVENT, onLive);
+    window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
-      window.removeEventListener(FRIENDS_CHANGED_EVENT, check);
-      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, check);
-      window.removeEventListener(AUTH_TOKEN_EVENT, check);
-      window.removeEventListener('focus', check);
+      window.removeEventListener(FRIENDS_CHANGED_EVENT, onLive);
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onLive);
+      window.removeEventListener(AUTH_TOKEN_EVENT, onLive);
+      window.removeEventListener('focus', onFocus);
     };
   }, [user?.id]);
 

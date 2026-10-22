@@ -213,9 +213,14 @@ export function fetchBlockedUsers(page = 1, limit = 20): Promise<Page<BlockedUse
   return cachedFetch(`/api/blocks:${cacheScope()}:${path}`, () => request<Page<BlockedUserItem>>(path), TTL.MEDIUM);
 }
 
-/** Pending incoming requests. Not cached: the badge must be correct on every screen load. */
+/** Pending incoming requests. Cached briefly; friendship mutations clear this prefix. */
 export async function fetchIncomingRequestCount(): Promise<number> {
-  const body = await request<unknown>('/api/friends/requests/count');
+  const path = '/api/friends/requests/count';
+  const body = await cachedFetch(
+    `${path}:${cacheScope()}`,
+    () => request<unknown>(path),
+    TTL.SHORT,
+  );
   return readCount(body);
 }
 

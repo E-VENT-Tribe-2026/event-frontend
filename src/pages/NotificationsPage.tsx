@@ -661,7 +661,11 @@ export default function NotificationsPage() {
 
       <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
         {/* Sub-filter Tabs */}
-        <div className="flex gap-1 overflow-x-auto rounded-2xl glass-card p-1">
+        <div
+          role="tablist"
+          aria-label="Notification filters"
+          className="flex w-full gap-1 rounded-2xl glass-card p-1.5"
+        >
           {[
             { id: 'all' as const, label: 'All', count: feedItems.length },
             { id: 'friends' as const, label: 'Friends', count: friendsCount },
@@ -674,16 +678,18 @@ export default function NotificationsPage() {
               <button
                 key={tab.id}
                 type="button"
+                role="tab"
+                aria-selected={isActive}
                 onClick={() => { setSubFilter(tab.id); setVisibleCount(PAGE_SIZE); }}
-                className={`shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2.5 text-xs font-semibold transition-all sm:flex-row sm:gap-1.5 sm:px-2.5 ${
                   isActive
                     ? 'gradient-primary text-primary-foreground shadow-glow'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
               >
-                <span>{tab.label}</span>
+                <span className="text-center leading-tight">{tab.label}</span>
                 <span
-                  className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
+                  className={`inline-flex h-4 min-w-[1rem] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold ${
                     isActive
                       ? 'bg-background/25 text-inherit'
                       : 'bg-secondary text-muted-foreground'

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import TopBar from '@/components/TopBar';
+import { clearCache } from '@/lib/queryCache';
 
 vi.mock('@/lib/auth', () => ({
   AUTH_TOKEN_EVENT: 'eventapp:auth-token',
@@ -53,6 +54,8 @@ function renderBar() {
 describe('TopBar bell dot (#296)', () => {
   beforeEach(() => {
     vi.resetModules();
+    clearCache();
+    sessionStorage.clear();
   });
   afterEach(() => {
     vi.unstubAllGlobals();

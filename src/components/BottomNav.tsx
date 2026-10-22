@@ -1,9 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Map, PlusCircle, MessageCircle, LayoutDashboard, Users, Shield } from 'lucide-react';
-import { getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
+import { getCurrentUser } from '@/lib/storage';
 import { getAuthToken } from '@/lib/auth';
-import { getApiUrl } from '@/lib/api';
-import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
 import { useEffect, useState } from 'react';
 import {
   CHAT_UNREAD_CHANGED_EVENT,
@@ -24,32 +23,15 @@ export default function BottomNav() {
     return () => window.removeEventListener('eventapp:user-updated', sync);
   }, []);
 
-  // Fetch profile on mount to load avatar
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) return;
-    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    })
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then((data: Record<string, unknown>) => {
-        const p = (data.data || data.user || data) as Record<string, unknown>;
-        if (!p.id) return;
-        // Use setCurrentUserFromOAuth so it works even if user isn't in memory yet
-        setCurrentUserFromOAuth({
-          id: String(p.id),
-          email: String(p.email || getCurrentUser()?.email || ''),
-          name: String(p.full_name || p.name || ''),
-          username: typeof p.username === 'string' ? p.username : getCurrentUser()?.username,
-          avatar: String(p.avatar_url || ''),
-          bio: String(p.bio || ''),
-          interests: Array.isArray(p.interests) ? p.interests as string[] : [],
-        });
+    if (!getAuthToken()) return;
+    void fetchMyProfile()
+      .then((body) => {
+        applyMyProfileToSession(body);
         setUser(getCurrentUser());
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
       .catch(() => {});
-  }, []); // once on mount
+  }, []);
 
   // Pending incoming friend requests, refreshed on every screen load and after friendship changes.
   const [requestCount, setRequestCount] = useState(0);

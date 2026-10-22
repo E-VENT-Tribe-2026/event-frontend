@@ -46,11 +46,10 @@ import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import RealtimeBridge from '@/components/RealtimeBridge';
 import { getAuthToken, clearAuthToken, AUTH_EXPIRED_EVENT } from '@/lib/auth';
 import { syncSupabaseSession } from '@/lib/supabase';
-import { logout, getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
+import { logout } from '@/lib/storage';
 import { startSessionTimeout, stopSessionTimeout, extendSession } from '@/lib/sessionTimeout';
 import { clearCache } from '@/lib/queryCache';
-import { getApiUrl } from '@/lib/api';
-import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
 
 const persister = typeof window !== 'undefined'
   ? createSyncStoragePersister({
@@ -71,23 +70,9 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     const token = getAuthToken();
     if (!token) return;
     void syncSupabaseSession(token);
-    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    })
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then((data: Record<string, unknown>) => {
-        const profile = (data.data || data.user || data) as Record<string, unknown>;
-        if (!profile.id) return;
-        setCurrentUserFromOAuth({
-          id: String(profile.id),
-          email: String(profile.email || getCurrentUser()?.email || ''),
-          name: String(profile.full_name || profile.name || getCurrentUser()?.name || ''),
-          username: typeof profile.username === 'string' ? profile.username : getCurrentUser()?.username,
-          avatar: String(profile.avatar_url || ''),
-          bio: String(profile.bio || ''),
-          interests: Array.isArray(profile.interests) ? profile.interests as string[] : [],
-        });
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+    void fetchMyProfile(token)
+      .then((body) => {
+        applyMyProfileToSession(body);
       })
       .catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps

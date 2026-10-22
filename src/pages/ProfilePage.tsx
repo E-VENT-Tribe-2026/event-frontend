@@ -24,6 +24,7 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { invalidatePrefix, invalidate, cachedFetch, TTL } from '@/lib/queryCache';
+import { fetchMyProfile } from '@/lib/profileMe';
 import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } from '@/lib/username';
 import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
 import { storageRefusalMessage } from '@/lib/profilePhoto';
@@ -261,17 +262,7 @@ export default function ProfilePage() {
     (async () => {
       try {
         const [rawProf, favData] = await Promise.all([
-          cachedFetch(
-            `/api/profile/me:${user?.id ?? ''}`,
-            async () => {
-              const res = await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-              });
-              if (!res.ok) throw new Error('Failed to fetch profile');
-              return res.json();
-            },
-            TTL.LONG,
-          ).catch((err) => {
+          fetchMyProfile(token).catch((err) => {
             console.error('Error fetching profile:', err);
             return null;
           }),
