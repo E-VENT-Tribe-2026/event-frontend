@@ -20,6 +20,7 @@ import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidate, invalidatePrefix, cachedFetch, TTL } from '@/lib/queryCache';
+import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
 import { FRIENDS_CHANGED_EVENT, fetchSentRequests, sendFriendRequest, userProfilePath } from '@/lib/friendsApi';
 import { useFriendsGoingEvents } from '@/hooks/useFriendsGoing';
 
@@ -283,32 +284,11 @@ export default function HomePage() {
 
     let cancelled = false;
 
-    cachedFetch(
-      `/api/profile/me:${userId}`,
-      async () => {
-        const res = await fetch(getApiUrl('/api/profile/me'), {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
-        if (!res.ok) throw new Error('Failed to fetch profile');
-        return res.json();
-      },
-      TTL.LONG,
-    )
-      .then((data: Record<string, unknown>) => {
+    fetchMyProfile(token)
+      .then((data: unknown) => {
         if (cancelled) return;
-        const profile = (data.data || data.user || data) as Record<string, unknown>;
-        const apiInterests = (Array.isArray(profile.interests) ? profile.interests : []) as string[];
-        const local = getCurrentUser();
-        const sameInterests = JSON.stringify(local?.interests ?? []) === JSON.stringify(apiInterests);
-        // Only write + re-render when something actually changed.
-        if (!sameInterests) {
-          updateUser({
-            interests: apiInterests,
-            avatar: typeof profile.avatar_url === 'string' ? profile.avatar_url : (local?.avatar || local?.profilePhoto),
-            name: typeof profile.full_name === 'string' ? profile.full_name : local?.name,
-          });
-          setCurrentUser(getCurrentUser());
-        }
+        applyMyProfileToSession(data);
+        setCurrentUser(getCurrentUser());
       })
       .catch(() => { /* fall back to locally stored user */ })
       .finally(() => {

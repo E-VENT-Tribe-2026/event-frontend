@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import RequireUsername from '@/components/RequireUsername';
 import { setAuthToken, clearAuthToken } from '@/lib/auth';
+import { clearCache } from '@/lib/queryCache';
 import { setPendingAdminVerification, clearPendingAdminVerification } from '@/lib/adminAuth';
 
 function renderGuarded(initialPath = '/home') {
@@ -33,6 +34,8 @@ describe('RequireUsername — ticket #247 admin-verification gate', () => {
     vi.stubGlobal('fetch', fetchMock);
     clearAuthToken();
     clearPendingAdminVerification();
+    clearCache();
+    sessionStorage.clear();
   });
 
   afterEach(() => vi.unstubAllGlobals());

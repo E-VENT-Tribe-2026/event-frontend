@@ -70,6 +70,20 @@ type ChatMessage = {
 export const CHAT_OPEN_POLL_MS = 1000;
 export const CHAT_LIST_POLL_MS = 4000;
 export const CHAT_LIVE_POLL_MS = CHAT_OPEN_POLL_MS;
+export const CHAT_FETCH_TIMEOUT_MS = 12_000;
+
+function abortAfter(ms: number): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    cancel: () => window.clearTimeout(timeoutId),
+  };
+}
+
+function isAbortError(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError');
+}
 
 const LOCAL_MESSAGE_PREFIX = 'local:';
 
@@ -211,6 +225,8 @@ export default function ChatPage() {
   // Only the newest loadMessages call may update the screen, so a slow response
   // for a chat you already left cannot overwrite the chat you are looking at.
   const messagesRequestRef = useRef(0);
+  const messagesInFlightRef = useRef(false);
+  const peekInFlightRef = useRef(false);
   const activeChatRef = useRef<string | null>(null);
   const chatsRef = useRef<ChatEvent[]>([]);
   const loadMessagesRef = useRef<(eventId: string, silent?: boolean) => Promise<void>>(async () => {});
@@ -339,6 +355,7 @@ export default function ChatPage() {
   const loadChatList = useCallback(async (silent = false) => {
     if (!token) { if (!silent) setChatListLoading(false); return; }
     if (!silent && chatsRef.current.length === 0) setChatListLoading(true);
+    const listFetch = abortAfter(CHAT_FETCH_TIMEOUT_MS);
     try {
       // Cached for 30 s (TTL.SHORT): a joined or created event shows up quickly,
       // and a failed request throws so it is never stored.
@@ -346,7 +363,10 @@ export default function ChatPage() {
         cachedFetch(
           `/api/participants/my/events:chat:${user.id}`,
           async () => {
-            const res = await fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } });
+            const res = await fetch(getApiUrl('/api/participants/my/events'), {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: listFetch.signal,
+            });
             if (!res.ok) throw new ChatHttpError(res.status);
             return res.json(); // an unreadable body rejects, so it is not stored
           },
@@ -355,7 +375,10 @@ export default function ChatPage() {
         cachedFetch(
           `/api/events/my-events:chat:${user.id}`,
           async () => {
-            const res = await fetch(getApiUrl('/api/events/my-events'), { headers: { Authorization: `Bearer ${token}` } });
+            const res = await fetch(getApiUrl('/api/events/my-events'), {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: listFetch.signal,
+            });
             if (!res.ok) throw new ChatHttpError(res.status);
             return res.json(); // an unreadable body rejects, so it is not stored
           },
@@ -450,6 +473,7 @@ export default function ChatPage() {
     } catch {
       if (!silent && chatsRef.current.length === 0) setChats([]);
     } finally {
+      listFetch.cancel();
       if (!silent) setChatListLoading(false);
     }
   }, [token, user.id, selectedEventFromUrl, handledSelectedParam, navigate]);
@@ -468,8 +492,12 @@ export default function ChatPage() {
   const loadMessages = useCallback(
     async (eventId: string, silent = false) => {
       if (!token) return;
+      // A 1s poll / live refresh must not start another GET while one is already
+      // waiting — that used to increment the request id so the spinner never cleared.
+      if (silent && messagesInFlightRef.current) return;
       const requestId = ++messagesRequestRef.current;
-      const isCurrent = () => requestId === messagesRequestRef.current;
+      const stillOpen = () => activeChatRef.current === eventId;
+      const isCurrent = () => requestId === messagesRequestRef.current && stillOpen();
       const cacheKey = chatMessagesCacheKey(eventId, user.id);
       const showRows = (rows: Record<string, unknown>[]) => {
         const next = rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[];
@@ -480,6 +508,7 @@ export default function ChatPage() {
         });
       };
 
+      messagesInFlightRef.current = true;
       // Show the saved copy at once (whatever its age), then always refresh from the server below.
       const saved = peekCache<Record<string, unknown>[]>(cacheKey);
       if (!silent) {
@@ -491,10 +520,12 @@ export default function ChatPage() {
           setMessages([]); // Clears old messages immediately to prevent bleed-over
         }
       }
+      const request = abortAfter(CHAT_FETCH_TIMEOUT_MS);
       try {
         const primaryUrl = `${getApiUrl(chatMessagesPath(eventId))}?limit=100&page=1`;
         const res = await fetch(primaryUrl, {
           cache: 'no-store',
+          signal: request.signal,
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
         // Never keep messages from a chat you can no longer access, even if you have moved on.
@@ -508,23 +539,33 @@ export default function ChatPage() {
         }
         // Failed or unreadable responses are never saved; keep the saved copy on screen if there is one.
         const body = res.ok ? await res.json().catch(() => null) : null;
-        if (!isCurrent()) return;
+        if (!stillOpen()) return;
         if (body === null) {
-          if (!saved) setMessages([]);
-          setChatUnavailable(false);
-          setChatApiMissing(true);
+          if (isCurrent()) {
+            if (!saved) setMessages([]);
+            setChatUnavailable(false);
+            setChatApiMissing(true);
+          }
           return;
         }
         const rows = normalizeMessageList(body);
         setCacheEntry(cacheKey, rows, TTL.SHORT);
+        if (silent && !isCurrent()) return;
         showRows(rows);
         setChatUnavailable(false);
         setChatApiMissing(false);
-      } catch {
+      } catch (err) {
+        if (isAbortError(err) && !isCurrent()) return;
         if (isCurrent() && !saved) setMessages([]); // network error
+        if (isCurrent() && isAbortError(err)) setChatApiMissing(true);
       } finally {
-        // The newest request ends loading, silent or not, so a send during a load cannot leave it stuck.
-        if (isCurrent()) setMessagesLoading(false);
+        request.cancel();
+        if (requestId === messagesRequestRef.current) messagesInFlightRef.current = false;
+        // The open chat's own fetch must drop the spinner even if a later silent
+        // refresh took over the request id. Switching chats still leaves B loading.
+        if (stillOpen() && (!silent || requestId === messagesRequestRef.current)) {
+          setMessagesLoading(false);
+        }
       }
     },
     [token, user.id],
@@ -533,7 +574,25 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!activeChat) return;
-    void loadMessages(activeChat);
+    let cancelled = false;
+    let interval = 0;
+    const tick = () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void loadMessages(activeChat, true);
+    };
+    void loadMessages(activeChat).finally(() => {
+      if (cancelled || !getAuthToken()) return;
+      interval = window.setInterval(tick, CHAT_OPEN_POLL_MS);
+      window.addEventListener('focus', tick);
+      document.addEventListener('visibilitychange', tick);
+    });
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', tick);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [activeChat, loadMessages]);
 
   useEffect(() => {
@@ -570,47 +629,41 @@ export default function ChatPage() {
   }, [user.id]);
 
   useEffect(() => {
-    if (!token || !activeChat) return;
-    const tick = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      void loadMessages(activeChat, true);
-    };
-    const id = window.setInterval(tick, CHAT_OPEN_POLL_MS);
-    window.addEventListener('focus', tick);
-    document.addEventListener('visibilitychange', tick);
-    return () => {
-      window.clearInterval(id);
-      window.removeEventListener('focus', tick);
-      document.removeEventListener('visibilitychange', tick);
-    };
-  }, [activeChat, token, loadMessages]);
-
-  useEffect(() => {
     if (!token) return;
     let cancelled = false;
     const peek = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (peekInFlightRef.current) return;
+      peekInFlightRef.current = true;
       const openId = activeChatRef.current;
       const others = chatsRef.current.filter((chat) => chat.id !== openId);
-      await Promise.allSettled(
-        others.map(async (chat) => {
-          if (cancelled) return;
-          try {
-            const res = await fetch(`${getApiUrl(chatMessagesPath(chat.id))}?limit=100&page=1`, {
-              cache: 'no-store',
-              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-            });
-            if (!res.ok) return;
-            const body = await res.json().catch(() => null);
-            const latest = latestMessageMeta(normalizeMessageList(body));
-            if (latest) {
-              noteNewerChatMessage(user.id, chat.id, latest.createdAt, latest.senderId, latest.messageId);
+      try {
+        await Promise.allSettled(
+          others.map(async (chat) => {
+            if (cancelled) return;
+            const request = abortAfter(CHAT_FETCH_TIMEOUT_MS);
+            try {
+              const res = await fetch(`${getApiUrl(chatMessagesPath(chat.id))}?limit=1&page=1`, {
+                cache: 'no-store',
+                signal: request.signal,
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+              });
+              if (!res.ok) return;
+              const body = await res.json().catch(() => null);
+              const latest = latestMessageMeta(normalizeMessageList(body));
+              if (latest) {
+                noteNewerChatMessage(user.id, chat.id, latest.createdAt, latest.senderId, latest.messageId);
+              }
+            } catch {
+              /* ignore a single chat peek */
+            } finally {
+              request.cancel();
             }
-          } catch {
-            /* ignore a single chat peek */
-          }
-        }),
-      );
+          }),
+        );
+      } finally {
+        peekInFlightRef.current = false;
+      }
     };
     let interval = 0;
     const timeout = window.setTimeout(() => {
@@ -794,7 +847,7 @@ export default function ChatPage() {
             }}
             className="flex-1 space-y-1 overflow-y-auto px-4 py-4 custom-scrollbar"
           >
-            {messagesLoading && (
+            {messagesLoading && messages.length === 0 && (
               <div className="space-y-3 pt-4">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <div key={i} className={`flex items-end gap-2 ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>

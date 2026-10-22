@@ -116,7 +116,7 @@ const stubFetch = (
 };
 
 function renderChat() {
-  render(
+  return render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/chat']}>
       <Routes>
         <Route path="/chat" element={<ChatPage />} />
@@ -293,6 +293,42 @@ describe('ChatPage', () => {
       }, 201));
     });
     expect(screen.getByText('Hello from test')).toBeInTheDocument();
+  });
+
+  it('does not stay on the loading skeleton when a live refresh overlaps the first fetch', async () => {
+    const pending: Array<(res: Response) => void> = [];
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) {
+        return new Promise<Response>((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      return undefined;
+    });
+
+    const { container } = renderChat();
+    await openChat(/DJ Luna/i);
+    await waitFor(() => expect(container.querySelector('.shimmer')).not.toBeNull());
+
+    await act(async () => {
+      notifyChatMessagesChanged('evt-1');
+    });
+
+    await act(async () => {
+      const rows = [{
+        id: 1,
+        sender_id: 'other-user',
+        content: 'Welcome!',
+        created_at: '2030-05-01T12:00:00.000Z',
+        message_type: 'user',
+      }];
+      pending.forEach((release) => release(jsonResponse({ data: rows })));
+    });
+
+    expect(await screen.findByText('Welcome!')).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector('.shimmer')).toBeNull());
   });
 
   it('shows an incoming live message even when the next fetch is still stale', async () => {

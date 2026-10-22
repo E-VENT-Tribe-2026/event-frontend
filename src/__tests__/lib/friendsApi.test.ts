@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setAuthToken } from '@/lib/auth';
+import { clearCache } from '@/lib/queryCache';
 import {
   FRIENDS_CHANGED_EVENT,
   acceptFriendRequest,
@@ -88,6 +89,8 @@ describe('friendship requests and caching', () => {
   beforeEach(() => {
     setAuthToken('token-abc');
     vi.stubGlobal('fetch', fetchMock);
+    clearCache();
+    sessionStorage.clear();
   });
 
   afterEach(() => {
