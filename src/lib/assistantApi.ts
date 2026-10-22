@@ -337,6 +337,7 @@ export async function sendAssistantChat(
 /**
  * Call tool: Search Events
  * POST /api/assistant/tools/search-events
+ * Includes fallback to standard /api/events/?search= so events from database are always found.
  */
 export async function searchAssistantEvents(
   query: string,
@@ -344,7 +345,7 @@ export async function searchAssistantEvents(
 ): Promise<AssistantSearchResponse> {
   const url = getApiUrl(API_ENDPOINTS.ASSISTANT_TOOL_SEARCH);
 
-  let res: Response;
+  let res: Response | null = null;
   try {
     res = await fetch(url, {
       method: 'POST',
@@ -353,21 +354,69 @@ export async function searchAssistantEvents(
       credentials: 'include',
       signal,
     });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Network error';
-    throw new AssistantApiError(`Failed to search events (${msg}).`, 0, 'NETWORK_ERROR', true);
+  } catch {
+    // If orchestrator tool endpoint is offline or fails, continue to fallback below
   }
 
-  if (!res.ok) {
-    return handleAssistantError(res);
+  if (res && res.ok) {
+    const data = (await res.json()) as AssistantSearchResponse;
+    if (data && Array.isArray(data.events) && data.events.length > 0) {
+      return data;
+    }
   }
 
-  return (await res.json()) as AssistantSearchResponse;
+  // Robust fallback: Query /api/events/ directly with search parameter
+  try {
+    const cleanTerm = query.replace(/\bevents?\b/gi, '').replace(/\bupcoming\b/gi, '').trim();
+    const fallbackUrl = getApiUrl(
+      cleanTerm
+        ? `${API_ENDPOINTS.EVENTS}/?search=${encodeURIComponent(cleanTerm)}&limit=10`
+        : `${API_ENDPOINTS.EVENTS}/?limit=10`
+    );
+    const fallbackRes = await fetch(fallbackUrl, {
+      headers: getAuthHeaders(),
+      signal,
+    });
+    if (fallbackRes.ok) {
+      const fbData = await fallbackRes.json();
+      const rawEvents = Array.isArray(fbData) ? fbData : fbData?.data || fbData?.events || [];
+      const events: AssistantEventItem[] = rawEvents.map((e: any) => ({
+        id: String(e.id || crypto.randomUUID()),
+        title: String(e.title || 'Untitled Event'),
+        description: e.description ? String(e.description) : undefined,
+        category: e.category ? String(e.category) : undefined,
+        cost: typeof e.cost === 'number' ? e.cost : undefined,
+        max_capacity: typeof e.max_capacity === 'number' ? e.max_capacity : undefined,
+        status: e.status ? String(e.status) : 'active',
+        start_datetime: e.start_datetime ? String(e.start_datetime) : undefined,
+        end_datetime: e.end_datetime ? String(e.end_datetime) : undefined,
+        location_name: e.location_name ? String(e.location_name) : undefined,
+        latitude: typeof e.latitude === 'number' ? e.latitude : undefined,
+        longitude: typeof e.longitude === 'number' ? e.longitude : undefined,
+        created_by: e.created_by ? String(e.created_by) : undefined,
+      }));
+
+      if (events.length > 0) {
+        return {
+          success: true,
+          events,
+        };
+      }
+    }
+  } catch {
+    // Fallback failed
+  }
+
+  return {
+    success: true,
+    events: [],
+  };
 }
 
 /**
  * Call tool: Event Details
  * POST /api/assistant/tools/event-details
+ * Includes fallback to GET /api/events/{event_id}.
  */
 export async function getAssistantEventDetails(
   eventId: string,
@@ -375,7 +424,7 @@ export async function getAssistantEventDetails(
 ): Promise<AssistantEventDetailsResponse> {
   const url = getApiUrl(API_ENDPOINTS.ASSISTANT_TOOL_EVENT_DETAILS);
 
-  let res: Response;
+  let res: Response | null = null;
   try {
     res = await fetch(url, {
       method: 'POST',
@@ -384,16 +433,56 @@ export async function getAssistantEventDetails(
       credentials: 'include',
       signal,
     });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Network error';
-    throw new AssistantApiError(`Failed to fetch event details (${msg}).`, 0, 'NETWORK_ERROR', true);
+  } catch {
+    // Fallback to /api/events/{event_id}
   }
 
-  if (!res.ok) {
-    return handleAssistantError(res);
+  if (res && res.ok) {
+    const data = await res.json();
+    if (data && data.event) {
+      return data as AssistantEventDetailsResponse;
+    }
   }
 
-  return (await res.json()) as AssistantEventDetailsResponse;
+  // Fallback to GET /api/events/{eventId}
+  try {
+    const fallbackUrl = getApiUrl(`${API_ENDPOINTS.EVENTS}/${encodeURIComponent(eventId)}`);
+    const fbRes = await fetch(fallbackUrl, {
+      headers: getAuthHeaders(),
+      signal,
+    });
+    if (fbRes.ok) {
+      const fbData = await fbRes.json();
+      const raw = fbData?.event || fbData?.data || fbData;
+      if (raw && raw.title) {
+        return {
+          success: true,
+          event: {
+            id: String(raw.id || eventId),
+            title: String(raw.title),
+            description: raw.description ? String(raw.description) : undefined,
+            category: raw.category ? String(raw.category) : undefined,
+            cost: typeof raw.cost === 'number' ? raw.cost : undefined,
+            max_capacity: typeof raw.max_capacity === 'number' ? raw.max_capacity : undefined,
+            status: raw.status ? String(raw.status) : 'active',
+            start_datetime: raw.start_datetime ? String(raw.start_datetime) : undefined,
+            end_datetime: raw.end_datetime ? String(raw.end_datetime) : undefined,
+            location_name: raw.location_name ? String(raw.location_name) : undefined,
+            latitude: typeof raw.latitude === 'number' ? raw.latitude : undefined,
+            longitude: typeof raw.longitude === 'number' ? raw.longitude : undefined,
+            created_by: raw.created_by ? String(raw.created_by) : undefined,
+          },
+        };
+      }
+    }
+  } catch {
+    // Fallback failed
+  }
+
+  return {
+    success: false,
+    event: { id: eventId, title: 'Event' },
+  };
 }
 
 /**

@@ -231,14 +231,23 @@ export const AIAssistantWidget: React.FC = () => {
     try {
       // If user specifically clicks quick search chip
       if (trimmed.startsWith('🔍 Search upcoming') || trimmed.toLowerCase().startsWith('/search ')) {
-        const query = trimmed.replace(/^🔍\s*Search\s*upcoming\s*/i, '').replace(/^\/search\s*/i, '').trim();
-        const searchRes = await searchAssistantEvents(query || 'music');
+        const rawQuery = trimmed
+          .replace(/^🔍\s*Search\s*upcoming\s*/i, '')
+          .replace(/^\/search\s*/i, '')
+          .trim();
+        const cleanQuery = rawQuery.replace(/\bevents?\b/gi, '').replace(/\bupcoming\b/gi, '').trim();
+        const queryToSearch = cleanQuery || 'music';
+
+        const searchRes = await searchAssistantEvents(queryToSearch);
+        const hasEvents = searchRes.events && searchRes.events.length > 0;
+        const displayTerm = rawQuery || queryToSearch;
+
         const assistantMsg: ChatThreadMessage = {
           id: `asst-${Date.now()}`,
           role: 'assistant',
-          content: searchRes.events?.length
-            ? `Here are the matching events for **"${query || 'music'}"**:`
-            : `No events found matching **"${query || 'music'}"**.`,
+          content: hasEvents
+            ? `Here are the matching events for **"${displayTerm}"**:`
+            : `No events found matching **"${displayTerm}"**.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           events: searchRes.events,
         };
