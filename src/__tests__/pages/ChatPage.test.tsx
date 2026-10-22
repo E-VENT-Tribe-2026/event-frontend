@@ -5,6 +5,7 @@ import type { User } from '@/lib/storage';
 import ChatPage from '@/pages/ChatPage';
 import { markChatUnread, setViewingChatId } from '@/lib/chatUnread';
 import { notifyChatMessagesChanged } from '@/lib/realtimeEvents';
+import { clearCache } from '@/lib/queryCache';
 
 const { getCurrentUserMock, getAuthTokenMock } = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn<[], User | null>(),
@@ -36,6 +37,15 @@ vi.mock('@/lib/authProfile', () => ({
   sameAuthUserId: (a: string | null | undefined, b: string | null | undefined) =>
     Boolean(a && b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()),
 }));
+
+vi.mock('@/lib/chatLive', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/chatLive')>();
+  return {
+    ...mod,
+    useChatLiveChannels: () => {},
+    publishLiveChatMessage: () => {},
+  };
+});
 
 const chatUser = {
   id: 'u-chat',
@@ -94,10 +104,13 @@ const listRoutes = (url: string, joined: ReturnType<typeof joinedEvent>[]) => {
 };
 
 /** Stubs global fetch. Unhandled routes (handler returns undefined) respond 500. */
-const stubFetch = (handler: (url: string, init?: RequestInit) => Response | undefined) => {
-  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-    Promise.resolve(handler(urlOf(input), init) ?? new Response('{}', { status: 500 })),
-  );
+const stubFetch = (
+  handler: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined,
+) => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const result = handler(urlOf(input), init);
+    return result instanceof Promise ? result : Promise.resolve(result ?? new Response('{}', { status: 500 }));
+  });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 };
@@ -133,6 +146,7 @@ describe('ChatPage', () => {
   afterEach(() => {
     window.sessionStorage.clear();
     localStorage.clear();
+    clearCache();
     setViewingChatId(null);
     vi.unstubAllGlobals();
   });
@@ -235,6 +249,89 @@ describe('ChatPage', () => {
     expect(await screen.findByTestId('new-messages-tag')).toHaveTextContent('New messages');
   });
 
+  it('shows a sent message before the server answers', async () => {
+    let releasePost: (res: Response) => void = () => {};
+    const welcome = {
+      id: 1,
+      sender_id: 'other-user',
+      content: 'Welcome!',
+      created_at: '2030-05-01T12:00:00.000Z',
+      message_type: 'user',
+    };
+    stubFetch((url, init) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) {
+        if (init?.method === 'POST') {
+          return new Promise<Response>((resolve) => {
+            releasePost = resolve;
+          });
+        }
+        return jsonResponse({ data: [welcome] });
+      }
+      return undefined;
+    });
+
+    renderChat();
+    await openChat(/DJ Luna/i);
+    expect(await screen.findByText('Welcome!')).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText(/Type a message/i);
+    fireEvent.change(input, { target: { value: 'Hello from test' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    expect(await screen.findByText('Hello from test')).toBeInTheDocument();
+    expect(input).toHaveValue('');
+
+    await act(async () => {
+      releasePost(jsonResponse({
+        id: 2,
+        sender_id: 'u-chat',
+        content: 'Hello from test',
+        created_at: '2030-05-01T12:05:00.000Z',
+        event_id: 'evt-1',
+      }, 201));
+    });
+    expect(screen.getByText('Hello from test')).toBeInTheDocument();
+  });
+
+  it('shows an incoming live message even when the next fetch is still stale', async () => {
+    stubFetch((url) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) {
+        return jsonResponse({
+          data: [{
+            id: 1,
+            sender_id: 'other-user',
+            content: 'Welcome!',
+            created_at: '2030-05-01T12:00:00.000Z',
+            message_type: 'user',
+          }],
+        });
+      }
+      return undefined;
+    });
+
+    renderChat();
+    await openChat(/DJ Luna/i);
+    expect(await screen.findByText('Welcome!')).toBeInTheDocument();
+
+    await act(async () => {
+      notifyChatMessagesChanged('evt-1', {
+        id: 2,
+        event_id: 'evt-1',
+        sender_id: 'other-user',
+        content: 'Just arrived',
+        created_at: '2030-05-01T12:06:00.000Z',
+        message_type: 'user',
+      });
+    });
+
+    expect(await screen.findByText('Just arrived')).toBeInTheDocument();
+    expect(screen.getByText('Welcome!')).toBeInTheDocument();
+  });
+
   it('refreshes an open conversation when new messages arrive', async () => {
     const rows: Array<Record<string, unknown>> = [
       {
@@ -309,7 +406,9 @@ describe('ChatPage', () => {
     fireEvent.change(input, { target: { value: 'Hello from test' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-    expect(await screen.findByText('Hello from test')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Hello from test')).toBeInTheDocument();
+    });
     expect(input).toHaveValue('');
 
     // The message is sent as { content: <encoded payload> }

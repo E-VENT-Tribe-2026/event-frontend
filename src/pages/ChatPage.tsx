@@ -14,6 +14,7 @@ import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
 import { userProfilePath } from '@/lib/friendsApi';
 import { cachedFetch, invalidate, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
+import { chatLiveHoldUntil, publishLiveChatMessage, useChatLiveChannels } from '@/lib/chatLive';
 import { CHAT_MESSAGES_CHANGED_EVENT, eventIdFromRealtimeRow } from '@/lib/realtimeEvents';
 import {
   CHAT_UNREAD_CHANGED_EVENT,
@@ -63,9 +64,48 @@ type ChatMessage = {
   question?: string;
   options?: string[];
   optionIndex?: number;
+  liveUntil?: number;
 };
 
-export const CHAT_LIVE_POLL_MS = 4000;
+export const CHAT_OPEN_POLL_MS = 1000;
+export const CHAT_LIST_POLL_MS = 4000;
+export const CHAT_LIVE_POLL_MS = CHAT_OPEN_POLL_MS;
+
+const LOCAL_MESSAGE_PREFIX = 'local:';
+
+function isLocalChatMessage(id: string) {
+  return id.startsWith(LOCAL_MESSAGE_PREFIX);
+}
+
+function sameLiveMessage(a: ChatMessage, b: ChatMessage): boolean {
+  return a.from === b.from && a.text === b.text && a.messageType === b.messageType;
+}
+
+/** Keep optimistic / just-broadcast rows while the GET is still a beat behind. */
+function mergeLiveMessages(server: ChatMessage[], prev: ChatMessage[]): ChatMessage[] {
+  const now = Date.now();
+  const extras = prev.filter((local) => {
+    if (server.some((row) => row.id === local.id || sameLiveMessage(row, local))) return false;
+    if (isLocalChatMessage(local.id)) return true;
+    return Boolean(local.liveUntil && local.liveUntil > now);
+  });
+  return extras.length ? [...server, ...extras] : server;
+}
+
+function messageFieldsFromPostBody(
+  body: unknown,
+  fallback: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!body || typeof body !== 'object') return fallback;
+  const row = body as Record<string, unknown>;
+  if (Array.isArray(row.data) && row.data[0] && typeof row.data[0] === 'object') {
+    return { ...fallback, ...(row.data[0] as Record<string, unknown>) };
+  }
+  if (row.id != null || row.content != null || row.sender_id != null) {
+    return { ...fallback, ...row, content: fallback.content };
+  }
+  return fallback;
+}
 
 function messageRowId(row: Record<string, unknown>): string {
   if (row.id != null && String(row.id).trim()) return String(row.id);
@@ -208,6 +248,10 @@ export default function ChatPage() {
     const el = messagesEndRef.current;
     if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'auto', block: 'end' });
   }, [messages, messagesLoading, activeChat]);
+
+  const liveEventIds = chats.map((c) => c.id);
+  if (activeChat && !liveEventIds.includes(activeChat)) liveEventIds.push(activeChat);
+  useChatLiveChannels(liveEventIds);
 
   if (!user) return <Navigate to="/login" replace />;
 
@@ -430,7 +474,10 @@ export default function ChatPage() {
       const showRows = (rows: Record<string, unknown>[]) => {
         const next = rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[];
         if (next.length) rememberSeen(user.id, eventId, next[next.length - 1].id);
-        setMessages((prev) => (sameVisibleMessages(prev, next) ? prev : next));
+        setMessages((prev) => {
+          const merged = mergeLiveMessages(next, prev);
+          return sameVisibleMessages(prev, merged) ? prev : merged;
+        });
       };
 
       // Show the saved copy at once (whatever its age), then always refresh from the server below.
@@ -500,14 +547,15 @@ export default function ChatPage() {
       const matchesOpen =
         Boolean(openId && eventId && String(eventId).toLowerCase() === String(openId).toLowerCase());
       if (openId && (matchesOpen || !eventId)) {
-        if (row) {
-          const mapped = mapMessageRowRef.current(row);
-          if (mapped) {
-            setMessages((prev) => (prev.some((m) => m.id === mapped.id) ? prev : [...prev, mapped]));
-          }
+        const mapped = row ? mapMessageRowRef.current(row) : null;
+        if (mapped) {
+          const live = { ...mapped, liveUntil: chatLiveHoldUntil() };
+          setMessages((prev) => (prev.some((m) => m.id === live.id || sameLiveMessage(m, live)) ? prev : [...prev, live]));
+          invalidate(chatMessagesCacheKey(openId, user.id));
+        } else {
+          invalidate(chatMessagesCacheKey(openId, user.id));
+          void loadMessagesRef.current(openId, true);
         }
-        invalidate(chatMessagesCacheKey(openId, user.id));
-        void loadMessagesRef.current(openId, true);
       }
       // List and other threads must still light up after the first chat was opened.
       // Do not require `activeChat` — going back to the list used to drop every later tag.
@@ -527,7 +575,7 @@ export default function ChatPage() {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void loadMessages(activeChat, true);
     };
-    const id = window.setInterval(tick, CHAT_LIVE_POLL_MS);
+    const id = window.setInterval(tick, CHAT_OPEN_POLL_MS);
     window.addEventListener('focus', tick);
     document.addEventListener('visibilitychange', tick);
     return () => {
@@ -567,8 +615,8 @@ export default function ChatPage() {
     let interval = 0;
     const timeout = window.setTimeout(() => {
       void peek();
-      interval = window.setInterval(() => { void peek(); }, CHAT_LIVE_POLL_MS);
-    }, CHAT_LIVE_POLL_MS);
+      interval = window.setInterval(() => { void peek(); }, CHAT_LIST_POLL_MS);
+    }, CHAT_LIST_POLL_MS);
     return () => {
       cancelled = true;
       window.clearTimeout(timeout);
@@ -617,27 +665,68 @@ export default function ChatPage() {
 
     const content = explicitContent ?? encodeChatPayload({ v: 1, type: 'text', text: input.trim() });
     const plainInput = input.trim();
-    if (!content || !activeChat || !token || sending || chatUnavailable) return;
+    if (!content || !activeChat || !token || sending || chatUnavailable) {
+      return;
+    }
     if (!explicitContent && !plainInput) return;
-    
+
+    const eventId = activeChat;
+    const localId = `${LOCAL_MESSAGE_PREFIX}${
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    }`;
+    const optimisticRow: Record<string, unknown> = {
+      id: localId,
+      event_id: eventId,
+      sender_id: resolveMeId(),
+      content,
+      created_at: new Date().toISOString(),
+      message_type: 'user',
+    };
+    const optimistic = mapMessageRowRef.current(optimisticRow);
+    if (optimistic) {
+      setMessages((prev) => [...prev, { ...optimistic, liveUntil: chatLiveHoldUntil() }]);
+    }
+    if (!explicitContent) setInput('');
+    setShowEmoji(false);
+    setChatApiMissing(false);
+    pinToBottomRef.current = true;
+    publishLiveChatMessage(eventId, optimisticRow);
+
     setSending(true);
     try {
-      const primary = getApiUrl(chatMessagesPath(activeChat));
+      const primary = getApiUrl(chatMessagesPath(eventId));
       const res = await fetch(primary, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ content }),
       });
-      
+
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
+        setMessages((prev) => prev.filter((m) => m.id !== localId));
+        if (!explicitContent) setInput(plainInput);
         setToast({ show: true, message: errText ? `Could not send: ${errText.slice(0, 120)}` : 'Unable to send message right now.', type: 'error' });
         return;
       }
-      setInput(''); setShowEmoji(false); setChatApiMissing(false);
-      pinToBottomRef.current = true;
-      await loadMessages(activeChat, true); // always reads the server and replaces the saved copy
+      try {
+        const body = await res.json().catch(() => null);
+        const serverRow = messageFieldsFromPostBody(body, optimisticRow);
+        const confirmed = mapMessageRowRef.current(serverRow);
+        if (confirmed && optimistic && sameLiveMessage(confirmed, optimistic)) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === localId ? { ...confirmed, id: localId, liveUntil: chatLiveHoldUntil() } : m)),
+          );
+          publishLiveChatMessage(eventId, serverRow);
+        }
+        invalidate(chatMessagesCacheKey(eventId, user.id));
+      } catch {
+        /* keep the optimistic row; the next poll will reconcile */
+      }
     } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== localId));
+      if (!explicitContent) setInput(plainInput);
       setToast({ show: true, message: 'Unable to send message right now.', type: 'error' });
     } finally {
       setSending(false);

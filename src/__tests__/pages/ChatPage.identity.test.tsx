@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import type { User } from '@/lib/storage';
-import { invalidatePrefix, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
+import { clearCache, invalidatePrefix, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
 import { chatUser, renderChat, buildMyEventsResponse, emptyMyEventsResponse, unhandledResponse } from './chatTestFixtures';
 
 const { getCurrentUserMock, getAuthTokenMock } = vi.hoisted(() => ({
@@ -34,6 +34,15 @@ vi.mock('@/lib/authProfile', () => ({
   sameAuthUserId: (a: string | null | undefined, b: string | null | undefined) =>
     Boolean(a && b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()),
 }));
+
+vi.mock('@/lib/chatLive', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/chatLive')>();
+  return {
+    ...mod,
+    useChatLiveChannels: () => {},
+    publishLiveChatMessage: () => {},
+  };
+});
 
 type MessageRow = Record<string, unknown>;
 
@@ -90,6 +99,7 @@ describe('ChatPage sender display (#292)', () => {
   afterEach(() => {
     window.sessionStorage.clear();
     localStorage.clear();
+    clearCache();
     vi.unstubAllGlobals();
   });
 
@@ -213,7 +223,9 @@ describe('ChatPage sender display (#292)', () => {
     const input = screen.getByPlaceholderText(/Type a message/i);
     fireEvent.change(input, { target: { value: 'Sent while loading' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
-    expect(await screen.findByText('Sent while loading')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Sent while loading')).toBeInTheDocument();
+    });
 
     // The older, slower first load finishes last and must not change anything.
     releaseFirstLoad(messagesResponse([otherUserRow()]));
