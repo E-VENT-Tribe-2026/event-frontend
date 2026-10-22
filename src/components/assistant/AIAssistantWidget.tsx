@@ -31,6 +31,7 @@ import {
 } from '@/lib/assistantApi';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantEventCard } from './AssistantEventCard';
+import { AssistantEventDetailCard } from './AssistantEventDetailCard';
 import { AssistantDraftCard } from './AssistantDraftCard';
 
 export interface ChatThreadMessage {
@@ -41,6 +42,7 @@ export interface ChatThreadMessage {
   status?: 'sending' | 'sent' | 'error';
   errorMessage?: string;
   events?: AssistantEventItem[];
+  eventDetail?: AssistantEventItem;
   draft?: AssistantDraftEvent;
   validationIssues?: string[];
 }
@@ -274,6 +276,7 @@ export const AIAssistantWidget: React.FC = () => {
         content: parsed.displayText || res.reply || '',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         events: parsed.events,
+        eventDetail: parsed.eventDetail,
         draft: parsed.draft,
         validationIssues: parsed.validationIssues,
       };
@@ -625,8 +628,15 @@ export const AIAssistantWidget: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Rich Cards (Event Results) */}
-                      {!isUser && msg.events && msg.events.length > 0 && (
+                      {/* Rich Cards (Single Event Detail View) */}
+                      {!isUser && msg.eventDetail && (
+                        <div className="mt-1 w-full pl-8 max-w-[95%]">
+                          <AssistantEventDetailCard event={msg.eventDetail} />
+                        </div>
+                      )}
+
+                      {/* Rich Cards (Event Results List) */}
+                      {!isUser && !msg.eventDetail && msg.events && msg.events.length > 0 && (
                         <div className="mt-1 space-y-2 w-full pl-8 max-w-[95%]">
                           {msg.events.map((evt) => (
                             <AssistantEventCard key={evt.id} event={evt} />

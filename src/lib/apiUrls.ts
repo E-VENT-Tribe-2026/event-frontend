@@ -16,8 +16,6 @@ export const API_ENDPOINTS = {
   ADMIN_USER_WITHDRAW_WARNING: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}/warn/withdraw`,
   ADMIN_USER_SUSPEND: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}/suspend`,
   ADMIN_USER_LIFT: (userId: string) => `/api/admin/users/${encodeURIComponent(userId)}/lift-suspension`,
-  ADMIN_EVENTS: '/api/admin/events',
-  ADMIN_EVENT_DETAIL: (eventId: string) => `/api/admin/events/${encodeURIComponent(eventId)}`,
   ADMIN_EVENT_REMOVE: (eventId: string) => `/api/admin/events/${encodeURIComponent(eventId)}`,
   ADMIN_AUDIT: '/api/admin/audit',
   ADMIN_REPORTS: '/api/admin/reports',

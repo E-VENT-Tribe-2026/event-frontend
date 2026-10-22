@@ -1,6 +1,10 @@
 import { getApiUrl } from './api';
 import { API_ENDPOINTS } from './apiUrls';
 import { getAuthToken, notifyAuthExpired } from './auth';
+import { addEvent, getCurrentUser } from './storage';
+import { getCategoryBanner } from './categoryBanners';
+import { getGeneratedAvatarUrl } from './avatars';
+import { invalidateEvents } from './queries';
 
 export interface AssistantChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -120,11 +124,13 @@ export function extractCardsFromReply(
 ): {
   displayText: string;
   events?: AssistantEventItem[];
+  eventDetail?: AssistantEventItem;
   draft?: AssistantDraftEvent;
   validationIssues?: string[];
 } {
   let displayText = replyText || '';
   let events: AssistantEventItem[] | undefined = responseObj?.events;
+  let eventDetail: AssistantEventItem | undefined = responseObj?.event;
   let draft: AssistantDraftEvent | undefined = responseObj?.draft;
   let validationIssues: string[] | undefined = responseObj?.validation_issues;
 
@@ -137,7 +143,11 @@ export function extractCardsFromReply(
         draft = card.draft;
         validationIssues = card.validation_issues;
       } else if (card.type === 'event_detail' && card.event) {
-        events = [card.event];
+        eventDetail = card.event;
+        // Also keep events as [card.event] for backwards compatibility
+        if (!events) {
+          events = [card.event];
+        }
       }
     }
   }
@@ -180,7 +190,10 @@ export function extractCardsFromReply(
         }
 
         if (parsed.event && typeof parsed.event === 'object') {
-          events = [parsed.event];
+          eventDetail = parsed.event;
+          if (!events) {
+            events = [parsed.event];
+          }
           foundCard = true;
         }
       }
@@ -194,7 +207,7 @@ export function extractCardsFromReply(
     }
   }
 
-  return { displayText, events, draft, validationIssues };
+  return { displayText, events, eventDetail, draft, validationIssues };
 }
 
 function getAuthHeaders(): HeadersInit {
@@ -412,4 +425,150 @@ export async function draftAssistantEvent(
   }
 
   return (await res.json()) as AssistantDraftResponse;
+}
+
+export interface PublishDraftResult {
+  success: boolean;
+  eventId?: string;
+  error?: string;
+}
+
+/**
+ * Publish a drafted event directly from AI chat (Ticket #199).
+ * Calls POST /api/v1/events/ (with fallback to /api/events/),
+ * saves to local storage, and invalidates query cache so the new event
+ * shows up everywhere immediately.
+ */
+export async function publishDraftEvent(
+  draft: AssistantDraftEvent,
+  signal?: AbortSignal
+): Promise<PublishDraftResult> {
+  const token = getAuthToken();
+  if (!token) {
+    throw new AssistantApiError('You must be logged in to publish an event.', 401, 'UNAUTHORIZED', false);
+  }
+
+  const now = new Date();
+  const start = draft.start_datetime ? new Date(draft.start_datetime) : new Date(now.getTime() + 86400000);
+  const end = draft.end_datetime ? new Date(draft.end_datetime) : new Date(start.getTime() + 2 * 3600 * 1000);
+  const safeISO = (d: Date) => (Number.isNaN(d.getTime()) ? now.toISOString() : d.toISOString());
+
+  const category = draft.category || 'Other';
+  const banner = getCategoryBanner(category);
+
+  const payload = {
+    title: (draft.title || 'Untitled Event').trim(),
+    description: draft.description?.trim() || '',
+    category,
+    cost: typeof draft.cost === 'number' ? Math.max(0, Math.round(draft.cost)) : 0,
+    max_capacity: typeof draft.max_capacity === 'number' && draft.max_capacity > 0 ? Math.floor(draft.max_capacity) : 50,
+    start_datetime: safeISO(start),
+    end_datetime: safeISO(end),
+    location_name: (draft.location_name || 'TBD').trim(),
+    latitude: typeof draft.latitude === 'number' ? draft.latitude : 51.1657,
+    longitude: typeof draft.longitude === 'number' ? draft.longitude : 10.4515,
+  };
+
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    Authorization: `Bearer ${token.trim()}`,
+  };
+
+  let res: Response;
+  const primaryUrl = getApiUrl('/api/v1/events/');
+  try {
+    res = await fetch(primaryUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      credentials: 'include',
+      signal,
+    });
+
+    if (res.status === 404) {
+      // Fallback to /api/events/
+      const fallbackUrl = getApiUrl(`${API_ENDPOINTS.EVENTS}/`);
+      res = await fetch(fallbackUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        credentials: 'include',
+        signal,
+      });
+    }
+  } catch (err: unknown) {
+    if (signal?.aborted) {
+      throw new AssistantApiError('Publishing request was cancelled.', 0, 'ABORTED', false);
+    }
+    const msg = err instanceof Error ? err.message : 'Network error';
+    throw new AssistantApiError(`Failed to publish event (${msg}).`, 0, 'NETWORK_ERROR', true);
+  }
+
+  if (!res.ok) {
+    let errorDetail = `Failed to publish event (HTTP ${res.status})`;
+    try {
+      const errJson = await res.json();
+      if (errJson?.detail) {
+        errorDetail = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
+      } else if (errJson?.message) {
+        errorDetail = errJson.message;
+      }
+    } catch {
+      // non-JSON response
+    }
+    throw new AssistantApiError(errorDetail, res.status, 'PUBLISH_FAILED', true);
+  }
+
+  const data = await res.json().catch(() => ({}));
+  const eventId =
+    data?.id ||
+    data?.event?.id ||
+    data?.data?.id ||
+    (typeof data === 'string' ? data : undefined);
+
+  const user = getCurrentUser();
+  const createdDate = start.toISOString().slice(0, 10);
+  const createdTime = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`;
+  const finalId = eventId || crypto.randomUUID();
+
+  try {
+    addEvent({
+      id: finalId,
+      title: payload.title,
+      description: payload.description,
+      category: payload.category,
+      date: createdDate,
+      time: createdTime,
+      location: payload.location_name,
+      lat: payload.latitude,
+      lng: payload.longitude,
+      budget: payload.cost,
+      participantsLimit: payload.max_capacity,
+      participants: [],
+      image: banner,
+      organizer: user?.name || user?.username || 'Organizer',
+      organizerId: user?.id || 'current_user',
+      organizerAvatar: user?.avatar || getGeneratedAvatarUrl(user?.id || 'current_user'),
+      isPrivate: false,
+      requiresApproval: false,
+      isDraft: false,
+      reviews: [],
+      reports: [],
+      collaborators: [],
+    });
+  } catch {
+    // Non-fatal if local storage fails
+  }
+
+  try {
+    invalidateEvents();
+  } catch {
+    // Non-fatal if cache invalidation fails
+  }
+
+  return {
+    success: true,
+    eventId: finalId,
+  };
 }
