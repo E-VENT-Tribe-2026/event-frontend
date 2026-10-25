@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import {
   Sparkles,
   Send,
@@ -16,8 +16,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { getAuthToken } from '@/lib/auth';
+import { isAdministratorRole } from '@/lib/adminApi';
 import { getCurrentUser } from '@/lib/storage';
-import { accountPlanFrom } from '@/lib/accountPlan';
 import { assistantQuota, consumeAssistantAsk, BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
 import {
   sendAssistantChat,
@@ -67,8 +67,10 @@ const PUBLIC_PATHS = [
   '/admin-verify',
 ];
 
-function isHiddenAssistantRoute(pathname: string): boolean {
-  return PUBLIC_PATHS.includes(pathname) || pathname === '/admin' || pathname.startsWith('/admin/');
+export function isHiddenAssistantRoute(pathname: string): boolean {
+  const path = pathname.toLowerCase();
+  if (PUBLIC_PATHS.includes(path) || PUBLIC_PATHS.includes(pathname)) return true;
+  return path === '/admin' || path.startsWith('/admin');
 }
 
 export const AIAssistantWidget: React.FC = () => {
@@ -139,15 +141,14 @@ export const AIAssistantWidget: React.FC = () => {
     adjustTextareaHeight();
   }, [input, adjustTextareaHeight]);
 
-  // Hide on public routes, the admin panel, or when there is no session.
-  if (!token || isHiddenAssistantRoute(location.pathname)) {
+  const viewer = getCurrentUser();
+
+  // Never show on public routes, administrator screens, or administrator sessions.
+  if (!token || isHiddenAssistantRoute(location.pathname) || isAdministratorRole(viewer?.role)) {
     return null;
   }
-
-  const viewer = getCurrentUser();
-  const isPro = accountPlanFrom(viewer) === 'pro';
-  const quota = assistantQuota(viewer?.id, isPro);
-  const outOfAsks = !quota.unlimited && quota.remaining <= 0;
+  const quota = assistantQuota(viewer?.id);
+  const outOfAsks = quota.remaining <= 0;
   void quotaTick;
 
   const handleOpen = () => {
@@ -192,10 +193,9 @@ export const AIAssistantWidget: React.FC = () => {
     }
 
     const viewer = getCurrentUser();
-    const isPro = accountPlanFrom(viewer) === 'pro';
-    if (!isPro && assistantQuota(viewer?.id, false).remaining <= 0) {
+    if (assistantQuota(viewer?.id).remaining <= 0) {
       setBannerError({
-        message: `You've used your ${BASIC_ASSISTANT_ASKS_PER_DAY} free AI asks today. Upgrade to Pro for unlimited.`,
+        message: `You've used your ${BASIC_ASSISTANT_ASKS_PER_DAY} AI asks today. Come back tomorrow.`,
         canRetry: false,
       });
       setQuotaTick((n) => n + 1);
@@ -304,7 +304,7 @@ export const AIAssistantWidget: React.FC = () => {
       });
     } finally {
       if (charged) {
-        consumeAssistantAsk(viewer?.id, isPro);
+        consumeAssistantAsk(viewer?.id);
         setQuotaTick((n) => n + 1);
       }
       setIsLoading(false);
@@ -472,9 +472,7 @@ export const AIAssistantWidget: React.FC = () => {
                     <span>
                       {isLoading
                         ? 'Thinking...'
-                        : quota.unlimited
-                          ? 'Pro · unlimited asks'
-                          : `${quota.remaining} of ${quota.limit} asks left today`}
+                        : `${quota.remaining} of ${quota.limit} asks left today`}
                     </span>
                   </p>
                 </div>
@@ -524,14 +522,6 @@ export const AIAssistantWidget: React.FC = () => {
                   <AlertCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
                   <p className="text-xs leading-snug">
                     {bannerError.message}
-                    {outOfAsks ? (
-                      <>
-                        {' '}
-                        <Link to="/premium" className="font-bold underline underline-offset-2">
-                          Upgrade to Pro
-                        </Link>
-                      </>
-                    ) : null}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">

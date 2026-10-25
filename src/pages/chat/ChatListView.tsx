@@ -60,13 +60,13 @@ export default function ChatListView({
           onSearchChange={onSearchChange}
           searchPlaceholder="Search chats..."
         />
-        <header className="border-b border-border px-4 py-3">
+        <header className="mx-auto max-w-2xl border-b border-border px-4 py-3">
           <h1 className="text-xl font-bold text-gradient">Chats</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
         </header>
       </div>
 
-      <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
+      <div className="mx-auto max-w-2xl px-4 pt-4 space-y-4">
         <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
           {[
             { id: 'active' as const, label: 'Active', count: activeChats.length, icon: Calendar },
@@ -90,7 +90,7 @@ export default function ChatListView({
               >
                 <tab.icon className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{tab.label}</span>
-                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
+                <span className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold ${
                   isActive
                     ? 'bg-background/25 text-inherit'
                     : 'bg-secondary text-muted-foreground'

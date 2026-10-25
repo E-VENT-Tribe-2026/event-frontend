@@ -170,22 +170,6 @@ function normalizeEvent(raw: any): PublicEvent {
   };
 }
 
-/** mapApiEventToItem does not carry the organizer object, so add it from the raw row. */
-function toMapItem(row: any): EventItem {
-  const item = mapApiEventToItem(row) as any;
-  const o = row?.organizer;
-  if (!o) return item as EventItem;
-  const fullName = o.full_name || o.display_name || o.username || '';
-  return {
-    ...item,
-    organizer: fullName || item.organizer,
-    organizerId: o.id ?? item.organizerId,
-    organizerFullName: fullName || item.organizerFullName,
-    organizerUsername: o.username ?? item.organizerUsername,
-    organizerAvatar: o.avatar_url ?? item.organizerAvatar,
-  } as EventItem;
-}
-
 function OrganizerAvatar({ name, src }: { name: string; src?: string }) {
   const [failed, setFailed] = useState(false);
   const initial = (name || 'O').charAt(0).toUpperCase();
@@ -234,7 +218,7 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
         setEvents(rows.map(normalizeEvent));
 
         try {
-          setMapItems((parseEventsApiList(data) as any[]).map(toMapItem));
+          setMapItems(parseEventsApiList(data).map(mapApiEventToItem));
         } catch {
           setMapItems([]);
         }

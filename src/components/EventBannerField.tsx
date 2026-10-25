@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { Crown, ImagePlus, X } from 'lucide-react';
+import { ImagePlus, X } from 'lucide-react';
 import { getCategoryBanner } from '@/lib/categoryBanners';
 import { PROFILE_PHOTO_ACCEPT_ATTR, validateProfilePhotoFile } from '@/lib/profilePhoto';
 
@@ -8,18 +7,22 @@ export default function EventBannerField({
   category,
   customUrl,
   onCustomUrl,
-  isPro,
+  onCustomFile,
   onError,
   overlay,
 }: {
   category: string;
   customUrl: string | null;
   onCustomUrl: (url: string | null) => void;
-  isPro: boolean;
+  onCustomFile?: (file: File | null) => void;
   onError?: (message: string) => void;
   overlay?: ReactNode;
 }) {
   const src = customUrl || getCategoryBanner(category);
+
+  const releasePreview = () => {
+    if (customUrl?.startsWith('blob:')) URL.revokeObjectURL(customUrl);
+  };
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
@@ -28,7 +31,9 @@ export default function EventBannerField({
       onError?.(check.message);
       return;
     }
+    releasePreview();
     onCustomUrl(URL.createObjectURL(file));
+    onCustomFile?.(file);
   };
 
   return (
@@ -40,44 +45,35 @@ export default function EventBannerField({
           {overlay}
         </div>
       </div>
-      {isPro ? (
-        <div className="flex items-center gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-[11px] font-semibold text-foreground hover:bg-secondary/80">
-            <ImagePlus className="h-3.5 w-3.5" />
-            Custom banner
-            <input
-              type="file"
-              accept={PROFILE_PHOTO_ACCEPT_ATTR}
-              className="sr-only"
-              onChange={(e) => {
-                onFile(e.target.files?.[0]);
-                e.currentTarget.value = '';
-              }}
-            />
-          </label>
-          {customUrl ? (
-            <button
-              type="button"
-              onClick={() => onCustomUrl(null)}
-              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3 w-3" />
-              Use category image
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <Link
-          to="/premium"
-          className="flex items-center justify-between rounded-xl border border-primary/25 bg-primary/5 px-3 py-2"
-        >
-          <span className="text-xs font-medium text-foreground">Custom banner</span>
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-primary">
-            <Crown className="h-3 w-3" />
-            Pro
-          </span>
-        </Link>
-      )}
+      <div className="flex items-center gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-[11px] font-semibold text-foreground hover:bg-secondary/80">
+          <ImagePlus className="h-3.5 w-3.5" />
+          Custom banner
+          <input
+            type="file"
+            accept={PROFILE_PHOTO_ACCEPT_ATTR}
+            className="sr-only"
+            onChange={(e) => {
+              onFile(e.target.files?.[0]);
+              e.currentTarget.value = '';
+            }}
+          />
+        </label>
+        {customUrl ? (
+          <button
+            type="button"
+            onClick={() => {
+              releasePreview();
+              onCustomUrl(null);
+              onCustomFile?.(null);
+            }}
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3 w-3" />
+            Use category image
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

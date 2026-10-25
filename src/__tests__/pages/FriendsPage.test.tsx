@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { setAuthToken } from '@/lib/auth';
+import { invalidatePrefix } from '@/lib/queryCache';
 import FriendsPage, { SEARCH_DEBOUNCE_MS } from '@/pages/FriendsPage';
 import BottomNav from '@/components/BottomNav';
 import { markChatUnread, setViewingChatId } from '@/lib/chatUnread';
@@ -83,6 +84,7 @@ beforeEach(() => {
     route('GET', '/api/friends/requests/incoming', () => json(page(incomingRows))),
     route('GET', '/api/friends/requests/sent', () => json(page(sentRows))),
     route('GET', '/api/blocks', () => json(page(blockedRows))),
+    route('GET', '/api/friends/suggestions', () => json({ data: [] })),
   ];
 });
 
@@ -92,16 +94,41 @@ afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
   setViewingChatId(null);
+  invalidatePrefix('/api/friends');
 });
 
 describe('FriendsPage', () => {
+  it('shows suggested people on Discover and lets you send a request', async () => {
+    handlers.unshift(
+      route('GET', '/api/friends/suggestions', () =>
+        json({ data: [user('sug-1', 'maya_k', 'Maya K')] }),
+      ),
+      route('POST', '/api/friends/requests', () =>
+        json({ request_id: 99, created_at: '2026-10-01T10:00:00Z', user: user('sug-1', 'maya_k', 'Maya K') }, 201),
+      ),
+    );
+    renderFriends();
+    expect(await screen.findByTestId('friends-discover')).toBeInTheDocument();
+    expect(screen.getByText('Maya K')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add Maya K' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add Maya K' })).not.toBeInTheDocument());
+    const posted = fetchMock.mock.calls.some((call) => {
+      const url = String(call[0]);
+      const method = (call[1] as RequestInit | undefined)?.method;
+      return method === 'POST' && url.includes('/api/friends/requests');
+    });
+    expect(posted).toBe(true);
+  });
+
   it('shows the four sections and lists friends with picture, username and full name', async () => {
     renderFriends();
-    for (const name of ['Friends', 'Requests', 'Sent', 'Blocked']) {
+    for (const name of ['Friends', 'Requests', 'Sent', 'Blocked', 'Discover']) {
       expect(screen.getAllByRole('tab', { name: new RegExp(name) }).length).toBeGreaterThan(0);
     }
+    fireEvent.click(screen.getByRole('tab', { name: /^Friends/ }));
     expect(await screen.findByText('@friend_one')).toBeInTheDocument();
     expect(screen.getByText('friend_one Full')).toBeInTheDocument();
+    expect(screen.queryByTestId('friends-discover')).not.toBeInTheDocument();
   });
 
   it('blocks a friend after confirming and lists them on Blocked', async () => {
@@ -111,7 +138,7 @@ describe('FriendsPage', () => {
       blockedRows = [{ blocked_at: '2026-09-30T13:00:00Z', user: moved.user }, ...blockedRows];
       return json({ blocked_at: '2026-09-30T13:00:00Z', user: moved.user }, 201);
     }));
-    renderFriends();
+    renderFriends('/friends?tab=friends');
     fireEvent.click(await screen.findByRole('button', { name: /Block friend_one/ }));
     fireEvent.click(await screen.findByRole('button', { name: /^Block$/ }));
     await waitFor(() => expect(screen.queryByText('@friend_one')).not.toBeInTheDocument());
@@ -182,7 +209,7 @@ describe('FriendsPage', () => {
       friendsRows = friendsRows.filter((f) => f.user.id !== 'f1');
       return json({ message: 'Friend removed' });
     }));
-    renderFriends();
+    renderFriends('/friends?tab=friends');
     fireEvent.click(await screen.findByRole('button', { name: /Remove friend_one from friends/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(screen.queryByText('@friend_one')).not.toBeInTheDocument());

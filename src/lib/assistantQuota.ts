@@ -36,30 +36,24 @@ function writeRecord(userId: string | undefined, record: QuotaRecord) {
 }
 
 export type AssistantQuota = {
-  unlimited: boolean;
   remaining: number;
   used: number;
   limit: number;
 };
 
-export function assistantQuota(userId: string | undefined, isPro: boolean): AssistantQuota {
-  if (isPro) {
-    return { unlimited: true, remaining: Number.POSITIVE_INFINITY, used: 0, limit: Number.POSITIVE_INFINITY };
-  }
+export function assistantQuota(userId: string | undefined): AssistantQuota {
   const { used } = readRecord(userId);
   const capped = Math.min(BASIC_ASSISTANT_ASKS_PER_DAY, Math.max(0, used));
   return {
-    unlimited: false,
     remaining: Math.max(0, BASIC_ASSISTANT_ASKS_PER_DAY - capped),
     used: capped,
     limit: BASIC_ASSISTANT_ASKS_PER_DAY,
   };
 }
 
-/** Spend one Basic ask. Pro always succeeds. Returns false when the daily limit is hit. */
-export function consumeAssistantAsk(userId: string | undefined, isPro: boolean): boolean {
-  if (isPro) return true;
-  const current = assistantQuota(userId, false);
+/** Spend one ask. Returns false when the daily limit is hit. */
+export function consumeAssistantAsk(userId: string | undefined): boolean {
+  const current = assistantQuota(userId);
   if (current.remaining <= 0) return false;
   writeRecord(userId, { date: todayStamp(), used: current.used + 1 });
   return true;

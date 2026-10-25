@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import AdminGuard from '@/components/AdminGuard';
 import RequireUsername from '@/components/RequireUsername';
 import RouteFallback from '@/app/RouteFallback';
@@ -26,7 +26,6 @@ const MapPage = lazy(() => import('@/pages/MapPage'));
 const NotificationsPage = lazy(() => import('@/pages/NotificationsPage'));
 const OrganizerDashboardPage = lazy(() => import('@/pages/OrganizerDashboardPage'));
 const PaymentPage = lazy(() => import('@/pages/PaymentPage'));
-const PremiumPage = lazy(() => import('@/pages/PremiumPage'));
 const ProfilePage = lazy(() => import('@/pages/ProfilePage'));
 const TicketPage = lazy(() => import('@/pages/TicketPage'));
 const UserProfilePage = lazy(() => import('@/pages/UserProfilePage'));
@@ -66,7 +65,7 @@ export default function AppRoutes() {
         <Route path="/map" element={<SignedIn><MapPage /></SignedIn>} />
         <Route path="/profile" element={<SignedIn><ProfilePage /></SignedIn>} />
         <Route path="/account" element={<SignedIn><ManageAccountPage /></SignedIn>} />
-        <Route path="/premium" element={<SignedIn><PremiumPage /></SignedIn>} />
+        <Route path="/premium" element={<Navigate to="/account" replace />} />
         <Route path="/user/:userId" element={<SignedIn><UserProfilePage /></SignedIn>} />
         <Route path="/chat" element={<SignedIn><ChatPage /></SignedIn>} />
         <Route path="/friends" element={<SignedIn><FriendsPage /></SignedIn>} />

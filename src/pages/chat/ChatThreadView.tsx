@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
 import EventPollCard from '@/components/EventPollCard';
-import TopBar from '@/components/TopBar';
 import { UserAvatar } from '@/components/UserAvatar';
 import { encodeChatPayload } from '@/lib/chatPayload';
 import { userProfilePath } from '@/lib/friendsApi';
@@ -58,8 +57,6 @@ export default function ChatThreadView({
   onPollQuestionChange,
   pollOptions,
   onPollOptionsChange,
-  search,
-  onSearchChange,
   toast,
   onCloseToast,
   onBack,
@@ -72,19 +69,14 @@ export default function ChatThreadView({
   pinToBottomRef,
 }: ChatThreadViewProps) {
   const isReadOnly = Boolean(chat.isPast || chat.isCancelled);
+  const emojis = ['😀', '😂', '❤️', '👍', '🎉', '🔥', '🙌', '😊'];
 
   return (
-    <div className="flex min-h-screen flex-col bg-background pb-20">
+    <div className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-background">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={onCloseToast} />
 
-      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-lg">
-        <TopBar
-          search={search}
-          onSearchChange={onSearchChange}
-          searchPlaceholder="Search chats..."
-        />
-        <header className="border-b border-border px-4 py-3">
-          <div className="flex items-center gap-3">
+      <header className="shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-lg">
+        <div className="mx-auto flex max-w-2xl items-center gap-3">
             <button
               type="button"
               aria-label="Back to chats"
@@ -112,24 +104,25 @@ export default function ChatThreadView({
               </p>
             </div>
           </div>
-        </header>
-      </div>
+      </header>
 
       {chat.isCancelled && !chatUnavailable && (
-        <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>This event was cancelled. The chat is read-only.</p>
+        <div className="mx-auto mt-3 w-full max-w-2xl shrink-0 px-4">
+          <div className="flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>This event was cancelled. The chat is read-only.</p>
+          </div>
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
         <div
           ref={scrollerRef}
           onScroll={() => {
             const el = scrollerRef.current;
             if (el) pinToBottomRef.current = isNearBottom(el);
           }}
-          className="flex-1 space-y-1 overflow-y-auto px-4 py-4 custom-scrollbar"
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-4 custom-scrollbar"
         >
           {messagesLoading && messages.length === 0 && (
             <div className="space-y-3 pt-4">
@@ -195,9 +188,11 @@ export default function ChatThreadView({
                         </div>
                       )}
                       <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
-                        m.from === 'me'
-                          ? 'gradient-primary text-primary-foreground rounded-br-sm'
-                          : 'glass-card text-foreground rounded-bl-sm'
+                        m.messageType === 'poll'
+                          ? 'glass-card w-full text-foreground'
+                          : m.from === 'me'
+                            ? 'gradient-primary text-primary-foreground rounded-br-sm'
+                            : 'glass-card text-foreground rounded-bl-sm'
                       }`}>
                         {m.messageType === 'poll' && m.pollId && (m.options?.length || 0) > 1 ? (
                           <EventPollCard
@@ -239,7 +234,7 @@ export default function ChatThreadView({
       </div>
 
       {showPoll && !isReadOnly && !chatUnavailable && (
-        <div className="border-t border-border bg-background px-4 py-3 space-y-2">
+        <div className="mx-auto w-full max-w-2xl shrink-0 space-y-2 border-t border-border bg-background px-4 py-3">
           <p className="text-xs font-semibold text-foreground">New poll</p>
           <input
             value={pollQuestion}
@@ -291,7 +286,23 @@ export default function ChatThreadView({
         </div>
       )}
 
-      <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3">
+      <div className="shrink-0 border-t border-border bg-background/95 px-4 pt-3 pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] backdrop-blur-lg">
+        <div className="mx-auto max-w-2xl space-y-2">
+        {showEmoji && !isReadOnly && !chatUnavailable && (
+          <div className="flex flex-wrap gap-1 rounded-2xl bg-secondary/60 p-2" role="listbox" aria-label="Emoji">
+            {emojis.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => onInputChange(`${input}${emoji}`)}
+                className="rounded-xl px-2 py-1 text-lg hover:bg-background/80"
+                aria-label={emoji}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -334,6 +345,7 @@ export default function ChatThreadView({
           >
             <Send className="h-4 w-4 text-primary-foreground" />
           </button>
+        </div>
         </div>
       </div>
 

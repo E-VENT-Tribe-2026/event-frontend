@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { ArrowLeft, Type, Calendar, MapPin, Users, Euro, Clock, Crown } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, Type, Calendar, MapPin, Users, Euro, Clock } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
@@ -10,8 +10,8 @@ import BottomNav from '@/components/BottomNav';
 import TopBar from '@/components/TopBar';
 import CategoryPills from '@/components/CategoryPills';
 import EventBannerField from '@/components/EventBannerField';
-import { accountPlanFrom } from '@/lib/accountPlan';
 import { getCategoryBanner } from '@/lib/categoryBanners';
+import { publicBannerUrl, uploadEventBanner } from '@/lib/eventBanner';
 import { clampRepeatCount, recurringStartDates, type RepeatFreq } from '@/lib/eventRecurrence';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
@@ -105,9 +105,9 @@ export default function CreateEventPage() {
   const [pickedLng, setPickedLng] = useState<number | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>(GERMANY_DEFAULT);
   const [customBanner, setCustomBanner] = useState<string | null>(null);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [repeat, setRepeat] = useState<RepeatFreq>('none');
   const [repeatCount, setRepeatCount] = useState('4');
-  const isPro = accountPlanFrom(user) === 'pro';
 
   // Pre-fill form if an AI Assistant draft payload is provided via state or sessionStorage
   useEffect(() => {
@@ -260,9 +260,14 @@ export default function CreateEventPage() {
 
       const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
-      const freq: RepeatFreq = isPro ? repeat : 'none';
-      const starts = recurringStartDates(startObj, freq, clampRepeatCount(repeatCount));
-      const banner = customBanner && isPro ? customBanner : getCategoryBanner(form.category);
+      const starts = recurringStartDates(startObj, repeat, clampRepeatCount(repeatCount));
+      const uploadedBanner = bannerFile ? await uploadEventBanner(bannerFile) : null;
+      if (uploadedBanner) {
+        setCustomBanner(uploadedBanner);
+        setBannerFile(null);
+      }
+      const banner = uploadedBanner || publicBannerUrl(customBanner) || getCategoryBanner(form.category);
+      const storedBanner = publicBannerUrl(banner);
       const durationMs = 7200000;
 
       const authUser = supabase == null ? undefined : (await supabase.auth.getUser()).data?.user ?? undefined;
@@ -292,7 +297,7 @@ export default function CreateEventPage() {
           location_name: locationName,
           latitude: pickedLat!,
           longitude: pickedLng!,
-          ...(banner.startsWith('http') ? { banner_url: banner } : {}),
+          ...(storedBanner ? { banner_url: storedBanner } : {}),
         };
 
         const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/`), {
@@ -420,7 +425,7 @@ export default function CreateEventPage() {
           category={form.category}
           customUrl={customBanner}
           onCustomUrl={setCustomBanner}
-          isPro={isPro}
+          onCustomFile={setBannerFile}
           onError={(message) => setToast({ show: true, message, type: 'error' })}
           overlay={
             <div className="absolute bottom-3 left-3 right-3 space-y-1.5">
@@ -501,57 +506,44 @@ export default function CreateEventPage() {
               {errors.time && <span className="text-[10px] text-destructive px-1">{errors.time}</span>}
             </div>
           </div>
-          {isPro ? (
-            <div className="space-y-2 pt-1">
-              <p className="text-xs font-semibold text-foreground">Repeat</p>
-              <div className="flex gap-1 rounded-xl bg-secondary/60 p-1" role="radiogroup" aria-label="Repeat">
-                {([
-                  ['none', 'Doesn’t repeat'],
-                  ['weekly', 'Weekly'],
-                  ['monthly', 'Monthly'],
-                ] as Array<[RepeatFreq, string]>).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="radio"
-                    aria-checked={repeat === id}
-                    onClick={() => setRepeat(id)}
-                    className={`flex-1 rounded-lg py-2 text-[11px] font-semibold transition-all ${
-                      repeat === id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {repeat !== 'none' && (
-                <div className="space-y-1">
-                  <label htmlFor="create-repeat-count" className="block text-xs font-semibold text-foreground">How many times</label>
-                  <input
-                    id="create-repeat-count"
-                    type="number"
-                    min={2}
-                    max={12}
-                    value={repeatCount}
-                    onChange={(e) => setRepeatCount(e.target.value)}
-                    className={inputCls('repeatCount')}
-                  />
-                  <p className="text-[10px] text-muted-foreground px-0.5">Creates {clampRepeatCount(repeatCount)} events, 2–12.</p>
-                </div>
-              )}
+          <div className="space-y-2 pt-1">
+            <p className="text-xs font-semibold text-foreground">Repeat</p>
+            <div className="flex gap-1 rounded-xl bg-secondary/60 p-1" role="radiogroup" aria-label="Repeat">
+              {([
+                ['none', 'Doesn’t repeat'],
+                ['weekly', 'Weekly'],
+                ['monthly', 'Monthly'],
+              ] as Array<[RepeatFreq, string]>).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={repeat === id}
+                  onClick={() => setRepeat(id)}
+                  className={`flex-1 rounded-lg py-2 text-[11px] font-semibold transition-all ${
+                    repeat === id ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          ) : (
-            <Link
-              to="/premium"
-              className="flex items-center justify-between rounded-xl border border-primary/25 bg-primary/5 px-3 py-2"
-            >
-              <span className="text-xs font-medium text-foreground">Repeat this event</span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-primary">
-                <Crown className="h-3 w-3" />
-                Pro
-              </span>
-            </Link>
-          )}
+            {repeat !== 'none' && (
+              <div className="space-y-1">
+                <label htmlFor="create-repeat-count" className="block text-xs font-semibold text-foreground">How many times</label>
+                <input
+                  id="create-repeat-count"
+                  type="number"
+                  min={2}
+                  max={12}
+                  value={repeatCount}
+                  onChange={(e) => setRepeatCount(e.target.value)}
+                  className={inputCls('repeatCount')}
+                />
+                <p className="text-[10px] text-muted-foreground px-0.5">Creates {clampRepeatCount(repeatCount)} events, 2–12.</p>
+              </div>
+            )}
+          </div>
         </FormSection>
 
         <FormSection icon={MapPin} title="Location">

@@ -137,14 +137,6 @@ export default function AdminEventChat({
                   <span className="font-bold" style={{ color: 'var(--adm-fg)' }}>
                     {m.sender_name}
                   </span>
-                  {m.is_pro && (
-                    <span
-                      className="rounded px-1.5 py-0.2 text-[10px] font-bold"
-                      style={{ background: 'hsl(38 92% 52% / .18)', color: 'hsl(38 92% 65%)', border: '1px solid hsl(38 92% 52% / .35)' }}
-                    >
-                      Pro
-                    </span>
-                  )}
                   <span style={{ color: 'var(--adm-muted-fg)' }}>@{m.sender_username}</span>
                 </div>
 

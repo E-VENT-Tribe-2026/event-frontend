@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Ban, Check, Search, UserMinus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
+import { Ban, Check, Search, Sparkles, UserMinus, UserPlus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
 import TopBar from '@/components/TopBar';
 import AppToast from '@/components/AppToast';
@@ -25,12 +25,14 @@ import {
   cancelFriendRequest,
   declineFriendRequest,
   fetchBlockedUsers,
+  fetchFriendSuggestions,
   fetchFriends,
   fetchIncomingRequests,
   fetchSentRequests,
   FRIENDS_CHANGED_EVENT,
   removeFriend,
   searchUsers,
+  sendFriendRequest,
   unblockUser,
   userAvatarUrl,
   userProfilePath,
@@ -42,9 +44,10 @@ import {
   type UserSummary,
 } from '@/lib/friendsApi';
 
-type Section = 'friends' | 'incoming' | 'sent' | 'blocked';
+type Section = 'friends' | 'incoming' | 'sent' | 'blocked' | 'discover';
 
 const SECTIONS: Array<{ id: Section; label: string }> = [
+  { id: 'discover', label: 'Discover' },
   { id: 'friends', label: 'Friends' },
   { id: 'incoming', label: 'Requests' },
   { id: 'sent', label: 'Sent' },
@@ -202,7 +205,7 @@ export default function FriendsPage() {
   const currentUserId = getCurrentUser()?.id ?? null;
 
   const tabParam = searchParams.get('tab') as Section | null;
-  const section: Section = SECTIONS.some((s) => s.id === tabParam) ? (tabParam as Section) : 'friends';
+  const section: Section = SECTIONS.some((s) => s.id === tabParam) ? (tabParam as Section) : 'discover';
   const setSection = (id: Section) => setSearchParams({ tab: id }, { replace: true });
 
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
@@ -218,6 +221,8 @@ export default function FriendsPage() {
   const [pendingRemoval, setPendingRemoval] = useState<UserSummary | null>(null);
   const [pendingBlock, setPendingBlock] = useState<UserSummary | null>(null);
   const [pendingUnblock, setPendingUnblock] = useState<UserSummary | null>(null);
+  const [suggestions, setSuggestions] = useState<UserSearchResult[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(true);
 
   useEffect(() => {
     const refresh = () => {
@@ -230,6 +235,29 @@ export default function FriendsPage() {
     window.addEventListener(FRIENDS_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(FRIENDS_CHANGED_EVENT, refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSuggestions = () => {
+      setSuggestionsLoading(true);
+      fetchFriendSuggestions()
+        .then((rows) => {
+          if (!cancelled) setSuggestions(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setSuggestions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSuggestionsLoading(false);
+        });
+    };
+    loadSuggestions();
+    window.addEventListener(FRIENDS_CHANGED_EVENT, loadSuggestions);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(FRIENDS_CHANGED_EVENT, loadSuggestions);
+    };
   }, []);
 
   const openProfile = (userId: string) => navigate(userProfilePath(userId, currentUserId));
@@ -391,11 +419,39 @@ export default function FriendsPage() {
     }
   };
 
+  const onSuggestAdd = async (person: UserSearchResult) => {
+    setBusyKey(`suggest:${person.id}`);
+    try {
+      const res = await sendFriendRequest(person.id);
+      setSuggestions((prev) => prev.filter((row) => row.id !== person.id));
+      sent.setState((s) => ({
+        ...s,
+        loaded: true,
+        items: [res, ...s.items.filter((row) => row.user.id !== person.id)],
+      }));
+      setToast({ show: true, message: 'Friend request sent', type: 'success' });
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const knownIds = new Set<string>([
+    ...(currentUserId ? [currentUserId] : []),
+    ...friends.state.items.map((row) => row.user.id),
+    ...incoming.state.items.map((row) => row.user.id),
+    ...sent.state.items.map((row) => row.user.id),
+    ...blocked.state.items.map((row) => row.user.id),
+  ]);
+  const visibleSuggestions = suggestions.filter((row) => !knownIds.has(row.id)).slice(0, 8);
+
   const counts: Partial<Record<Section, number>> = {
     friends: friends.state.loaded ? friends.state.items.length : undefined,
     incoming: incoming.state.loaded ? incoming.state.items.length : undefined,
     sent: sent.state.loaded ? sent.state.items.length : undefined,
     blocked: blocked.state.loaded ? blocked.state.items.length : undefined,
+    discover: suggestionsLoading ? undefined : visibleSuggestions.length,
   };
 
   const hasActiveSearch = query.trim().length > 0;
@@ -454,7 +510,7 @@ export default function FriendsPage() {
                     role="tab"
                     aria-selected={active}
                     onClick={() => setSection(id)}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-semibold transition-all ${
+                    className={`flex flex-1 items-center justify-center gap-1 rounded-xl px-1.5 py-2.5 text-[11px] font-semibold transition-all sm:px-3 sm:text-xs ${
                       active
                         ? 'gradient-primary text-primary-foreground shadow-glow'
                         : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
@@ -465,7 +521,7 @@ export default function FriendsPage() {
                       <span className={`inline-flex h-4 min-w-[1rem] px-1 items-center justify-center rounded-full text-[10px] font-bold ${
                         active ? 'bg-background/25 text-inherit' : 'bg-secondary text-muted-foreground'
                       }`}>
-                        {count}{(id === 'incoming' ? incoming : id === 'sent' ? sent : id === 'blocked' ? blocked : friends).state.hasMore ? '+' : ''}
+                        {count}{id === 'incoming' && incoming.state.hasMore ? '+' : id === 'sent' && sent.state.hasMore ? '+' : id === 'blocked' && blocked.state.hasMore ? '+' : id === 'friends' && friends.state.hasMore ? '+' : ''}
                       </span>
                     )}
                   </button>
@@ -478,7 +534,7 @@ export default function FriendsPage() {
                 <ListBody
                   list={friends.state}
                   emptyIcon={Users}
-                  emptyText="No friends yet. Use the search bar above to find people."
+                  emptyText="No friends yet. Open Discover or search by username to find people."
                   onLoadMore={() => void friends.load(friends.state.page + 1)}
                 >
                   {friends.state.items.map((f) => (
@@ -506,6 +562,52 @@ export default function FriendsPage() {
                     </UserRow>
                   ))}
                 </ListBody>
+              </section>
+            )}
+
+            {section === 'discover' && (
+              <section aria-label="Discover people" className="space-y-3 pt-1" data-testid="friends-discover">
+                <div className="flex items-center gap-2 px-1">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <h2 className="text-sm font-bold text-foreground">People you may know</h2>
+                </div>
+                <p className="text-[11px] text-muted-foreground px-1">Suggestions for people to add. Search by username to find anyone.</p>
+                {suggestionsLoading && visibleSuggestions.length === 0 ? (
+                  <div className="space-y-2" aria-busy="true">
+                    <span className="sr-only">Loading suggestions</span>
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3">
+                        <div className="h-10 w-10 shrink-0 rounded-full shimmer" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-3 w-2/5 rounded-full shimmer" />
+                          <div className="h-2.5 w-1/3 rounded-full shimmer" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : visibleSuggestions.length === 0 ? (
+                  <EmptyState icon={Sparkles} text="No suggestions right now. Search by username to find people." />
+                ) : (
+                  <ul className="space-y-2">
+                    {visibleSuggestions.map((person) => {
+                      const name = person.full_name || person.username || 'Someone';
+                      return (
+                        <UserRow key={person.id} user={person} onOpen={() => openProfile(person.id)}>
+                          <button
+                            type="button"
+                            onClick={() => void onSuggestAdd(person)}
+                            disabled={busyKey === `suggest:${person.id}`}
+                            className={`${actionBtn} gradient-primary text-primary-foreground`}
+                            aria-label={`Add ${name}`}
+                          >
+                            <UserPlus className="h-3.5 w-3.5" />
+                            Add
+                          </button>
+                        </UserRow>
+                      );
+                    })}
+                  </ul>
+                )}
               </section>
             )}
 

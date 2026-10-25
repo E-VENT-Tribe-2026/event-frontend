@@ -9,13 +9,12 @@ import {
   ShieldCheck,
   Shield,
   Ban,
-  Star,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UserAvatar } from '@/components/UserAvatar';
 import { fetchAdminUsers, isSuspendedAccount, type AdminUserSummary } from '@/lib/adminApi';
 
-type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings' | 'pro';
+type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings';
 
 type UserRow = AdminUserSummary & {
   is_suspended?: boolean;
@@ -36,27 +35,23 @@ const FILTER_LABELS: Record<FilterChip, string> = {
   administrators: 'Administrators',
   suspended: 'Suspended',
   with_warnings: 'With warnings',
-  pro: 'Pro',
 };
 
 const FILTER_ICONS: Partial<Record<FilterChip, typeof Shield>> = {
   administrators: Shield,
   suspended: Ban,
   with_warnings: AlertTriangle,
-  pro: Star,
 };
 
 const isAdminUser = (u: UserRow) => (u.role ?? '').toLowerCase().includes('admin');
 const isSuspendedUser = (u: UserRow) => isSuspendedAccount(u);
 const hasWarnings = (u: UserRow) => (u.warnings_count ?? 0) > 0;
-const isProUser = (u: UserRow) => Boolean(u.is_pro);
 
 const FILTER_PREDICATES: Record<FilterChip, (u: UserRow) => boolean> = {
   all: () => true,
   administrators: isAdminUser,
   suspended: isSuspendedUser,
   with_warnings: hasWarnings,
-  pro: isProUser,
 };
 
 export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTabProps) {
@@ -364,20 +359,6 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
-                      {isProUser(u) && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
-                          style={{
-                            background: 'hsl(45 93% 50% / .15)',
-                            color: 'hsl(45 93% 60%)',
-                            borderColor: 'hsl(45 93% 50% / .35)',
-                          }}
-                        >
-                          <Star className="h-3 w-3" />
-                          Pro
-                        </span>
-                      )}
-
                       {warnings > 0 && (
                         <span
                           className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"

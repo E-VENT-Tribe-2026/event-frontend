@@ -1,4 +1,5 @@
 ﻿import { useState, useMemo, useEffect, useCallback } from 'react';
+import { HOME_LOCATION_EVENT, readHomeLocation } from '@/lib/accountSettings';
 import { getCurrentUser, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
@@ -41,7 +42,9 @@ export default function HomePage() {
   const [budgetMax, setBudgetMax] = useState(500);
   const [filterDate, setFilterDate] = useState('');
   const [debouncedDate, setDebouncedDate] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
+  const [selectedCity, setSelectedCity] = useState(
+    () => readHomeLocation(getCurrentUser()?.id)?.city ?? '',
+  );
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleAll, setVisibleAll] = useState(PAGE);
@@ -180,6 +183,15 @@ export default function HomePage() {
     const syncUser = () => setCurrentUser(getCurrentUser());
     window.addEventListener('eventapp:user-updated', syncUser);
     return () => window.removeEventListener('eventapp:user-updated', syncUser);
+  }, []);
+
+  useEffect(() => {
+    const applyHome = () => {
+      const city = readHomeLocation(getCurrentUser()?.id)?.city ?? '';
+      setSelectedCity(city);
+    };
+    window.addEventListener(HOME_LOCATION_EVENT, applyHome);
+    return () => window.removeEventListener(HOME_LOCATION_EVENT, applyHome);
   }, []);
 
   const toggleSection = (key: string) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));

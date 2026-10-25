@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  NOTIFICATION_PREFS_EVENT,
+  notificationAllowed,
+  readNotificationPrefs,
+  type NotificationPrefs,
+} from '@/lib/accountSettings';
 import { getCurrentUser, getNotifications, saveNotifications, type Notification } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck, AlertTriangle } from 'lucide-react';
+import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck, AlertTriangle, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import TopBar from '@/components/TopBar';
@@ -31,6 +37,7 @@ type NotificationKind =
   | 'friend_request'
   | 'friend_request_accepted'
   | 'event_invitation'
+  | 'event_chat'
   | 'warning'
   | 'other';
 
@@ -60,6 +67,7 @@ const iconMap: Record<NotificationKind, React.ElementType> = {
   friend_request:  Contact,
   friend_request_accepted: UserCheck,
   event_invitation: CalendarClock,
+  event_chat:      MessageCircle,
   warning:         AlertTriangle,
   other:           Info,
 };
@@ -75,6 +83,7 @@ const colorMap: Record<NotificationKind, string> = {
   friend_request:  'text-primary bg-primary/20',
   friend_request_accepted: 'text-green-500 bg-green-500/15',
   event_invitation: 'text-primary bg-primary/20',
+  event_chat:      'text-primary bg-primary/20',
   warning:         '',
   other:           'text-primary bg-primary/20',
 };
@@ -93,6 +102,9 @@ function normalizeKind(type: string): NotificationKind {
   if (t === 'warning') return 'warning';
   if (t === 'friend_request_accepted') return 'friend_request_accepted';
   if (t === 'event_invitation') return 'event_invitation';
+  if (t === 'event_chat' || t === 'chat' || t === 'chat_message' || t === 'new_message' || t === 'message' || t.includes('chat')) {
+    return 'event_chat';
+  }
   if (t.startsWith('friend_request')) return 'friend_request';
   if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
   if (t === 'user_left' || t.includes('left')) return 'user_left';
@@ -161,11 +173,18 @@ function isPendingItem(id: string): boolean {
 export default function NotificationsPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState(getCurrentUser);
+  const [prefs, setPrefs] = useState<NotificationPrefs>(() => readNotificationPrefs(getCurrentUser()?.id));
 
   useEffect(() => {
     const sync = () => setUser(getCurrentUser());
     window.addEventListener('eventapp:user-updated', sync);
     return () => window.removeEventListener('eventapp:user-updated', sync);
+  }, []);
+
+  useEffect(() => {
+    const syncPrefs = () => setPrefs(readNotificationPrefs(getCurrentUser()?.id));
+    window.addEventListener(NOTIFICATION_PREFS_EVENT, syncPrefs);
+    return () => window.removeEventListener(NOTIFICATION_PREFS_EVENT, syncPrefs);
   }, []);
 
   const [markingId, setMarkingId] = useState<string | null>(null);
@@ -214,6 +233,7 @@ export default function NotificationsPage() {
   useEffect(() => {
     if (rawNotifications && Array.isArray(rawNotifications)) {
       const mapped = rawNotifications
+        .filter((n) => notificationAllowed(n.type, prefs))
         .map(fromApi)
         .sort((a, b) => {
           const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -223,14 +243,17 @@ export default function NotificationsPage() {
       setItems(mapped);
       setUsingFallback(false);
     } else if (!queryLoading) {
-      setItems(getNotifications().map(fromLocal));
+      setItems(getNotifications().filter((n) => notificationAllowed(n.type, prefs)).map(fromLocal));
       setUsingFallback(true);
     }
-  }, [rawNotifications, queryLoading]);
+  }, [rawNotifications, queryLoading, prefs]);
 
   const unmatchedPending = useMemo(
-    () => pendingRequests.filter((req) => !items.some((n) => n.kind === 'friend_request' && n.relatedUserId === req.user.id)),
-    [pendingRequests, items],
+    () =>
+      prefs.friend_requests
+        ? pendingRequests.filter((req) => !items.some((n) => n.kind === 'friend_request' && n.relatedUserId === req.user.id))
+        : [],
+    [pendingRequests, items, prefs.friend_requests],
   );
 
   const feedItems = useMemo(() => {
@@ -257,7 +280,7 @@ export default function NotificationsPage() {
     if (subFilter === 'friends') {
       next = feedItems.filter((n) => isFriendKind(n.kind));
     } else if (subFilter === 'activity') {
-      next = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'event_invitation');
+      next = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'event_invitation' || n.kind === 'event_chat');
     } else if (subFilter === 'updates') {
       next = feedItems.filter((n) => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted');
     } else if (subFilter === 'reminders') {
@@ -294,7 +317,7 @@ export default function NotificationsPage() {
   }, [filteredItems]);
 
   const unreadCount = useMemo(() => feedItems.filter((n) => !n.read).length, [feedItems]);
-  const activityCount = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created').length;
+  const activityCount = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'event_invitation' || n.kind === 'event_chat').length;
   const updatesCount = feedItems.filter((n) => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted').length;
   const remindersCount = feedItems.filter((n) => n.kind === 'reminder').length;
   const friendsCount = feedItems.filter((n) => isFriendKind(n.kind)).length;
@@ -418,7 +441,9 @@ export default function NotificationsPage() {
         saveNotifications(legacy);
       }
     }
-    if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
+    if (n.kind === 'event_chat' && n.relatedEventId) {
+      navigate(`/chat?eventId=${encodeURIComponent(n.relatedEventId)}`);
+    } else if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
     else if ((n.kind === 'friend_request' || n.kind === 'friend_request_accepted') && n.relatedUserId) {
       // The other person's profile, where the request can be answered.
       navigate(userProfilePath(n.relatedUserId, getCurrentUser()?.id));
@@ -589,10 +614,17 @@ export default function NotificationsPage() {
           {n.relatedEventId && (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); navigate(`/event/${n.relatedEventId}`); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(
+                  n.kind === 'event_chat'
+                    ? `/chat?eventId=${encodeURIComponent(n.relatedEventId!)}`
+                    : `/event/${n.relatedEventId}`,
+                );
+              }}
               className="hidden sm:inline-flex items-center gap-1 rounded-xl bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors"
             >
-              View <ExternalLink className="h-3 w-3" />
+              {n.kind === 'event_chat' ? 'Chat' : 'View'} <ExternalLink className="h-3 w-3" />
             </button>
           )}
           {!n.read && !isPendingItem(n.id) && (
@@ -639,7 +671,7 @@ export default function NotificationsPage() {
           onSearchChange={setSearch}
           searchPlaceholder="Search notifications..."
         />
-        <div className="mx-auto flex max-w-lg items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
+        <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
           <h1 className="text-base font-bold text-foreground">Notifications</h1>
           <div className="flex items-center gap-2">
             <button
@@ -659,12 +691,12 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
+      <div className="mx-auto max-w-2xl px-4 pt-4 space-y-4">
         {/* Sub-filter Tabs */}
         <div
           role="tablist"
           aria-label="Notification filters"
-          className="flex w-full gap-1 rounded-2xl glass-card p-1.5"
+          className="flex w-full gap-1.5 rounded-2xl glass-card p-1.5"
         >
           {[
             { id: 'all' as const, label: 'All', count: feedItems.length },
@@ -681,7 +713,7 @@ export default function NotificationsPage() {
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => { setSubFilter(tab.id); setVisibleCount(PAGE_SIZE); }}
-                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2.5 text-xs font-semibold transition-all sm:flex-row sm:gap-1.5 sm:px-2.5 ${
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2.5 text-xs font-semibold transition-all sm:flex-row sm:gap-1.5 sm:px-3 ${
                   isActive
                     ? 'gradient-primary text-primary-foreground shadow-glow'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
@@ -790,7 +822,7 @@ export default function NotificationsPage() {
       </div>
 
       {!loading && filteredItems.length > 0 && (
-        <div className="mx-auto max-w-lg px-4 pt-4 pb-6">
+        <div className="mx-auto max-w-2xl px-4 pt-4 pb-6">
           {filteredItems.length > visibleCount ? (
             <button
               type="button"

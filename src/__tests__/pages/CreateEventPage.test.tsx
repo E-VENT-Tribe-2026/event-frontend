@@ -183,15 +183,15 @@ describe('CreateEventPage', () => {
     );
   });
 
-  it('gates custom banners and recurrence behind Pro', () => {
+  it('lets any account upload a custom banner and set recurrence', () => {
     renderPage();
-    expect(screen.getByRole('link', { name: /Custom banner/i })).toHaveAttribute('href', '/premium');
-    expect(screen.getByRole('link', { name: /Repeat this event/i })).toHaveAttribute('href', '/premium');
-    expect(screen.queryByRole('radiogroup', { name: 'Repeat' })).not.toBeInTheDocument();
+    expect(screen.getByText('Custom banner')).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Repeat' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Repeat this event/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Custom banner/i })).not.toBeInTheDocument();
   });
 
-  it('lets Pro create a weekly series in one publish', async () => {
-    currentUser.isPremium = true;
+  it('lets you create a weekly series in one publish', async () => {
     let posts = 0;
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

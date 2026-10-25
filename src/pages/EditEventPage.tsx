@@ -5,8 +5,9 @@ import { getCurrentUser, upsertEvent, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import CategoryPills from '@/components/CategoryPills';
 import EventBannerField from '@/components/EventBannerField';
-import { accountPlanFrom } from '@/lib/accountPlan';
 import { getCategoryBanner } from '@/lib/categoryBanners';
+import { publicBannerUrl, uploadEventBanner } from '@/lib/eventBanner';
+import { setCacheEntry, TTL } from '@/lib/queryCache';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
@@ -61,7 +62,7 @@ export default function EditEventPage() {
   const [cachedItem, setCachedItem] = useState<EventItem | null>(null);
   const [currentParticipantCount, setCurrentParticipantCount] = useState(0);
   const [customBanner, setCustomBanner] = useState<string | null>(null);
-  const isPro = accountPlanFrom(user) === 'pro';
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
 
   const update = (key: string, value: string | boolean) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -236,6 +237,13 @@ export default function EditEventPage() {
       const endObj = new Date(startObj.getTime() + durationMs);
       const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
+      const uploaded = bannerFile ? await uploadEventBanner(bannerFile) : null;
+      const bannerUrl = uploaded || publicBannerUrl(customBanner);
+      if (uploaded) {
+        setCustomBanner(uploaded);
+        setBannerFile(null);
+      }
+
       const payload = {
         title: sanitizeText(form.title),
         description: sanitizeText(form.description),
@@ -247,7 +255,7 @@ export default function EditEventPage() {
         location_name: locationName,
         latitude: pickedLat!,
         longitude: pickedLng!,
-        ...(isPro && customBanner?.startsWith('http') ? { banner_url: customBanner } : {}),
+        banner_url: bannerUrl,
       };
 
       const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/${id}`), {
@@ -294,7 +302,7 @@ export default function EditEventPage() {
         organizer: organizerName,
         organizerId,
         organizerAvatar,
-        image: isPro && customBanner ? customBanner : (base?.image ?? item.image),
+        image: publicBannerUrl(item.image) || bannerUrl || item.image,
         participants: base?.participants ?? item.participants,
         reviews: base?.reviews ?? [],
         reports: base?.reports ?? [],
@@ -302,8 +310,9 @@ export default function EditEventPage() {
       };
 
       upsertEvent(merged);
-      setToast({ show: true, message: 'Event updated!', type: 'success' });
       invalidateEvents();
+      setCacheEntry(`/api/events/${id}`, { ...updatedRow, banner_url: bannerUrl ?? updatedRow.banner_url }, TTL.MEDIUM);
+      setToast({ show: true, message: 'Event updated!', type: 'success' });
       setTimeout(() => navigate(`/event/${id}`), 1200);
     } catch (err: unknown) {
       clearTimeout(timeoutId);
@@ -382,7 +391,7 @@ export default function EditEventPage() {
           category={form.category}
           customUrl={customBanner}
           onCustomUrl={setCustomBanner}
-          isPro={isPro}
+          onCustomFile={setBannerFile}
           onError={(message) => setToast({ show: true, message, type: 'error' })}
         />
 

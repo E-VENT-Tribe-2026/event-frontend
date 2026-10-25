@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
+import { HOME_LOCATION_EVENT, mapStartView, readHomeLocation } from '@/lib/accountSettings';
+import { getCurrentUser, getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
 import BottomNav from '@/components/BottomNav';
 import TopBar from '@/components/TopBar';
 import { LocateFixed, RefreshCw } from 'lucide-react';
@@ -76,7 +77,9 @@ export default function MapPage() {
 
   const [category, setCategory] = useState('All');
   const [filterDate, setFilterDate] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
+  const [selectedCity, setSelectedCity] = useState(
+    () => readHomeLocation(getCurrentUser()?.id)?.city ?? '',
+  );
   const [titleSearch, setTitleSearch] = useState('');
   const [debouncedTitle, setDebouncedTitle] = useState('');
   const [debouncedFilterDate, setDebouncedFilterDate] = useState('');
@@ -200,6 +203,7 @@ export default function MapPage() {
       if (cancelled || !mapRef.current || mapInstance.current) return;
       leafletRef.current = L;
 
+      const start = mapStartView(getCurrentUser()?.id);
       const map = L.map(mapRef.current, {
         zoomControl: true,
         bounceAtZoomLimits: false,
@@ -208,7 +212,7 @@ export default function MapPage() {
         maxBoundsViscosity: 1,
         minZoom: 3,
         preferCanvas: true,
-      }).setView([40.7128, -74.006], 3);
+      }).setView(start.center, start.zoom);
       mapInstance.current = map;
       map.setMaxBounds(WORLD_BOUNDS);
 
@@ -239,6 +243,19 @@ export default function MapPage() {
       }
       setMapReady(false);
     };
+  }, []);
+
+  useEffect(() => {
+    const applyHome = () => {
+      const userId = getCurrentUser()?.id;
+      setSelectedCity(readHomeLocation(userId)?.city ?? '');
+      const map = mapInstance.current;
+      if (!map) return;
+      const start = mapStartView(userId);
+      map.setView(start.center, start.zoom);
+    };
+    window.addEventListener(HOME_LOCATION_EVENT, applyHome);
+    return () => window.removeEventListener(HOME_LOCATION_EVENT, applyHome);
   }, []);
 
   useEffect(() => {

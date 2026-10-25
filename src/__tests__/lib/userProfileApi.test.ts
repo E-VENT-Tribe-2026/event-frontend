@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setAuthToken } from '@/lib/auth';
-import { fetchUserProfile } from '@/lib/userProfileApi';
+import { fetchUserProfile, toProfileVisibility, visibilityForApi } from '@/lib/userProfileApi';
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -59,6 +59,14 @@ describe('fetchUserProfile blocking', () => {
       code: 'profile_unavailable',
       message: 'This profile is unavailable',
     });
+  });
+
+  it('treats friends_only as private for the editor', () => {
+    expect(toProfileVisibility('public')).toBe('public');
+    expect(toProfileVisibility('private')).toBe('private');
+    expect(toProfileVisibility('friends_only')).toBe('private');
+    expect(visibilityForApi('private')).toBe('private');
+    expect(visibilityForApi('public')).toBe('public');
   });
 
   it('also reads nested FastAPI detail.code', async () => {

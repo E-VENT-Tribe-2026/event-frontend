@@ -17,30 +17,26 @@ describe('assistantQuota', () => {
     window.localStorage.clear();
   });
 
-  it('gives Basic accounts five asks and Pro unlimited', () => {
-    expect(assistantQuota(USER, false)).toEqual({
-      unlimited: false,
+  it('gives five asks per day', () => {
+    expect(assistantQuota(USER)).toEqual({
       remaining: BASIC_ASSISTANT_ASKS_PER_DAY,
       used: 0,
       limit: BASIC_ASSISTANT_ASKS_PER_DAY,
     });
-    expect(assistantQuota(USER, true).unlimited).toBe(true);
-    expect(consumeAssistantAsk(USER, true)).toBe(true);
-    expect(assistantQuota(USER, true).unlimited).toBe(true);
   });
 
-  it('stops Basic asks after the daily limit', () => {
+  it('stops asks after the daily limit', () => {
     for (let i = 0; i < BASIC_ASSISTANT_ASKS_PER_DAY; i++) {
-      expect(consumeAssistantAsk(USER, false)).toBe(true);
+      expect(consumeAssistantAsk(USER)).toBe(true);
     }
-    expect(consumeAssistantAsk(USER, false)).toBe(false);
-    expect(assistantQuota(USER, false).remaining).toBe(0);
+    expect(consumeAssistantAsk(USER)).toBe(false);
+    expect(assistantQuota(USER).remaining).toBe(0);
   });
 
   it('resets when the stored date is not today', () => {
     window.localStorage.setItem(KEY, JSON.stringify({ date: '2000-01-01', used: 5 }));
-    expect(assistantQuota(USER, false).remaining).toBe(BASIC_ASSISTANT_ASKS_PER_DAY);
-    expect(consumeAssistantAsk(USER, false)).toBe(true);
-    expect(assistantQuota(USER, false).used).toBe(1);
+    expect(assistantQuota(USER).remaining).toBe(BASIC_ASSISTANT_ASKS_PER_DAY);
+    expect(consumeAssistantAsk(USER)).toBe(true);
+    expect(assistantQuota(USER).used).toBe(1);
   });
 });

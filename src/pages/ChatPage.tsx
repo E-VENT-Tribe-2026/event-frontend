@@ -292,8 +292,11 @@ export default function ChatPage() {
       }
 
       if (selectedEventFromUrl && !handledSelectedParam) {
-        if (mapped.some((entry) => entry.id === selectedEventFromUrl)) {
-          setActiveChat(selectedEventFromUrl);
+        const fromUrl = mapped.find(
+          (entry) => entry.id.toLowerCase() === selectedEventFromUrl.toLowerCase(),
+        );
+        if (fromUrl) {
+          setActiveChat(fromUrl.id);
         } else {
           try {
             const singleRes = await fetch(getApiUrl(`/api/events/${selectedEventFromUrl}`), {
