@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, Mail, Lock, Ban } from 'lucide-react';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { supabase, syncSupabaseSession } from '@/lib/supabase';
 import { motion } from 'framer-motion';
@@ -12,15 +12,25 @@ import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { destinationAfterSignIn } from '@/lib/username';
 import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 import { needsAdminVerification, setPendingAdminVerification, clearPendingAdminVerification, type AdminAuthStatus } from '@/lib/adminAuth';
+import { readSuspension, type SuspensionNotice } from '@/lib/suspension';
+
+/** A suspension handed over by another page, e.g. the Google sign-in callback. */
+function suspensionFromState(state: unknown): SuspensionNotice | null {
+  const s = (state as { suspension?: { reason?: unknown } } | null)?.suspension;
+  if (!s || typeof s !== 'object') return null;
+  return { reason: typeof s.reason === 'string' && s.reason.trim() ? s.reason : null };
+}
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [suspension, setSuspension] = useState<SuspensionNotice | null>(() => suspensionFromState(location.state));
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -33,6 +43,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSuspension(null);
     if (!validate() || isSubmitting) return;
     setIsSubmitting(true);
     try {
@@ -42,6 +53,12 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      const suspended = res.status === 403 ? readSuspension((data as { detail?: unknown }).detail) : null;
+      if (suspended) {
+        setSuspension(suspended);
+        setIsSubmitting(false);
+        return;
+      }
       if (!res.ok) {
         const detail = String((data as any)?.detail || (data as any)?.message || '').trim();
         const lowered = detail.toLowerCase();
@@ -182,19 +199,45 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Suspension notice: stays until the user edits a field or submits again */}
+          {suspension && (
+            <div
+              role="alert"
+              className="flex items-start"
+              style={{
+                gap: 10,
+                padding: '12px 14px',
+                borderRadius: 12,
+                fontSize: 13,
+                border: '1px solid hsl(0 84% 60% / .35)',
+                background: 'hsl(0 84% 60% / .1)',
+                color: 'hsl(0 92% 85%)',
+              }}
+            >
+              <Ban className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'hsl(0 92% 74%)' }} aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="font-bold">Your account is suspended.</p>
+                {/* Plain text only: React escapes the reason. */}
+                {suspension.reason && (
+                  <p className="mt-1 whitespace-pre-wrap break-words">{suspension.reason}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
+                <input type="email" placeholder="Email" value={email} onChange={e => { setEmail(e.target.value); setSuspension(null); }} className={inputCls} />
               </div>
               {errors.email && <p className="mt-1 text-xs text-destructive">{errors.email}</p>}
             </div>
             <div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} />
+                <input type={showPw ? 'text' : 'password'} placeholder="Password" value={password} onChange={e => { setPassword(e.target.value); setSuspension(null); }} className={inputCls} />
                 <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
                   {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>

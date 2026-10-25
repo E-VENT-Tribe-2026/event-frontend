@@ -44,7 +44,23 @@ export type ApiNotification = {
   created_at?: string | null;
   read?: boolean;
   actor_name?: string | null;
+  /** Warning rows only (event-backend #191); `message` is the administrator's reason. */
+  is_warning?: boolean;
+  warning_id?: string | null;
+  warning_acknowledged?: boolean | null;
+  warning_withdrawn?: boolean | null;
 };
+
+/** Warning fields for rows with `is_warning === true`; nothing for any other row. */
+function warningFields(row: Record<string, unknown>): Partial<ApiNotification> {
+  if (row.is_warning !== true) return {};
+  return {
+    is_warning: true,
+    warning_id: row.warning_id == null ? null : String(row.warning_id),
+    warning_acknowledged: typeof row.warning_acknowledged === 'boolean' ? row.warning_acknowledged : null,
+    warning_withdrawn: typeof row.warning_withdrawn === 'boolean' ? row.warning_withdrawn : null,
+  };
+}
 
 function normalizeType(type: string): string {
   // Return the raw type as-is so the UI can map it to the correct icon/color.
@@ -121,6 +137,7 @@ export async function fetchNotifications(token: string): Promise<ApiNotification
           : typeof row.triggered_by_name === 'string' ? row.triggered_by_name
           : typeof row.profiles?.full_name === 'string' ? row.profiles.full_name
           : null,
+        ...warningFields(row),
       })) as ApiNotification[];
     },
     TTL.SHORT, // 30s — notifications should feel fresh

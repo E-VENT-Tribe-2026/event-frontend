@@ -4,13 +4,21 @@ import { getCurrentUser, getNotifications, saveNotifications, type Notification 
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck } from 'lucide-react';
+import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import TopBar from '@/components/TopBar';
 import AppToast from '@/components/AppToast';
+import WarningDialog from '@/components/WarningDialog';
 import { useNotifications, invalidateNotifications } from '@/lib/queries';
 import { userProfilePath, fetchIncomingRequests, FRIEND_REQUESTS_PATH, FRIENDS_CHANGED_EVENT, type FriendRequestItem } from '@/lib/friendsApi';
+import { acknowledgeWarning } from '@/lib/warningsApi';
+
+// Same text as WarningsGate shows when an acknowledgement fails.
+const ACK_ERROR = "We couldn't confirm that you read this warning. Check your connection and try again.";
+
+const WARN = 'hsl(38 92% 52%)';
+const WARN_TEXT = 'hsl(38 95% 66%)';
 
 type NotificationKind =
   | 'user_joined'
@@ -23,6 +31,7 @@ type NotificationKind =
   | 'friend_request'
   | 'friend_request_accepted'
   | 'event_invitation'
+  | 'warning'
   | 'other';
 
 type UINotification = {
@@ -34,6 +43,10 @@ type UINotification = {
   eventTitle: string;
   createdAt: string | null;
   read: boolean;
+  /** Warning notifications only. */
+  warningId?: string | null;
+  warningAcknowledged?: boolean;
+  warningWithdrawn?: boolean;
 };
 
 const iconMap: Record<NotificationKind, React.ElementType> = {
@@ -47,6 +60,7 @@ const iconMap: Record<NotificationKind, React.ElementType> = {
   friend_request:  Contact,
   friend_request_accepted: UserCheck,
   event_invitation: CalendarClock,
+  warning:         AlertTriangle,
   other:           Info,
 };
 
@@ -61,6 +75,7 @@ const colorMap: Record<NotificationKind, string> = {
   friend_request:  'text-primary bg-primary/20',
   friend_request_accepted: 'text-green-500 bg-green-500/15',
   event_invitation: 'text-primary bg-primary/20',
+  warning:         '',
   other:           'text-primary bg-primary/20',
 };
 
@@ -68,8 +83,14 @@ function isFriendKind(kind: NotificationKind): boolean {
   return kind === 'friend_request' || kind === 'friend_request_accepted';
 }
 
+/** A warning that still waits for acknowledgement: it cannot be selected or deleted. */
+function isWaitingWarning(n: UINotification): boolean {
+  return n.kind === 'warning' && !n.warningAcknowledged && !n.warningWithdrawn;
+}
+
 function normalizeKind(type: string): NotificationKind {
   const t = type.toLowerCase().trim();
+  if (t === 'warning') return 'warning';
   if (t === 'friend_request_accepted') return 'friend_request_accepted';
   if (t === 'event_invitation') return 'event_invitation';
   if (t.startsWith('friend_request')) return 'friend_request';
@@ -84,15 +105,25 @@ function normalizeKind(type: string): NotificationKind {
 }
 
 function fromApi(n: ApiNotification): UINotification {
-  return {
+  const kind = normalizeKind(n.type);
+  const base: UINotification = {
     id: n.id,
-    kind: normalizeKind(n.type),
+    kind,
     message: n.message || 'Event update',
     relatedEventId: n.related_event_id ?? null,
     relatedUserId: n.related_user_id ?? null,
     eventTitle: n.event_title ?? '',
     createdAt: n.created_at ?? null,
     read: Boolean(n.read),
+  };
+  if (kind !== 'warning') return base;
+  return {
+    ...base,
+    // The administrator's reason; never replaced by a generic text.
+    message: n.message ?? '',
+    warningId: n.warning_id ?? null,
+    warningAcknowledged: Boolean(n.warning_acknowledged),
+    warningWithdrawn: Boolean(n.warning_withdrawn),
   };
 }
 
@@ -268,7 +299,9 @@ export default function NotificationsPage() {
   const remindersCount = feedItems.filter((n) => n.kind === 'reminder').length;
   const friendsCount = feedItems.filter((n) => isFriendKind(n.kind)).length;
   const selectedCount = selectedIds.size;
-  const allSelected = filteredItems.length > 0 && selectedCount === filteredItems.length;
+  // Waiting warnings have no checkbox, so "Select All" never picks them.
+  const selectableItems = filteredItems.filter((n) => !isWaitingWarning(n));
+  const allSelected = selectableItems.length > 0 && selectedCount === selectableItems.length;
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -280,7 +313,39 @@ export default function NotificationsPage() {
   };
 
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(filteredItems.map((n) => n.id)));
+    setSelectedIds(allSelected ? new Set() : new Set(selectableItems.map((n) => n.id)));
+  };
+
+  // Warning cards open the warning dialog; opening alone never marks them read.
+  const [openWarning, setOpenWarning] = useState<UINotification | null>(null);
+  const [ackSubmitting, setAckSubmitting] = useState(false);
+  const [ackError, setAckError] = useState<string | null>(null);
+
+  const onOpenWarning = (n: UINotification) => {
+    setAckError(null);
+    setOpenWarning(n);
+  };
+
+  const onAcknowledgeWarning = async () => {
+    const n = openWarning;
+    if (!n || ackSubmitting) return;
+    const token = getAuthToken();
+    if (!token || !n.warningId) {
+      setAckError(ACK_ERROR);
+      return;
+    }
+    setAckSubmitting(true);
+    setAckError(null);
+    try {
+      await acknowledgeWarning(token, n.warningId);
+      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, warningAcknowledged: true, read: true } : x)));
+      setOpenWarning(null);
+      invalidateNotifications();
+    } catch {
+      setAckError(ACK_ERROR);
+    } finally {
+      setAckSubmitting(false);
+    }
   };
 
   const onDeleteSelected = async () => {
@@ -399,7 +464,90 @@ export default function NotificationsPage() {
     }
   };
 
+  // Amber warning card (mockup .nt.n-warn), on top of the normal card layout.
+  const renderWarningCard = (n: UINotification, i: number) => {
+    const waiting = isWaitingWarning(n);
+    const isDeleting = deletingIds.has(n.id);
+    const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onOpenWarning(n);
+      }
+    };
+    return (
+      <motion.div
+        key={n.id}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: i * 0.02 }}
+        role="button"
+        tabIndex={0}
+        aria-label="Warning from an administrator: tap to read"
+        data-testid="warning-card"
+        className="flex items-center gap-3.5 rounded-2xl glass-card p-4 transition-all shadow-sm cursor-pointer hover:!border-[hsl(38_92%_52%_/_.9)] outline-none focus-visible:ring-2 focus-visible:ring-[hsl(38_92%_52%)]"
+        style={{
+          border: '1px solid hsl(38 92% 52% / .6)',
+          background: 'linear-gradient(145deg, hsl(38 55% 20% / .7), hsl(213 50% 14%))',
+          boxShadow: `inset 4px 0 0 ${WARN}, 0 0 0 3px hsl(38 92% 52% / .08)`,
+        }}
+        onClick={() => onOpenWarning(n)}
+        onKeyDown={onKeyDown}
+      >
+        {!waiting && (
+          <input
+            type="checkbox"
+            checked={selectedIds.has(n.id)}
+            onChange={() => toggleSelected(n.id)}
+            onClick={(event) => event.stopPropagation()}
+            className="h-4 w-4 shrink-0 accent-primary cursor-pointer rounded"
+            aria-label="Select notification"
+          />
+        )}
+        <div className="shrink-0 rounded-xl p-2.5 shadow-xs" style={{ background: 'hsl(38 92% 52% / .2)' }}>
+          <AlertTriangle className="h-4 w-4" style={{ color: WARN_TEXT }} aria-hidden="true" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            {!n.read && (
+              <span className="h-2 w-2 rounded-full animate-pulse shrink-0" style={{ background: WARN }} data-testid="unread-dot" />
+            )}
+            <span className="font-bold uppercase" style={{ fontSize: 10, letterSpacing: '.06em', color: WARN_TEXT }}>
+              Warning
+            </span>
+          </div>
+          <p className="font-semibold text-foreground mt-0.5" style={{ fontSize: 13.5 }}>
+            Warning from an administrator
+          </p>
+          {/* Plain text only: React escapes the reason. */}
+          <p className="line-clamp-2 break-words mt-0.5" style={{ fontSize: 13, color: 'hsl(213 20% 82%)' }}>
+            {n.message}
+          </p>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="font-semibold" style={{ fontSize: 12, color: WARN_TEXT }}>Tap to read ›</span>
+            <span className="text-[10px] text-muted-foreground">· {relativeTime(n.createdAt)}</span>
+          </div>
+        </div>
+        {!waiting && (
+          <div className="shrink-0 flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={(e) => void onDelete(n.id, e)}
+              className="rounded-xl p-2 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
+              aria-label="Delete notification"
+              title="Delete notification"
+            >
+              {isDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        )}
+      </motion.div>
+    );
+  };
+
   const renderCard = (n: UINotification, i: number) => {
+    if (n.kind === 'warning') return renderWarningCard(n, i);
     const Icon = iconMap[n.kind];
     const isDeleting = deletingIds.has(n.id);
     return (
@@ -664,6 +812,15 @@ export default function NotificationsPage() {
       )}
 
       <BottomNav />
+
+      <WarningDialog
+        warning={openWarning ? { id: openWarning.warningId ?? openWarning.id, reason: openWarning.message } : null}
+        mode={openWarning && isWaitingWarning(openWarning) ? 'acknowledge' : 'review'}
+        submitting={ackSubmitting}
+        error={ackError}
+        onAcknowledge={() => void onAcknowledgeWarning()}
+        onClose={() => setOpenWarning(null)}
+      />
     </div>
   );
 }

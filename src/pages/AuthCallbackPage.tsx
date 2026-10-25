@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { setAuthToken } from '@/lib/auth';
+import { setAuthToken, clearAuthToken } from '@/lib/auth';
+import { readSuspension, type SuspensionNotice } from '@/lib/suspension';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
@@ -25,6 +26,24 @@ function normalizeNextPath(raw: string | null): string {
     return path + url.search;
   } catch {
     return fallback;
+  }
+}
+
+/**
+ * Google sign-in never calls /api/auth/login, so a suspension is checked here.
+ * Returns the notice only for a 403 with the suspended code; anything else
+ * (success, other errors, network failure) returns null so sign-in continues.
+ */
+async function fetchSuspension(accessToken: string): Promise<SuspensionNotice | null> {
+  try {
+    const res = await fetch(getApiUrl('/api/auth/me'), {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+    if (res.status !== 403) return null;
+    const body = await res.json().catch(() => null);
+    return readSuspension((body as { detail?: unknown } | null)?.detail);
+  } catch {
+    return null;
   }
 }
 
@@ -81,6 +100,13 @@ export default function AuthCallbackPage() {
       }
 
       setAuthToken(session.access_token);
+
+      const suspension = await fetchSuspension(session.access_token);
+      if (suspension) {
+        clearAuthToken();
+        navigate('/login', { replace: true, state: { suspension } });
+        return;
+      }
 
       // Scenario F: Google sign-in never calls /api/auth/login,
       // so an administrator's status is checked separately here.
