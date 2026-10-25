@@ -288,6 +288,56 @@ describe('UserProfilePage', () => {
     expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
   });
 
+  it('lets an administrator see a suspended profile that the public API hides', async () => {
+    setCurrentUserFromOAuth({
+      id: 'viewer-1',
+      email: 'v@test.com',
+      name: 'Viewer',
+      username: 'viewer',
+      role: 'administrator',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(`/api/profile/${OTHER_ID}`)) {
+          return {
+            ok: false,
+            status: 404,
+            json: async () => ({ detail: { code: 'profile_unavailable' } }),
+          } as Response;
+        }
+        if (url.includes(`/api/admin/users/${OTHER_ID}`)) {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              id: OTHER_ID,
+              username: 'jane_doe',
+              full_name: 'Jane Doe',
+              is_admin: false,
+              role: 'user',
+              created_at: '2026-01-01T00:00:00Z',
+              status: 'suspended',
+              suspension: { reason: 'Spam', suspended_at: '2026-01-01T00:00:00Z', suspended_by: 'ada' },
+              organized_events: { upcoming: [], past: [], cancelled: [] },
+              joined_events: { upcoming: [], past: [], cancelled: [] },
+              warnings: [],
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
+    expect(screen.getByTestId('account-status-badge')).toHaveTextContent('Suspended');
+    expect(screen.getByText(/Reason: Spam/)).toBeInTheDocument();
+    expect(screen.queryByText('This profile is unavailable')).not.toBeInTheDocument();
+  });
+
   it('shows only the parts the backend returns, with no empty sections', async () => {
     // Friends-only profile seen by someone who is not a friend: only the top of the profile.
     mockBackend(

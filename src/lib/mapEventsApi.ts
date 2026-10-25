@@ -8,14 +8,23 @@
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { parseEventsApiList } from '@/lib/mapApiEvent';
-import { cachedFetch, TTL } from '@/lib/queryCache';
+import { cachedFetch, peekCache, TTL } from '@/lib/queryCache';
+
+export function mapEventsCacheKey(params: URLSearchParams): string {
+  const token = getAuthToken();
+  const scope = (token ?? '').slice(-16);
+  return `/api/events?${params.toString()}#${scope}`;
+}
+
+export function peekMapEvents(params: URLSearchParams): Record<string, unknown>[] | null {
+  return peekCache<Record<string, unknown>[]>(mapEventsCacheKey(params));
+}
 
 export function fetchMapEvents(params: URLSearchParams, signal?: AbortSignal): Promise<Record<string, unknown>[]> {
   const token = getAuthToken();
-  const scope = (token ?? '').slice(-16);
   const query = params.toString();
   return cachedFetch(
-    `/api/events?${query}#${scope}`,
+    mapEventsCacheKey(params),
     async () => {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (token) headers.Authorization = `Bearer ${token}`;
@@ -24,5 +33,6 @@ export function fetchMapEvents(params: URLSearchParams, signal?: AbortSignal): P
       return parseEventsApiList(await res.json());
     },
     TTL.MEDIUM,
+    true,
   );
 }

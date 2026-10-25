@@ -10,6 +10,29 @@ export function isAdministratorRole(role: unknown): boolean {
   return normalized === 'administrator' || normalized === 'admin';
 }
 
+/** Backend may send `is_suspended`, `status: "suspended"`, or an open `suspension` object. */
+export function isSuspendedAccount(user: {
+  is_suspended?: boolean | null;
+  status?: string | null;
+  account_status?: string | null;
+  suspension?: { lifted_at?: string | null } | null;
+}): boolean {
+  if (user.is_suspended === true) return true;
+  const status = String(user.status ?? user.account_status ?? '').trim().toLowerCase();
+  if (status === 'suspended') return true;
+  return Boolean(user.suspension && !user.suspension.lifted_at);
+}
+
+function eventBuckets(
+  value: AdminUserDetails['organized_events'] | undefined,
+): AdminUserDetails['organized_events'] {
+  return {
+    upcoming: Array.isArray(value?.upcoming) ? value.upcoming : [],
+    past: Array.isArray(value?.past) ? value.past : [],
+    cancelled: Array.isArray(value?.cancelled) ? value.cancelled : [],
+  };
+}
+
 export interface AdminCountsResponse {
   total_users: number;
   events?: {
@@ -30,6 +53,10 @@ export interface AdminUserSummary {
   icon_id?: string | null;
   role: string;
   created_at: string;
+  status?: string | null;
+  is_suspended?: boolean;
+  warnings_count?: number;
+  is_pro?: boolean;
 }
 
 export interface AdminUsersResponse {
@@ -154,6 +181,8 @@ export interface AdminUserSuspension {
 
 export interface AdminUserDetailsFull extends AdminUserDetails {
   email?: string | null;
+  status?: string | null;
+  account_status?: string | null;
   is_suspended: boolean;
   suspension?: AdminUserSuspension | null;
   warnings: AdminUserWarning[];
@@ -216,6 +245,7 @@ export interface AdminAuditEntry {
   target_id?: string | null;
   target_type?: string | null;
   details?: string | null;
+  reason?: string | null;
   created_at: string;
 }
 
@@ -396,7 +426,14 @@ export async function fetchAdminUsers(
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminUsersResponse>(res);
+  const body = await handleAdminResponse<AdminUsersResponse>(res);
+  return {
+    ...body,
+    items: (body.items ?? []).map((item) => ({
+      ...item,
+      is_suspended: isSuspendedAccount(item),
+    })),
+  };
 }
 
 /**
@@ -411,7 +448,13 @@ export async function fetchAdminUserDetails(userId: string): Promise<AdminUserDe
     cache: 'no-store',
   });
   const data = await handleAdminResponse<AdminUserDetailsFull>(res);
-  return { ...data, warnings: Array.isArray(data.warnings) ? data.warnings : [] };
+  return {
+    ...data,
+    is_suspended: isSuspendedAccount(data),
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    organized_events: eventBuckets(data.organized_events),
+    joined_events: eventBuckets(data.joined_events),
+  };
 }
 
 /**
@@ -501,9 +544,13 @@ export async function suspendUser(userId: string, reason: string): Promise<Admin
 }
 
 /**
- * Lifts a suspension from a user account.
+ * Lifts a suspension from a user account. A reason is required for the audit log.
  */
-export async function liftSuspension(userId: string): Promise<AdminActionResponse> {
+export async function liftSuspension(userId: string, reason: string): Promise<AdminActionResponse> {
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    throw new Error('A reason is required to lift a suspension.');
+  }
   const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_LIFT(userId));
   const res = await fetch(url, {
     method: 'POST',
@@ -511,6 +558,7 @@ export async function liftSuspension(userId: string): Promise<AdminActionRespons
       ...getAdminHeaders(),
       'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ reason: trimmed }),
     cache: 'no-store',
   });
   return handleAdminResponse<AdminActionResponse>(res);
@@ -605,13 +653,18 @@ export async function fetchAdminAudit(
     cache: 'no-store',
   });
   const body = await handleAdminResponse<AdminAuditResponse & { entries?: AdminAuditEntry[]; data?: AdminAuditEntry[] }>(res);
-  const items = Array.isArray(body.items)
+  const rawItems = Array.isArray(body.items)
     ? body.items
     : Array.isArray(body.entries)
       ? body.entries
       : Array.isArray(body.data)
         ? body.data
         : [];
+  const items = rawItems.map((entry) => {
+    const reason = typeof entry.reason === 'string' && entry.reason.trim() ? entry.reason.trim() : null;
+    const details = typeof entry.details === 'string' && entry.details.trim() ? entry.details.trim() : null;
+    return { ...entry, reason, details };
+  });
   return {
     items,
     total: Number(body.total ?? items.length),

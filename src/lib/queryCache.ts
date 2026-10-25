@@ -183,7 +183,7 @@ export function setCacheEntry<T>(
 export function peekCache<T>(key: string): T | null {
   const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
   if (memEntry) return memEntry.data;
-  const sessEntry = PERSISTENT_KEYS.has(key) ? readFromSession<T>(key) : null;
+  const sessEntry = readFromSession<T>(key);
   return sessEntry?.data ?? null;
 }
 

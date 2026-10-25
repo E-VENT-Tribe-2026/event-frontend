@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchMapEvents } from '@/lib/mapEventsApi';
+import { fetchMapEvents, peekMapEvents } from '@/lib/mapEventsApi';
 import { clearAuthToken, setAuthToken } from '@/lib/auth';
 import { clearCache, invalidatePrefix } from '@/lib/queryCache';
 
@@ -26,6 +26,12 @@ describe('fetchMapEvents (map events through the client-side cache)', () => {
     mockFetch();
     const rows = await fetchMapEvents(params());
     expect(rows).toEqual([{ id: 'e1', title: 'Football', friends_attending_count: 1 }]);
+  });
+
+  it('can show the last list immediately from the cache', async () => {
+    mockFetch();
+    await fetchMapEvents(params());
+    expect(peekMapEvents(params())?.[0]).toMatchObject({ id: 'e1' });
   });
 
   it('serves a second call from the cache without asking the server again', async () => {

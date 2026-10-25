@@ -196,7 +196,7 @@ export function useParticipantCount(eventId: string | undefined) {
     queryKey: QK.participants(eventId ?? ''),
     queryFn: () => apiFetch<{ count: number }>(`/api/participants/${eventId}/participants/count`),
     enabled: Boolean(eventId),
-    staleTime: 30 * 1000,
+    staleTime: 2 * 60 * 1000,
   });
 }
 

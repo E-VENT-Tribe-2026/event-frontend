@@ -115,6 +115,13 @@ function ActionPill({ action }: { action: string }) {
   );
 }
 
+function auditNote(entry: AdminAuditEntry): string | null {
+  const reason = entry.reason?.trim();
+  if (reason) return reason;
+  const details = entry.details?.trim();
+  return details || null;
+}
+
 function formatDate(isoString: string): string {
   try {
     const d = new Date(isoString);
@@ -314,12 +321,13 @@ export default function AdminAuditTab({
                         {formatDate(entry.created_at)}
                       </span>
                     </div>
-                    {entry.details && (
+                    {auditNote(entry) && (
                       <p
                         className="text-[11px] truncate"
+                        data-testid="audit-reason"
                         style={{ color: 'var(--adm-muted-fg)', opacity: 0.8 }}
                       >
-                        {entry.details}
+                        {auditNote(entry)}
                       </p>
                     )}
                   </div>
@@ -353,6 +361,15 @@ export default function AdminAuditTab({
                       {formatDate(entry.created_at)}
                     </p>
                   </div>
+                  {auditNote(entry) && (
+                    <p
+                      className="hidden sm:block mt-1.5 text-[11px]"
+                      data-testid="audit-reason"
+                      style={{ color: 'var(--adm-muted-fg)', opacity: 0.85 }}
+                    >
+                      {auditNote(entry)}
+                    </p>
+                  )}
                 </li>
               );
             })}

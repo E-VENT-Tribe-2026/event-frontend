@@ -52,6 +52,9 @@ export type UserProfile = {
   /** True when the viewer has blocked this user. */
   blocked_by_me?: boolean;
   friendship?: Friendship | null;
+  /** Present when an administrator is viewing a suspended account. */
+  is_suspended?: boolean;
+  suspension?: { reason?: string | null } | null;
 };
 
 export const PROFILE_UNAVAILABLE_MESSAGE = 'This profile is unavailable';

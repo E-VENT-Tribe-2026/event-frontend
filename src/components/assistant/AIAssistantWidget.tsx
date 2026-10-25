@@ -67,6 +67,10 @@ const PUBLIC_PATHS = [
   '/admin-verify',
 ];
 
+function isHiddenAssistantRoute(pathname: string): boolean {
+  return PUBLIC_PATHS.includes(pathname) || pathname === '/admin' || pathname.startsWith('/admin/');
+}
+
 export const AIAssistantWidget: React.FC = () => {
   const location = useLocation();
   const token = getAuthToken();
@@ -135,9 +139,8 @@ export const AIAssistantWidget: React.FC = () => {
     adjustTextareaHeight();
   }, [input, adjustTextareaHeight]);
 
-  // Hide widget completely on public/unauthenticated routes or if no token
-  const isPublicRoute = PUBLIC_PATHS.includes(location.pathname);
-  if (!token || isPublicRoute) {
+  // Hide on public routes, the admin panel, or when there is no session.
+  if (!token || isHiddenAssistantRoute(location.pathname)) {
     return null;
   }
 

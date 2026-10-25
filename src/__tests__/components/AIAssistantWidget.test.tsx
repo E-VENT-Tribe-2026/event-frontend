@@ -34,6 +34,24 @@ describe('AIAssistantWidget — Ticket #196', () => {
     expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
   });
 
+  it('does not render on the administrator panel', () => {
+    render(
+      <MemoryRouter initialEntries={['/admin']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
+  });
+
+  it('does not render on nested administrator pages', () => {
+    render(
+      <MemoryRouter initialEntries={['/admin/events/e1']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
+  });
+
   it('renders FAB on authenticated routes when user has a token', () => {
     render(
       <MemoryRouter initialEntries={['/home']}>

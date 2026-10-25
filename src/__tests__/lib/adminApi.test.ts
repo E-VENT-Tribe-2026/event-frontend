@@ -9,6 +9,8 @@ import {
   grantAdminRole,
   warnUser,
   withdrawWarning,
+  liftSuspension,
+  isSuspendedAccount,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 import * as storageModule from '@/lib/storage';
@@ -176,6 +178,7 @@ describe('adminApi service', () => {
 
     const data = await fetchAdminUserDetails('u1');
     expect(data.full_name).toBe('Alice Wonder');
+    expect(data.is_suspended).toBe(false);
     expect(data.organized_events.upcoming).toHaveLength(1);
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -252,5 +255,72 @@ describe('adminApi service', () => {
     const data = await fetchAdminAudit(1, 20);
     expect(data.items).toHaveLength(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/audit-log?page=1&limit=20');
+  });
+
+  it('treats status "suspended" as a suspended account', () => {
+    expect(isSuspendedAccount({ status: 'suspended' })).toBe(true);
+    expect(isSuspendedAccount({ is_suspended: true })).toBe(true);
+    expect(isSuspendedAccount({ status: 'active' })).toBe(false);
+  });
+
+  it('maps status "suspended" on admin user details', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 'u9',
+        username: 'paused',
+        full_name: 'Paused User',
+        role: 'user',
+        created_at: '2026-01-01T00:00:00Z',
+        status: 'suspended',
+        suspension: { reason: 'Spam', suspended_at: '2026-01-02T00:00:00Z', suspended_by: 'ada' },
+      }),
+    );
+
+    const data = await fetchAdminUserDetails('u9');
+    expect(data.is_suspended).toBe(true);
+    expect(data.warnings).toEqual([]);
+    expect(data.organized_events.upcoming).toEqual([]);
+  });
+
+  it('posts a lift-suspension reason to /api/admin/users/{id}/lift-suspension', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Suspension lifted.' }));
+
+    const res = await liftSuspension('u1', 'Appeal accepted');
+    expect(res.message).toBe('Suspension lifted.');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/users/u1/lift-suspension');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reason: 'Appeal accepted' });
+  });
+
+  it('refuses to lift a suspension without a reason', async () => {
+    await expect(liftSuspension('u1', '   ')).rejects.toThrow('A reason is required to lift a suspension.');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the lift reason on audit-log entries', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a2',
+            action: 'lift_suspension',
+            admin_id: 'ada',
+            admin_name: 'Ada',
+            target_id: 'u1',
+            target_type: 'user',
+            reason: 'Appeal accepted',
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        total_pages: 1,
+      }),
+    );
+
+    const data = await fetchAdminAudit(1, 20);
+    expect(data.items[0].action).toBe('lift_suspension');
+    expect(data.items[0].reason).toBe('Appeal accepted');
   });
 });

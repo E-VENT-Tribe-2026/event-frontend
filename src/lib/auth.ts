@@ -1,3 +1,4 @@
+import { clearAuthUserCache } from './authProfile';
 import { clearSessionUserSnapshot } from './storage';
 
 const AUTH_TOKEN_KEY = 'event_auth_token';
@@ -15,6 +16,7 @@ let authToken: string | null =
   typeof window !== 'undefined' ? window.sessionStorage.getItem(AUTH_TOKEN_KEY) : null;
 
 export function setAuthToken(token: string | null) {
+  clearAuthUserCache();
   authToken = token;
   if (typeof window !== 'undefined') {
     if (token) {
@@ -31,6 +33,7 @@ export function getAuthToken(): string | null {
 }
 
 export function clearAuthToken() {
+  clearAuthUserCache();
   authToken = null;
   if (typeof window !== 'undefined') {
     window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
@@ -43,7 +46,7 @@ export function clearAuthToken() {
     .catch(() => {});
 }
 
-/** Fired by any API layer that receives a 401. App.tsx listens and logs the user out. */
+/** Fired by any API layer that receives a 401. SessionGuard listens and logs the user out. */
 export const AUTH_EXPIRED_EVENT = 'eventapp:auth-expired';
 
 export function notifyAuthExpired() {

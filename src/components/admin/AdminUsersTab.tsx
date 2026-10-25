@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UserAvatar } from '@/components/UserAvatar';
-import { fetchAdminUsers, type AdminUserSummary } from '@/lib/adminApi';
+import { fetchAdminUsers, isSuspendedAccount, type AdminUserSummary } from '@/lib/adminApi';
 
 type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings' | 'pro';
 
@@ -47,7 +47,7 @@ const FILTER_ICONS: Partial<Record<FilterChip, typeof Shield>> = {
 };
 
 const isAdminUser = (u: UserRow) => (u.role ?? '').toLowerCase().includes('admin');
-const isSuspendedUser = (u: UserRow) => Boolean(u.is_suspended);
+const isSuspendedUser = (u: UserRow) => isSuspendedAccount(u);
 const hasWarnings = (u: UserRow) => (u.warnings_count ?? 0) > 0;
 const isProUser = (u: UserRow) => Boolean(u.is_pro);
 
