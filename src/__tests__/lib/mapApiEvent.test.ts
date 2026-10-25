@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import { mapApiEventToItem, parseJoinedEventsApiList } from '@/lib/mapApiEvent';
 import { isEventUpcoming, localDateTimeParts } from '@/lib/eventTime';
 
 const harryPotterNight = {
@@ -65,5 +65,13 @@ describe('mapApiEventToItem', () => {
     });
     expect(item.organizerFullName).toBe('Alex');
     expect(item.organizerUsername).toBe('alex');
+  });
+});
+
+describe('parseJoinedEventsApiList', () => {
+  it('reads events nested as events, event, or wrapped in data', () => {
+    expect(parseJoinedEventsApiList([{ events: harryPotterNight }]).map((e) => e.id)).toEqual([harryPotterNight.id]);
+    expect(parseJoinedEventsApiList({ data: [{ event: harryPotterNight }] }).map((e) => e.id)).toEqual([harryPotterNight.id]);
+    expect(parseJoinedEventsApiList([harryPotterNight]).map((e) => e.id)).toEqual([harryPotterNight.id]);
   });
 });

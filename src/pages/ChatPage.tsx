@@ -3,7 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentUser } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
-import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import { mapApiEventToItem, parseEventsApiList, parseJoinedEventsApiList } from '@/lib/mapApiEvent';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
 import { cachedFetch, invalidate, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
@@ -128,9 +128,8 @@ export default function ChatPage() {
   if (activeChat && !liveEventIds.includes(activeChat)) liveEventIds.push(activeChat);
   useChatLiveChannels(liveEventIds);
 
-  if (!user) return <Navigate to="/login" replace />;
-
-  const resolveMeId = () => authUserId || user.id;
+  const signedInUserId = user?.id ?? '';
+  const resolveMeId = () => authUserId || signedInUserId;
 
   const mapMessageRow = useCallback(
     (row: Record<string, unknown>): ChatMessage | null => {
@@ -164,7 +163,7 @@ export default function ChatPage() {
         /\b(joined|left|was (added|removed|kicked)|has (joined|left)|added .+ to the chat|removed .+ from|is now (an admin|a member)|chat history|created (this|the) (group|chat)|changed the (subject|icon|description))\b/i.test(text);
       const meId = resolveMeId();
       const isMe = !isSystem && Boolean(senderId) &&
-        (sameAuthUserId(senderId, meId) || sameAuthUserId(senderId, user.id));
+        (sameAuthUserId(senderId, meId) || sameAuthUserId(senderId, signedInUserId));
 
       const profiles = row.profiles as Record<string, unknown> | undefined;
       const senderObj = row.sender as Record<string, unknown> | undefined;
@@ -193,7 +192,7 @@ export default function ChatPage() {
         optionIndex: parsed?.optionIndex,
       };
     },
-    [authUserId, user.id],
+    [authUserId, signedInUserId],
   );
 
   const mapMessageRowRef = useRef(mapMessageRow);
@@ -212,7 +211,7 @@ export default function ChatPage() {
   chatsRef.current = chats;
 
   const loadChatList = useCallback(async (silent = false) => {
-    if (!token) { if (!silent) setChatListLoading(false); return; }
+    if (!token || !signedInUserId) { if (!silent) setChatListLoading(false); return; }
     if (!silent && chatsRef.current.length === 0) setChatListLoading(true);
     const listFetch = abortAfter(CHAT_FETCH_TIMEOUT_MS);
     try {
@@ -220,7 +219,7 @@ export default function ChatPage() {
       // and a failed request throws so it is never stored.
       const [joinedBody, organizedBody] = await Promise.all([
         cachedFetch(
-          `/api/participants/my/events:chat:${user.id}`,
+          `/api/participants/my/events:chat:${signedInUserId}`,
           async () => {
             const res = await fetch(getApiUrl('/api/participants/my/events'), {
               headers: { Authorization: `Bearer ${token}` },
@@ -232,7 +231,7 @@ export default function ChatPage() {
           TTL.SHORT,
         ).catch(() => []),
         cachedFetch(
-          `/api/events/my-events:chat:${user.id}`,
+          `/api/events/my-events:chat:${signedInUserId}`,
           async () => {
             const res = await fetch(getApiUrl('/api/events/my-events'), {
               headers: { Authorization: `Bearer ${token}` },
@@ -244,19 +243,8 @@ export default function ChatPage() {
           TTL.SHORT,
         ).catch(() => ({})),
       ]);
-      const joinedRows = Array.isArray(joinedBody)
-        ? joinedBody
-        : Array.isArray(joinedBody?.data)
-          ? joinedBody.data
-          : [];
-      const organizedRows = Array.isArray(organizedBody?.data)
-        ? organizedBody.data
-        : Array.isArray(organizedBody)
-          ? organizedBody
-          : [];
-      const joinedEvents = joinedRows
-        .map((row: Record<string, unknown>) => (row?.events || row) as Record<string, unknown>)
-        .filter((row) => row && (row.id || row.title));
+      const joinedEvents = parseJoinedEventsApiList(joinedBody);
+      const organizedRows = parseEventsApiList(organizedBody);
       const allEvents = [...joinedEvents, ...organizedRows];
 
       const byId = new Map<string, ChatEvent>();
@@ -272,7 +260,7 @@ export default function ChatPage() {
             avatar: evt.image,
             lastMsg: 'Open conversation',
             time: evt.time || '',
-            unread: isChatUnread(user.id, evt.id) ? 1 : 0,
+            unread: isChatUnread(signedInUserId, evt.id) ? 1 : 0,
             isPast: !isEventUpcoming(evt),
             isCancelled,
             eventDate: evt.date || '',
@@ -313,7 +301,7 @@ export default function ChatPage() {
                 avatar: singleItem.image,
                 lastMsg: 'Open conversation',
                 time: singleItem.time || '',
-                unread: isChatUnread(user.id, singleItem.id) ? 1 : 0,
+                unread: isChatUnread(signedInUserId, singleItem.id) ? 1 : 0,
                 isPast: !isEventUpcoming(singleItem),
                 isCancelled: isCanc,
                 eventDate: singleItem.date || '',
@@ -338,7 +326,7 @@ export default function ChatPage() {
       listFetch.cancel();
       if (!silent) setChatListLoading(false);
     }
-  }, [token, user.id, selectedEventFromUrl, handledSelectedParam, navigate]);
+  }, [token, signedInUserId, selectedEventFromUrl, handledSelectedParam, navigate]);
 
   loadChatListRef.current = loadChatList;
   useEffect(() => { void loadChatList(); }, [loadChatList]);
@@ -352,10 +340,10 @@ export default function ChatPage() {
       const requestId = ++messagesRequestRef.current;
       const stillOpen = () => activeChatRef.current === eventId;
       const isCurrent = () => requestId === messagesRequestRef.current && stillOpen();
-      const cacheKey = chatMessagesCacheKey(eventId, user.id);
+      const cacheKey = chatMessagesCacheKey(eventId, signedInUserId);
       const showRows = (rows: Record<string, unknown>[]) => {
         const next = rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[];
-        if (next.length) rememberSeen(user.id, eventId, next[next.length - 1].id);
+        if (next.length) rememberSeen(signedInUserId, eventId, next[next.length - 1].id);
         setMessages((prev) => {
           const merged = mergeLiveMessages(next, prev);
           return sameVisibleMessages(prev, merged) ? prev : merged;
@@ -422,7 +410,7 @@ export default function ChatPage() {
         }
       }
     },
-    [token, user.id],
+    [token, signedInUserId],
   );
   loadMessagesRef.current = loadMessages;
 
@@ -464,9 +452,9 @@ export default function ChatPage() {
         if (mapped) {
           const live = { ...mapped, liveUntil: chatLiveHoldUntil() };
           setMessages((prev) => (prev.some((m) => m.id === live.id || sameLiveMessage(m, live)) ? prev : [...prev, live]));
-          invalidate(chatMessagesCacheKey(openId, user.id));
+          invalidate(chatMessagesCacheKey(openId, signedInUserId));
         } else {
-          invalidate(chatMessagesCacheKey(openId, user.id));
+          invalidate(chatMessagesCacheKey(openId, signedInUserId));
           void loadMessagesRef.current(openId, true);
         }
       }
@@ -474,13 +462,13 @@ export default function ChatPage() {
       // Do not require `activeChat` â€” going back to the list used to drop every later tag.
       if (eventId && !matchesOpen) {
         const sender = row?.sender_id ?? row?.user_id;
-        noteIncomingChatMessage(user.id, eventId, sender == null ? null : String(sender));
+        noteIncomingChatMessage(signedInUserId, eventId, sender == null ? null : String(sender));
       }
       void loadChatListRef.current(true);
     };
     window.addEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
     return () => window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
-  }, [user.id]);
+  }, [signedInUserId]);
 
   useEffect(() => {
     if (!token) return;
@@ -508,7 +496,7 @@ export default function ChatPage() {
               const body = await res.json().catch(() => null);
               const latest = latestMessageMeta(normalizeMessageList(body));
               if (latest) {
-                noteNewerChatMessage(user.id, chat.id, latest.createdAt, latest.senderId, latest.messageId);
+                noteNewerChatMessage(signedInUserId, chat.id, latest.createdAt, latest.senderId, latest.messageId);
               }
             } catch {
               /* ignore a single chat peek */
@@ -531,13 +519,13 @@ export default function ChatPage() {
       window.clearTimeout(timeout);
       window.clearInterval(interval);
     };
-  }, [token, user.id]);
+  }, [token, signedInUserId]);
 
   const closeActiveChat = () => {
     const openId = activeChatRef.current;
     if (openId) {
       const lastId = messages.length ? messages[messages.length - 1].id : null;
-      markChatRead(user.id, openId, lastId);
+      markChatRead(signedInUserId, openId, lastId);
     }
     setViewingChatId(null);
     setActiveChat(null);
@@ -547,9 +535,9 @@ export default function ChatPage() {
     setViewingChatId(activeChat);
     if (!activeChat) return;
     const lastId = messages.length ? messages[messages.length - 1].id : null;
-    markChatRead(user.id, activeChat, lastId);
+    markChatRead(signedInUserId, activeChat, lastId);
     setChats((prev) => prev.map((c) => (c.id === activeChat ? { ...c, unread: 0 } : c)));
-  }, [activeChat, messages, user.id]);
+  }, [activeChat, messages, signedInUserId]);
 
   useEffect(() => {
     return () => setViewingChatId(null);
@@ -560,13 +548,13 @@ export default function ChatPage() {
       setChats((prev) =>
         prev.map((c) => ({
           ...c,
-          unread: activeChat === c.id ? 0 : isChatUnread(user.id, c.id) ? 1 : 0,
+          unread: activeChat === c.id ? 0 : isChatUnread(signedInUserId, c.id) ? 1 : 0,
         })),
       );
     };
     window.addEventListener(CHAT_UNREAD_CHANGED_EVENT, syncUnread);
     return () => window.removeEventListener(CHAT_UNREAD_CHANGED_EVENT, syncUnread);
-  }, [activeChat, user.id]);
+  }, [activeChat, signedInUserId]);
 
   const sendMessage = async (explicitContent?: string) => {
     const chat = activeChatObj;
@@ -629,7 +617,7 @@ export default function ChatPage() {
           );
           publishLiveChatMessage(eventId, serverRow);
         }
-        invalidate(chatMessagesCacheKey(eventId, user.id));
+        invalidate(chatMessagesCacheKey(eventId, signedInUserId));
       } catch {
         /* keep the optimistic row; the next poll will reconcile */
       }
@@ -641,6 +629,8 @@ export default function ChatPage() {
       setSending(false);
     }
   };
+
+  if (!user) return <Navigate to="/login" replace />;
 
   if (activeChat && activeChatObj) {
     return (
@@ -665,6 +655,7 @@ export default function ChatPage() {
         onSearchChange={setSearch}
         toast={toast}
         onCloseToast={() => setToast((prev) => ({ ...prev, show: false }))}
+        onToast={(message, type) => setToast({ show: true, message, type })}
         onBack={closeActiveChat}
         onSend={(content) => void sendMessage(content)}
         onOpenProfile={(path) => navigate(path)}
@@ -685,7 +676,7 @@ export default function ChatPage() {
       search={search}
       onSearchChange={setSearch}
       loading={chatListLoading}
-      userId={user.id}
+      userId={signedInUserId}
       onOpenChat={(chatId) => {
         setMessages([]);
         setActiveChat(chatId);

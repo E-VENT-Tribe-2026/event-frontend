@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HOME_LOCATION_EVENT, mapStartView, readHomeLocation } from '@/lib/accountSettings';
 import { getCurrentUser, getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
+import { hasSignedInSession } from '@/lib/signedIn';
 import BottomNav from '@/components/BottomNav';
 import TopBar from '@/components/TopBar';
 import { LocateFixed, RefreshCw } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
@@ -394,6 +395,8 @@ export default function MapPage() {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     );
   };
+
+  if (!hasSignedInSession()) return <Navigate to="/login" replace />;
 
   return (
     <div className="min-h-screen bg-background pb-20 relative">

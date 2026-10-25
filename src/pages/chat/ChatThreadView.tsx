@@ -1,5 +1,6 @@
-import { type RefObject } from 'react';
-import { AlertTriangle, ArrowLeft, ListChecks, MapPinned, Send, Smile } from 'lucide-react';
+import { type RefObject, useState } from 'react';
+import { AlertTriangle, ArrowLeft, Flag, ListChecks, MapPinned, Send, Smile } from 'lucide-react';
+import ReportContentDialog from '@/components/ReportContentDialog';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
@@ -7,7 +8,7 @@ import EventPollCard from '@/components/EventPollCard';
 import { UserAvatar } from '@/components/UserAvatar';
 import { encodeChatPayload } from '@/lib/chatPayload';
 import { userProfilePath } from '@/lib/friendsApi';
-import { formatDateSeparator, isNearBottom, type ChatEvent, type ChatMessage } from '@/pages/chat/chatModel';
+import { formatDateSeparator, isLocalChatMessage, isNearBottom, type ChatEvent, type ChatMessage } from '@/pages/chat/chatModel';
 
 type ChatThreadViewProps = {
   chat: ChatEvent;
@@ -30,6 +31,7 @@ type ChatThreadViewProps = {
   onSearchChange: (value: string) => void;
   toast: { show: boolean; message: string; type: 'error' | 'success' };
   onCloseToast: () => void;
+  onToast?: (message: string, type: 'success' | 'error') => void;
   onBack: () => void;
   onSend: (content?: string) => void;
   onOpenProfile: (path: string) => void;
@@ -59,6 +61,7 @@ export default function ChatThreadView({
   onPollOptionsChange,
   toast,
   onCloseToast,
+  onToast,
   onBack,
   onSend,
   onOpenProfile,
@@ -70,6 +73,8 @@ export default function ChatThreadView({
 }: ChatThreadViewProps) {
   const isReadOnly = Boolean(chat.isPast || chat.isCancelled);
   const emojis = ['😀', '😂', '❤️', '👍', '🎉', '🔥', '🙌', '😊'];
+  const [report, setReport] = useState<{ type: 'event' | 'message'; id: string } | null>(null);
+  const canReportEvent = Boolean(user.id) && user.id !== chat.organizerId;
 
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-background">
@@ -103,6 +108,16 @@ export default function ChatThreadView({
                 )}
               </p>
             </div>
+            {canReportEvent && (
+              <button
+                type="button"
+                aria-label="Report event"
+                onClick={() => setReport({ type: 'event', id: chat.id })}
+                className="rounded-full p-2 text-muted-foreground hover:bg-secondary/80 hover:text-destructive"
+              >
+                <Flag className="h-4 w-4" />
+              </button>
+            )}
           </div>
       </header>
 
@@ -185,6 +200,16 @@ export default function ChatThreadView({
                           <span className="text-[11px] font-semibold text-foreground">
                             {m.senderName || 'Unknown'}
                           </span>
+                          {!isLocalChatMessage(m.id) && (
+                            <button
+                              type="button"
+                              aria-label="Report message"
+                              onClick={() => setReport({ type: 'message', id: m.id })}
+                              className="rounded-full p-0.5 text-muted-foreground hover:bg-secondary/80 hover:text-destructive"
+                            >
+                              <Flag className="h-3 w-3" />
+                            </button>
+                          )}
                         </div>
                       )}
                       <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
@@ -350,6 +375,24 @@ export default function ChatThreadView({
       </div>
 
       <BottomNav />
+
+      {report && (
+        <ReportContentDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setReport(null);
+          }}
+          targetType={report.type}
+          targetId={report.id}
+          origin="event_chat"
+          title={report.type === 'event' ? 'Report this event' : 'Report this message'}
+          onSuccess={(message) => {
+            setReport(null);
+            onToast?.(message, 'success');
+          }}
+          onError={(message) => onToast?.(message, 'error')}
+        />
+      )}
     </div>
   );
 }

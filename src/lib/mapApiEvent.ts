@@ -108,15 +108,52 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function looksLikeEvent(row: Record<string, unknown>): boolean {
+  return Boolean(row.id || row.title || row.start_datetime);
+}
+
+/** Unwrap a GET /api/participants/my/events row (`events`, `event`, or the event itself). */
+export function nestedEventFromParticipantRow(row: unknown): Record<string, unknown> | null {
+  const rec = asRecord(row);
+  if (!rec) return null;
+  for (const key of ['events', 'event', 'item']) {
+    const nested = asRecord(rec[key]);
+    if (nested && looksLikeEvent(nested)) return nested;
+  }
+  return looksLikeEvent(rec) ? rec : null;
+}
+
 /** Normalize list from GET /api/events (wrapped or raw array). */
 export function parseEventsApiList(body: unknown): Record<string, unknown>[] {
-  if (!body || typeof body !== 'object') return [];
-  const b = body as Record<string, unknown>;
-  if (Array.isArray(b.data)) return b.data as Record<string, unknown>[];
-  if (Array.isArray(b.events)) return b.events as Record<string, unknown>[];
-  if (Array.isArray(b.items)) return b.items as Record<string, unknown>[];
   if (Array.isArray(body)) return body as Record<string, unknown>[];
+  const b = asRecord(body);
+  if (!b) return [];
+  for (const key of ['data', 'events', 'items', 'results', 'participants']) {
+    if (Array.isArray(b[key])) return b[key] as Record<string, unknown>[];
+  }
   return [];
+}
+
+/** Normalize GET /api/participants/my/events into event records. */
+export function parseJoinedEventsApiList(body: unknown): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const row of parseEventsApiList(body)) {
+    const event = nestedEventFromParticipantRow(row);
+    if (!event) continue;
+    const id = String(event.id || '').trim();
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    out.push(event);
+  }
+  return out;
 }
 
 export function apiRowCreatedBy(row: Record<string, unknown>): string {

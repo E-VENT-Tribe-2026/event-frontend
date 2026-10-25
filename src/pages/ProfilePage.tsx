@@ -20,7 +20,7 @@ import AppToast from '@/components/AppToast';
 import { getAuthToken, clearAuthToken, notifyAuthExpired } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import { mapApiEventToItem, parseJoinedEventsApiList } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -346,8 +346,7 @@ export default function ProfilePage() {
 
         if (cancelled) return;
 
-        const joinedRows = Array.isArray(joinedBody?.data) ? joinedBody.data : Array.isArray(joinedBody) ? joinedBody : [];
-        const mappedJoined = joinedRows.map((row: any) => mapApiEventToItem(row.events || row)).filter(Boolean);
+        const mappedJoined = parseJoinedEventsApiList(joinedBody).map(mapApiEventToItem);
         setRemoteJoinedEvents(mappedJoined);
 
         const createdRows = Array.isArray(createdBody?.data) ? createdBody.data : Array.isArray(createdBody) ? createdBody : [];

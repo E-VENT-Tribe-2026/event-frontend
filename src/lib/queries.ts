@@ -10,7 +10,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient } from './queryClient';
 import { getApiUrl } from './api';
 import { getAuthToken, notifyAuthExpired } from './auth';
-import { mapApiEventToItem, parseEventsApiList } from './mapApiEvent';
+import { mapApiEventToItem, parseEventsApiList, parseJoinedEventsApiList } from './mapApiEvent';
 import { fetchNotifications, notifyNotificationsChanged, type ApiNotification } from './notificationsApi';
 import { invalidatePrefix } from './queryCache';
 import { notifyEventsChanged } from './realtimeEvents';
@@ -206,11 +206,8 @@ export function useJoinedEvents(userId: string | undefined) {
   return useQuery({
     queryKey: QK.joinedEvents(userId ?? ''),
     queryFn: async () => {
-      const rows = await apiFetch<Array<{ events?: unknown }>>('/api/participants/my/events');
-      return rows
-        .map((row) => row?.events as Record<string, unknown>)
-        .filter(Boolean)
-        .map(mapApiEventToItem) as EventItem[];
+      const rows = await apiFetch<unknown>('/api/participants/my/events');
+      return parseJoinedEventsApiList(rows).map(mapApiEventToItem) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken()),
     staleTime: 2 * 60 * 1000,

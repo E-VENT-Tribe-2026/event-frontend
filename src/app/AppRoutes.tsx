@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AdminGuard from '@/components/AdminGuard';
+import RequireAuth from '@/components/RequireAuth';
 import RequireUsername from '@/components/RequireUsername';
 import RouteFallback from '@/app/RouteFallback';
 import AdminVerifyPage from '@/pages/AdminVerifyPage';
@@ -31,7 +32,11 @@ const TicketPage = lazy(() => import('@/pages/TicketPage'));
 const UserProfilePage = lazy(() => import('@/pages/UserProfilePage'));
 
 function SignedIn({ children }: { children: ReactNode }) {
-  return <RequireUsername>{children}</RequireUsername>;
+  return (
+    <RequireAuth>
+      <RequireUsername>{children}</RequireUsername>
+    </RequireAuth>
+  );
 }
 
 function AdminOnly({ children }: { children: ReactNode }) {

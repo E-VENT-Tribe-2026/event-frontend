@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Ban, Check, Search, Sparkles, UserMinus, UserPlus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { getCurrentUser } from '@/lib/storage';
+import { hasSignedInSession } from '@/lib/signedIn';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { invalidateNotifications } from '@/lib/queries';
 import {
@@ -455,6 +456,8 @@ export default function FriendsPage() {
   };
 
   const hasActiveSearch = query.trim().length > 0;
+
+  if (!hasSignedInSession()) return <Navigate to="/login" replace />;
 
   return (
     <div className="min-h-screen bg-background pb-24">

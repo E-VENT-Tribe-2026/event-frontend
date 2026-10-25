@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   checkAdminVerified,
   fetchAdminAudit,
+  matchesAuditFilters,
+  auditActionFilterKey,
+  localDateFromIso,
   fetchAdminCounts,
   fetchAdminUsers,
   fetchAdminUserDetails,
@@ -257,6 +260,26 @@ describe('adminApi service', () => {
     expect(data.items).toHaveLength(1);
     expect(data.items[0].admin_name).toBe('Ada');
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/audit-log?limit=20');
+  });
+
+  it('matches audit filters by administrator, action, and local date', () => {
+    const noon = new Date(2026, 9, 25, 12, 0, 0).toISOString();
+    const entry = {
+      id: 'a1',
+      action: 'lift_suspension',
+      admin_id: 'ada',
+      admin_name: 'Ada Lovelace',
+      admin_username: 'ada.admin',
+      created_at: noon,
+    };
+    expect(auditActionFilterKey('lift_suspension')).toBe('lift-suspension');
+    expect(localDateFromIso(noon)).toBe('2026-10-25');
+    expect(matchesAuditFilters(entry, { admin: 'ada.admin' })).toBe(true);
+    expect(matchesAuditFilters(entry, { admin: 'bob' })).toBe(false);
+    expect(matchesAuditFilters(entry, { action: 'lift-suspension' })).toBe(true);
+    expect(matchesAuditFilters(entry, { action: 'warn' })).toBe(false);
+    expect(matchesAuditFilters(entry, { date: '2026-10-25' })).toBe(true);
+    expect(matchesAuditFilters(entry, { date: '2026-10-24' })).toBe(false);
   });
 
   it('maps nested administrator onto admin_name', async () => {

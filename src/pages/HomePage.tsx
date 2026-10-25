@@ -3,11 +3,12 @@ import { getCurrentUser, getEvents as getLocalEvents, type EventItem, updateUser
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { SlidersHorizontal } from 'lucide-react';
 import CategoryPills from '@/components/CategoryPills';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
+import { hasSignedInSession } from '@/lib/signedIn';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
 import { EVENTS_CHANGED_EVENT } from '@/lib/realtimeEvents';
@@ -365,6 +366,8 @@ export default function HomePage() {
     setBudgetMin(0);
     setBudgetMax(maxPrice);
   };
+
+  if (!hasSignedInSession()) return <Navigate to="/login" replace />;
 
   return (
     <div className="min-h-screen bg-background pb-20 relative">

@@ -55,12 +55,12 @@ export function addCheckin(eventId: string, record: Omit<CheckinRecord, 'at'> & 
   return saved;
 }
 
-/** Check-in is offered from 3h before start until 12h after start. */
+/** Check-in is offered from 2h before start until 12h after start. */
 export function isCheckinWindow(startMs: number, now = Date.now()): boolean {
   if (!Number.isFinite(startMs)) return false;
-  const threeHours = 3 * 60 * 60 * 1000;
+  const twoHours = 2 * 60 * 60 * 1000;
   const twelveHours = 12 * 60 * 60 * 1000;
-  return now >= startMs - threeHours && now <= startMs + twelveHours;
+  return now >= startMs - twoHours && now <= startMs + twelveHours;
 }
 
 export function parseTicketQr(raw: string): { name?: string; event?: string; ticketId?: string } | null {
@@ -76,4 +76,29 @@ export function parseTicketQr(raw: string): { name?: string; event?: string; tic
   } catch {
     return { ticketId: text };
   }
+}
+
+/** The event QR payload is the six-digit code; scanners may wrap it in JSON or a URL. */
+export function extractCheckinCode(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return null;
+  const six = text.match(/\b(\d{6})\b/);
+  if (/^\d{6}$/.test(text)) return text;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const fromJson = parsed.code ?? parsed.check_in_code ?? parsed.qr_content;
+    if (typeof fromJson === 'string' && /^\d{6}$/.test(fromJson.trim())) return fromJson.trim();
+  } catch {
+    /* not JSON */
+  }
+  try {
+    const url = new URL(text);
+    for (const key of ['code', 'check_in_code', 'c']) {
+      const value = url.searchParams.get(key);
+      if (value && /^\d{6}$/.test(value.trim())) return value.trim();
+    }
+  } catch {
+    /* not a URL */
+  }
+  return six ? six[1] : null;
 }

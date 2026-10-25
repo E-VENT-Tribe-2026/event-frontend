@@ -89,6 +89,18 @@ function mockBackend(
       }
       return json(200, { ...profile, blocked_by_me: false });
     }
+    if (method === 'POST' && url.endsWith('/api/reports')) {
+      return json(201, {
+        id: 3,
+        status: 'open',
+        target_type: 'user',
+        target_id: OTHER_ID,
+        reason: 'spam',
+        origin: 'profile',
+        created_at: '2026-10-25T00:00:00Z',
+        message: 'Thanks. We received your report.',
+      });
+    }
     if (method === 'POST' && url.endsWith('/api/blocks')) {
       blocked = true;
       friendship = { status: 'none', request_id: null };
@@ -475,6 +487,27 @@ describe('UserProfilePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
 
     expect(await screen.findByText('You have reached the limit of friend requests for today.')).toBeInTheDocument();
+  });
+
+  it('reports the user from their profile', async () => {
+    const calls = mockBackend({ status: 'none', request_id: null });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^report$/i }));
+    expect(await screen.findByText('Report Jane Doe')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Thanks. We received your report.')).toBeInTheDocument();
+    });
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/reports'));
+    expect(JSON.parse(post!.body!)).toEqual({
+      target_type: 'user',
+      target_id: OTHER_ID,
+      reason: 'spam',
+      origin: 'profile',
+      description: null,
+    });
   });
 
   it('opens the own profile tab instead when the id is the viewer\'s own', async () => {

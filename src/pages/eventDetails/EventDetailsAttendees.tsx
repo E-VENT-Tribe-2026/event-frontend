@@ -1,8 +1,8 @@
+import { useState } from 'react';
 import { MapPinned, UserMinus, UserPlus, Users } from 'lucide-react';
 import FriendsAttendingSection from '@/components/FriendsAttendingSection';
 import InviteFriendsDialog from '@/components/InviteFriendsDialog';
 import { UserAvatar } from '@/components/UserAvatar';
-import { isCheckedIn } from '@/lib/checkin';
 import type { ParticipantRow } from '@/lib/eventAttendeesApi';
 import { formatUserIdentity } from '@/lib/userIdentity';
 import type { AttendeeRow } from '@/pages/eventDetails/eventDetailsModel';
@@ -23,9 +23,8 @@ type EventDetailsAttendeesProps = {
   isEventOwner: boolean;
   isCancelledEvent: boolean;
   isPastEvent: boolean;
-  checkinBusy: boolean;
+  checkedInUserIds?: Set<string>;
   removingParticipantId: string | null;
-  onCheckin: (userId: string, name: string) => void;
   onRemove: (userId: string) => void;
 };
 
@@ -45,11 +44,18 @@ export default function EventDetailsAttendees({
   isEventOwner,
   isCancelledEvent,
   isPastEvent,
-  checkinBusy,
+  checkedInUserIds,
   removingParticipantId,
-  onCheckin,
   onRemove,
 }: EventDetailsAttendeesProps) {
+  const [showAllAttendees, setShowAllAttendees] = useState(false);
+  const attendeePreviewLimit = 5;
+  const visibleAttendeeRows =
+    showAllAttendees || fullAttendeeRows.length <= attendeePreviewLimit
+      ? fullAttendeeRows
+      : fullAttendeeRows.slice(0, attendeePreviewLimit);
+  const hiddenAttendeeCount = Math.max(0, fullAttendeeRows.length - attendeePreviewLimit);
+
   return (
     <>
       <div className="rounded-2xl glass-card p-4 space-y-3">
@@ -81,64 +87,70 @@ export default function EventDetailsAttendees({
           ) : fullAttendeeRows.length === 0 ? (
             <p className="text-xs text-muted-foreground">No attendees yet.</p>
           ) : (
-            <ul className="space-y-2">
-              {fullAttendeeRows.map((row) => (
-                <li
-                  key={row.id}
-                  className="flex items-center justify-between gap-2 rounded-xl bg-secondary/40 px-3 py-2.5"
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <UserAvatar
-                      src={row.profilePhoto}
-                      srcSecondary={row.avatar}
-                      seed={row.id}
-                      name={row.name}
-                      email={row.email}
-                      size="sm"
-                      className="shrink-0 border border-border/50"
-                    />
-                    <span className="truncate text-sm font-medium text-foreground">
-                      {formatUserIdentity({ fullName: row.name })}
-                      {row.username && (
-                        <p className="text-sm text-muted-foreground" data-testid="profile-username">@{row.username}</p>
-                      )}
-                    </span>
-                    {row.isFriend && (
-                      <span
-                        data-testid="friend-label"
-                        className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"
-                      >
-                        Friend
+            <div className="space-y-2">
+              <ul className="space-y-2">
+                {visibleAttendeeRows.map((row) => (
+                  <li
+                    key={row.id}
+                    className="flex items-center justify-between gap-2 rounded-xl bg-secondary/40 px-3 py-2.5"
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <UserAvatar
+                        src={row.profilePhoto}
+                        srcSecondary={row.avatar}
+                        seed={row.id}
+                        name={row.name}
+                        email={row.email}
+                        size="sm"
+                        className="shrink-0 border border-border/50"
+                      />
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {formatUserIdentity({ fullName: row.name })}
+                        {row.username && (
+                          <p className="text-sm text-muted-foreground" data-testid="profile-username">@{row.username}</p>
+                        )}
                       </span>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {isEventOwner && !isCancelledEvent && (
-                      <button
-                        type="button"
-                        disabled={checkinBusy || isCheckedIn(eventId, row.id)}
-                        onClick={() => void onCheckin(row.id, row.name)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-primary/35 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <MapPinned className="h-3 w-3" />
-                        {isCheckedIn(eventId, row.id) ? 'Here' : 'Mark here'}
-                      </button>
-                    )}
-                    {isEventOwner && currentUserId && String(row.id) !== String(currentUserId) && !isPastEvent && !isCancelledEvent && (
-                      <button
-                        type="button"
-                        disabled={removingParticipantId === row.id}
-                        onClick={() => void onRemove(row.id)}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-destructive/35 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <UserMinus className="h-3 w-3" />
-                        {removingParticipantId === row.id ? '…' : 'Remove'}
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
+                      {row.isFriend && (
+                        <span
+                          data-testid="friend-label"
+                          className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"
+                        >
+                          Friend
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {checkedInUserIds?.has(row.id) && (
+                        <span className="inline-flex items-center gap-1 rounded-lg border border-primary/35 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary">
+                          <MapPinned className="h-3 w-3" />
+                          Here
+                        </span>
+                      )}
+                      {isEventOwner && currentUserId && String(row.id) !== String(currentUserId) && !isPastEvent && !isCancelledEvent && (
+                        <button
+                          type="button"
+                          disabled={removingParticipantId === row.id}
+                          onClick={() => void onRemove(row.id)}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-destructive/35 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <UserMinus className="h-3 w-3" />
+                          {removingParticipantId === row.id ? '…' : 'Remove'}
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {hiddenAttendeeCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllAttendees((open) => !open)}
+                  className="w-full rounded-xl py-2 text-xs font-semibold text-primary hover:bg-primary/10"
+                >
+                  {showAllAttendees ? 'See less' : 'See more'}
+                </button>
+              )}
+            </div>
           )
         ) : attendingFriends.length > 0 ? (
           <FriendsAttendingSection

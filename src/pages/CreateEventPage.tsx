@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Type, Calendar, MapPin, Users, Euro, Clock } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
@@ -16,6 +16,7 @@ import { clampRepeatCount, recurringStartDates, type RepeatFreq } from '@/lib/ev
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
+import { hasSignedInSession } from '@/lib/signedIn';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
@@ -399,6 +400,8 @@ export default function CreateEventPage() {
     } transition-all`;
 
   const isFree = !form.budget.trim() || Number(form.budget) === 0;
+
+  if (!hasSignedInSession()) return <Navigate to="/login" replace />;
 
   return (
     <div className="min-h-screen bg-background pb-24 relative overflow-x-hidden">

@@ -157,6 +157,32 @@ describe('ChatPage', () => {
     expect(await screen.findByText('Login page')).toBeInTheDocument();
   });
 
+  it('lists a joined event when the API nests it under event inside data', async () => {
+    stubFetch((url) => {
+      if (url.includes('/api/participants/my/events')) {
+        return jsonResponse({
+          data: [{
+            event: {
+              id: 'evt-hp',
+              title: 'Harry Potter Movie Night',
+              start_datetime: '2026-12-25T19:30:00+00:00',
+              status: 'active',
+              category: 'Movies',
+              location_name: 'Bremen',
+              created_by: 'org-1',
+            },
+          }],
+        });
+      }
+      if (url.includes('/api/events/my-events')) return jsonResponse({ data: [] });
+      return undefined;
+    });
+
+    renderChat();
+    expect(await screen.findByRole('button', { name: /Harry Potter Movie Night/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Active/i })).toHaveTextContent('1');
+  });
+
   it('shows a New messages tag that disappears after the chat is opened', async () => {
     markChatUnread('u-chat', 'evt-1');
     stubFetch((url) => {
@@ -584,5 +610,66 @@ describe('ChatPage', () => {
         options: ['Pizza', 'Tacos'],
       });
     });
+  });
+
+  it('reports another user\'s message from event chat', async () => {
+    const fetchMock = stubFetch((url, init) => {
+      const list = listRoutes(url, [joinedEvent('evt-1', 'DJ Luna')]);
+      if (list) return list;
+      if (url.includes('/api/chats/evt-1/messages')) {
+        return jsonResponse({
+          data: [
+            {
+              id: 42,
+              sender_id: 'other-user',
+              content: 'Welcome!',
+              created_at: '2030-05-01T12:00:00.000Z',
+              message_type: 'user',
+            },
+          ],
+          page: 1,
+          limit: 100,
+        });
+      }
+      if (url.includes('/api/reports') && init?.method === 'POST') {
+        return jsonResponse(
+          {
+            id: 9,
+            status: 'open',
+            target_type: 'message',
+            target_id: '42',
+            reason: 'harassment_or_hate',
+            origin: 'event_chat',
+            created_at: '2026-10-25T20:00:00Z',
+            message: 'Report received.',
+          },
+          201,
+        );
+      }
+      return undefined;
+    });
+
+    renderChat();
+    await openChat(/DJ Luna/i);
+
+    fireEvent.click(await screen.findByRole('button', { name: /report message/i }));
+    expect(await screen.findByText('Report this message')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Harassment or hate' }));
+    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Report received.')).toBeInTheDocument();
+    });
+    const post = fetchMock.mock.calls.find(([input, init]) =>
+      String(input).includes('/api/reports') && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(post![1]!.body))).toEqual({
+      target_type: 'message',
+      target_id: '42',
+      reason: 'harassment_or_hate',
+      origin: 'event_chat',
+      description: null,
+    });
+    expect(screen.getByRole('button', { name: /report event/i })).toBeInTheDocument();
   });
 });

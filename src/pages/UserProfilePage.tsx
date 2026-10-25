@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import { ArrowLeft, Ban, Calendar, Clock, Flag, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import ReportContentDialog from '@/components/ReportContentDialog';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
@@ -140,6 +141,7 @@ export default function UserProfilePage() {
   const [eventTab, setEventTab] = useState<EventTab>('upcoming');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [confirmBlock, setConfirmBlock] = useState<BlockAction | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Friends of the viewed user beyond the first page, which comes with the profile.
   const [moreFriends, setMoreFriends] = useState<UserSummary[]>([]);
@@ -362,6 +364,14 @@ export default function UserProfilePage() {
           <button type="button" onClick={() => setConfirmBlock('unblock')} disabled={busy} className={outline}>
             <Ban className="h-3.5 w-3.5" /> Unblock
           </button>
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            disabled={busy}
+            className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
+          >
+            <Flag className="h-3.5 w-3.5" /> Report
+          </button>
         </div>
       );
     }
@@ -375,6 +385,14 @@ export default function UserProfilePage() {
           className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
         >
           <Ban className="h-3.5 w-3.5" /> Block
+        </button>
+        <button
+          type="button"
+          onClick={() => setReportOpen(true)}
+          disabled={busy}
+          className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
+        >
+          <Flag className="h-3.5 w-3.5" /> Report
         </button>
       </div>
     );
@@ -628,6 +646,19 @@ export default function UserProfilePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {profile && (
+        <ReportContentDialog
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+          targetType="user"
+          targetId={profile.id}
+          origin="profile"
+          title={`Report ${displayName}`}
+          onSuccess={(message) => setToast({ show: true, message, type: 'success' })}
+          onError={(message) => setToast({ show: true, message, type: 'error' })}
+        />
+      )}
 
       <BottomNav />
     </div>

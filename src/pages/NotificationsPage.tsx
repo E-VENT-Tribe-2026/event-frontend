@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import {
   NOTIFICATION_PREFS_EVENT,
   notificationAllowed,
@@ -8,6 +8,7 @@ import {
 } from '@/lib/accountSettings';
 import { getCurrentUser, getNotifications, saveNotifications, type Notification } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
+import { hasSignedInSession } from '@/lib/signedIn';
 import { supabase } from '@/lib/supabase';
 import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
 import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck, AlertTriangle, MessageCircle } from 'lucide-react';
@@ -655,6 +656,8 @@ export default function NotificationsPage() {
       </motion.div>
     );
   };
+
+  if (!hasSignedInSession()) return <Navigate to="/login" replace />;
 
   return (
     <div className="min-h-screen bg-background pb-24">

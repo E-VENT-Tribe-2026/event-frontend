@@ -1,4 +1,4 @@
-﻿import { useParams, useNavigate, useLocation } from 'react-router-dom';
+﻿import { Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getEvents, getCurrentUser, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, cancelEvent, type EventItem } from '@/lib/storage';
 import { motion } from 'framer-motion';
 import { useState, useMemo, useEffect, useCallback } from 'react';
@@ -6,6 +6,7 @@ import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
 import { supabase } from '@/lib/supabase';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
+import { hasSignedInSession } from '@/lib/signedIn';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
@@ -20,7 +21,13 @@ import { fetchFriendsAttending, fetchParticipantCount, fetchParticipantList, typ
 import type { EventInvitationSummary } from '@/lib/invitationsApi';
 import { fetchAllFriends, friendsGoingToEvent } from '@/lib/eventSocial';
 import { type UserSummary } from '@/lib/friendsApi';
-import { addCheckin, CHECKINS_CHANGED_EVENT, listCheckins, type CheckinRecord } from '@/lib/checkin';
+import {
+  CheckinApiError,
+  fetchEventCheckinCode,
+  fetchEventCheckins,
+  submitEventCheckin,
+  type EventCheckinSummary,
+} from '@/lib/checkinsApi';
 import { postEventChatMessage } from '@/lib/chatPayload';
 import EventDetailsActions from '@/pages/eventDetails/EventDetailsActions';
 import EventDetailsAttendees from '@/pages/eventDetails/EventDetailsAttendees';
@@ -67,9 +74,9 @@ export default function EventDetailsPage() {
   const [invitation, setInvitation] = useState<EventInvitationSummary | null>(null);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [friendSummaries, setFriendSummaries] = useState<UserSummary[]>([]);
-  const [checkins, setCheckins] = useState<CheckinRecord[]>([]);
+  const [checkinSummary, setCheckinSummary] = useState<EventCheckinSummary | null>(null);
   const [checkinBusy, setCheckinBusy] = useState(false);
-  const [ticketScan, setTicketScan] = useState('');
+  const [checkinError, setCheckinError] = useState('');
   const user = getCurrentUser();
   const allUsers = getUsers();
 
@@ -339,21 +346,6 @@ export default function EventDetailsPage() {
     return () => { cancelled = true; };
   }, [user?.id]);
 
-  useEffect(() => {
-    if (!id) {
-      setCheckins([]);
-      return;
-    }
-    const refresh = () => setCheckins(listCheckins(id));
-    refresh();
-    const onChange = (event: Event) => {
-      const eventId = (event as CustomEvent<{ eventId?: string }>).detail?.eventId;
-      if (!eventId || eventId === id) refresh();
-    };
-    window.addEventListener(CHECKINS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(CHECKINS_CHANGED_EVENT, onChange);
-  }, [id]);
-
   const attendeeDisplayCount =
     useApiParticipation && attendeeCount !== null ? attendeeCount : participantIds.length;
 
@@ -381,6 +373,48 @@ export default function EventDetailsPage() {
     String(apiEventStatus || '').toLowerCase() === 'cancelled' ||
     String(apiEventStatus || '').toLowerCase() === 'canceled';
   const canAccessEventChat = Boolean(user && (isEventOwner || hasJoined));
+
+  const loadCheckin = useCallback(async (eventId: string, asOrganizer: boolean) => {
+    const empty: EventCheckinSummary = {
+      checked_in_count: 0,
+      participant_count: 0,
+      viewer_checked_in: false,
+      include_times: asOrganizer,
+      checkins: [],
+    };
+    try {
+      const list = (await fetchEventCheckins(eventId)) ?? empty;
+      if (!asOrganizer) {
+        setCheckinSummary(list);
+        return;
+      }
+      const door = await fetchEventCheckinCode(eventId);
+      setCheckinSummary({
+        ...list,
+        code: door?.code ?? null,
+        qr_content: door?.qr_content ?? door?.code ?? null,
+      });
+    } catch {
+      setCheckinSummary(empty);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!id || !user || isCancelledEvent) {
+      setCheckinSummary(null);
+      return;
+    }
+    if (!isEventOwner && !hasJoined) {
+      setCheckinSummary(null);
+      return;
+    }
+    void loadCheckin(id, isEventOwner);
+  }, [id, user, isCancelledEvent, isEventOwner, hasJoined, loadCheckin]);
+
+  const checkedInUserIds = useMemo(
+    () => new Set((checkinSummary?.checkins ?? []).map((c) => c.user_id)),
+    [checkinSummary],
+  );
 
   const existingRequest = user && event ? getJoinRequests().find(r => r.eventId === event.id && r.userId === user.id) : null;
 
@@ -439,12 +473,6 @@ export default function EventDetailsPage() {
       .filter(Boolean) as AttendeeRow[];
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
-  const recordCheckin = useCallback(async (userId: string, name: string, ticketId?: string) => {
-    if (!event) return;
-    addCheckin(event.id, { userId, name, ticketId });
-    await postEventChatMessage(event.id, { v: 1, type: 'checkin', text: `${name} is here` });
-  }, [event]);
-
   useEffect(() => {
     setBalloonFinished(false);
   }, [id]);
@@ -460,6 +488,10 @@ export default function EventDetailsPage() {
     }
     document.title = formatPageTitle(ev.title);
   }, [loadingApi, localEvent, routeEvent, apiEvent]);
+
+  if (!hasSignedInSession()) {
+    return <Navigate to="/login" replace />;
+  }
 
   if (!localEvent && !balloonFinished) {
     return <EventDetailsBalloonLoader ready={!loadingApi} onBurstDone={finishBalloon} />;
@@ -791,35 +823,53 @@ export default function EventDetailsPage() {
           isEventOwner={isEventOwner}
           isCancelledEvent={isCancelledEvent}
           isPastEvent={isPastEvent}
-          checkinBusy={checkinBusy}
+          checkedInUserIds={checkedInUserIds}
           removingParticipantId={removingParticipantId}
-          onCheckin={(userId, name) => void recordCheckin(userId, name)}
           onRemove={(userId) => void handleRemoveAttendee(userId)}
         />
 
         {!isCancelledEvent && user && (isEventOwner || hasJoined) && (
           <EventDetailsCheckin
-            eventId={event.id}
             eventStartMs={eventStartMs(event)}
             currentUserId={user.id}
-            currentUserName={user.name || 'You'}
             isEventOwner={isEventOwner}
             hasJoined={hasJoined}
-            checkins={checkins}
+            summary={
+              checkinSummary ?? {
+                checked_in_count: 0,
+                participant_count: attendeeDisplayCount,
+                viewer_checked_in: false,
+                include_times: isEventOwner,
+                checkins: [],
+              }
+            }
             checkinBusy={checkinBusy}
-            ticketScan={ticketScan}
-            onTicketScanChange={setTicketScan}
-            onSelfCheckin={async () => {
+            error={checkinError}
+            onSubmitCode={async (value, via) => {
               setCheckinBusy(true);
-              await recordCheckin(user.id, user.name || 'You');
-              setCheckinBusy(false);
-              setToast({ show: true, message: "You're here. Enjoy the event!", type: 'success' });
-            }}
-            onTicketCheckin={async (userId, name, ticketId) => {
-              setCheckinBusy(true);
-              await recordCheckin(userId, name, ticketId);
-              setTicketScan('');
-              setCheckinBusy(false);
+              setCheckinError('');
+              try {
+                const result = await submitEventCheckin(event.id, value, via);
+                await loadCheckin(event.id, isEventOwner);
+                setToast({
+                  show: true,
+                  message: result.already_checked_in ? 'You are already checked in.' : "You're checked in.",
+                  type: 'success',
+                });
+                if (!result.already_checked_in) {
+                  await postEventChatMessage(event.id, {
+                    v: 1,
+                    type: 'checkin',
+                    text: `${user.name || 'Someone'} is here`,
+                  });
+                }
+              } catch (err) {
+                const message = err instanceof CheckinApiError ? err.message : 'Could not check in.';
+                setCheckinError(message);
+                setToast({ show: true, message, type: 'error' });
+              } finally {
+                setCheckinBusy(false);
+              }
             }}
           />
         )}
@@ -851,6 +901,8 @@ export default function EventDetailsPage() {
           onCancelEvent={() => void handleCancelEvent()}
           onJoin={() => void handleJoinOrRequest()}
           onLeave={() => void handleJoinOrRequest()}
+          eventId={event.id}
+          onReportSuccess={(message) => setToast({ show: true, message, type: 'success' })}
         />
       </motion.div>
 

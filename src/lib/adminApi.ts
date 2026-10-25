@@ -266,6 +266,54 @@ export interface AdminAuditResponse {
   next_before: string | null;
 }
 
+export type AdminAuditFilters = {
+  admin?: string;
+  action?: string;
+  date?: string;
+};
+
+export function localDateFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function normalizeAuditAction(action: string): string {
+  return action.trim().toLowerCase().replace(/_/g, '-');
+}
+
+export function auditActionFilterKey(action: string): string {
+  const n = normalizeAuditAction(action);
+  if (n.includes('dismiss')) return 'dismiss-report';
+  if (n.includes('withdraw')) return 'withdraw-warning';
+  if (n.includes('grant')) return 'grant-admin';
+  if (n.includes('invite')) return 'invite-user';
+  if (n.includes('remove')) return 'remove';
+  if (n.includes('suspend') && !n.includes('lift')) return 'suspend';
+  if (n.includes('lift')) return 'lift-suspension';
+  if (n.includes('warn')) return 'warn';
+  return n;
+}
+
+export function matchesAuditFilters(entry: AdminAuditEntry, filters: AdminAuditFilters): boolean {
+  const adminQ = filters.admin?.trim().toLowerCase().replace(/^@/, '');
+  if (adminQ) {
+    const name = entry.admin_name.toLowerCase();
+    const username = (entry.admin_username ?? '').toLowerCase().replace(/^@/, '');
+    const id = entry.admin_id.toLowerCase();
+    if (!name.includes(adminQ) && !username.includes(adminQ) && id !== adminQ) return false;
+  }
+  if (filters.action) {
+    const wanted = auditActionFilterKey(filters.action);
+    if (auditActionFilterKey(entry.action) !== wanted) return false;
+  }
+  if (filters.date && localDateFromIso(entry.created_at) !== filters.date) return false;
+  return true;
+}
+
 // ---- Reports ----
 
 export interface AdminReportSummary {

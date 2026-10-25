@@ -1,4 +1,6 @@
-import { Ban, LogOut, Pencil, UserPlus } from 'lucide-react';
+import { useState } from 'react';
+import { Ban, Flag, LogOut, Pencil, UserPlus } from 'lucide-react';
+import ReportContentDialog from '@/components/ReportContentDialog';
 
 type EventDetailsActionsProps = {
   signedIn: boolean;
@@ -25,6 +27,8 @@ type EventDetailsActionsProps = {
   onCancelEvent: () => void;
   onJoin: () => void;
   onLeave: () => void;
+  eventId?: string;
+  onReportSuccess?: (message: string) => void;
 };
 
 export default function EventDetailsActions({
@@ -52,7 +56,12 @@ export default function EventDetailsActions({
   onCancelEvent,
   onJoin,
   onLeave,
+  eventId,
+  onReportSuccess,
 }: EventDetailsActionsProps) {
+  const [reportOpen, setReportOpen] = useState(false);
+  const canReport = signedIn && !isEventOwner && Boolean(eventId);
+
   return (
     <>
       <div className="space-y-2">
@@ -175,6 +184,29 @@ export default function EventDetailsActions({
           </button>
         )}
       </div>
+
+      {canReport && (
+        <button
+          type="button"
+          onClick={() => setReportOpen(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 py-3 text-sm font-semibold text-destructive hover:bg-destructive/10"
+        >
+          <Flag className="h-4 w-4" />
+          Report event
+        </button>
+      )}
+
+      {eventId && (
+        <ReportContentDialog
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+          targetType="event"
+          targetId={eventId}
+          origin="event_details"
+          title="Report this event"
+          onSuccess={onReportSuccess}
+        />
+      )}
     </>
   );
 }
