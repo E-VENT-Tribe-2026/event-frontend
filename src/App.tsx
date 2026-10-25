@@ -195,6 +195,7 @@ const App = () => (
             <Route path="/home" element={<RequireUsername><HomePage /></RequireUsername>} />
             <Route path="/event/:id/edit" element={<RequireUsername><EditEventPage /></RequireUsername>} />
             <Route path="/event/:id" element={<RequireUsername><EventDetailsPage /></RequireUsername>} />
+            <Route path="/events/:id" element={<RequireUsername><EventDetailsPage /></RequireUsername>} />
             <Route path="/create" element={<RequireUsername><CreateEventPage /></RequireUsername>} />
             <Route path="/map" element={<RequireUsername><MapPage /></RequireUsername>} />
             <Route path="/profile" element={<RequireUsername><ProfilePage /></RequireUsername>} />

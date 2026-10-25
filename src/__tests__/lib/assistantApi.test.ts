@@ -5,6 +5,7 @@ import {
   getAssistantEventDetails,
   draftAssistantEvent,
   extractCardsFromReply,
+  publishDraftEvent,
   AssistantApiError,
 } from '@/lib/assistantApi';
 import * as authModule from '@/lib/auth';
@@ -82,6 +83,24 @@ Ready to publish?`;
       expect(result.draft?.title).toBe('Weekend Hackathon');
       expect(result.validationIssues).toContain('Start time required');
       expect(result.displayText).toContain('Ready to publish?');
+    });
+
+    it('extracts single event details from responseObj and embedded JSON', () => {
+      const responseObj = {
+        reply: 'Here are details for the event',
+        event: {
+          id: 'evt-detail-1',
+          title: 'Deep Learning Workshop',
+          category: 'Technology',
+          description: 'Hands-on session with PyTorch',
+          created_by: 'Dr. Jane Smith',
+        },
+      };
+
+      const result = extractCardsFromReply(responseObj.reply, responseObj);
+      expect(result.eventDetail).toBeDefined();
+      expect(result.eventDetail?.title).toBe('Deep Learning Workshop');
+      expect(result.eventDetail?.created_by).toBe('Dr. Jane Smith');
     });
   });
 
@@ -231,6 +250,79 @@ Ready to publish?`;
       const res = await getAssistantEventDetails('evt-9');
       expect(res.success).toBe(true);
       expect(res.event.title).toBe('Art Gallery');
+    });
+  });
+
+  describe('publishDraftEvent (Ticket #199)', () => {
+    it('calls POST /api/v1/events/ with JWT auth and returns success with eventId', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 'new-event-777',
+          title: 'AI Dev Meetup',
+        }),
+      });
+      global.fetch = fetchMock;
+
+      const res = await publishDraftEvent({
+        title: 'AI Dev Meetup',
+        category: 'Technology',
+        cost: 0,
+        max_capacity: 50,
+        location_name: 'Tech Hub',
+        start_datetime: '2026-12-01T18:00:00Z',
+        end_datetime: '2026-12-01T20:00:00Z',
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.eventId).toBe('new-event-777');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const [url, opts] = fetchMock.mock.calls[0];
+      expect(url).toContain('/api/v1/events/');
+      expect(opts.method).toBe('POST');
+      expect(opts.headers.Authorization).toBe('Bearer mock-jwt-token');
+
+      const sentBody = JSON.parse(opts.body);
+      expect(sentBody.title).toBe('AI Dev Meetup');
+      expect(sentBody.category).toBe('Technology');
+    });
+
+    it('falls back to /api/events/ if /api/v1/events/ returns 404', async () => {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(async (url: string) => {
+        callCount++;
+        if (callCount === 1) {
+          return { ok: false, status: 404, json: async () => ({}) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: 'fallback-event-888' }),
+        };
+      });
+
+      const res = await publishDraftEvent({
+        title: 'Community Jazz Night',
+        category: 'Music',
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.eventId).toBe('fallback-event-888');
+      expect(callCount).toBe(2);
+    });
+
+    it('throws AssistantApiError if publishing fails with 422 or 500', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: async () => ({ detail: 'Start time cannot be in the past' }),
+      });
+
+      await expect(
+        publishDraftEvent({ title: 'Invalid Event' })
+      ).rejects.toThrow(/Start time cannot be in the past/);
     });
   });
 });
