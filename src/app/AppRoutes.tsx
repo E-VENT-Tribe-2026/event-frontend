@@ -61,6 +61,7 @@ export default function AppRoutes() {
         <Route path="/home" element={<SignedIn><HomePage /></SignedIn>} />
         <Route path="/event/:id/edit" element={<SignedIn><EditEventPage /></SignedIn>} />
         <Route path="/event/:id" element={<SignedIn><EventDetailsPage /></SignedIn>} />
+        <Route path="/events/:id" element={<SignedIn><EventDetailsPage /></SignedIn>} />
         <Route path="/create" element={<SignedIn><CreateEventPage /></SignedIn>} />
         <Route path="/map" element={<SignedIn><MapPage /></SignedIn>} />
         <Route path="/profile" element={<SignedIn><ProfilePage /></SignedIn>} />

@@ -31,6 +31,7 @@ import {
 } from '@/lib/assistantApi';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantEventCard } from './AssistantEventCard';
+import { AssistantEventDetailCard } from './AssistantEventDetailCard';
 import { AssistantDraftCard } from './AssistantDraftCard';
 
 export interface ChatThreadMessage {
@@ -41,6 +42,7 @@ export interface ChatThreadMessage {
   status?: 'sending' | 'sent' | 'error';
   errorMessage?: string;
   events?: AssistantEventItem[];
+  eventDetail?: AssistantEventItem;
   draft?: AssistantDraftEvent;
   validationIssues?: string[];
 }
@@ -232,14 +234,23 @@ export const AIAssistantWidget: React.FC = () => {
     try {
       // If user specifically clicks quick search chip
       if (trimmed.startsWith('🔍 Search upcoming') || trimmed.toLowerCase().startsWith('/search ')) {
-        const query = trimmed.replace(/^🔍\s*Search\s*upcoming\s*/i, '').replace(/^\/search\s*/i, '').trim();
-        const searchRes = await searchAssistantEvents(query || 'music');
+        const rawQuery = trimmed
+          .replace(/^🔍\s*Search\s*upcoming\s*/i, '')
+          .replace(/^\/search\s*/i, '')
+          .trim();
+        const cleanQuery = rawQuery.replace(/\bevents?\b/gi, '').replace(/\bupcoming\b/gi, '').trim();
+        const queryToSearch = cleanQuery || 'music';
+
+        const searchRes = await searchAssistantEvents(queryToSearch);
+        const hasEvents = searchRes.events && searchRes.events.length > 0;
+        const displayTerm = rawQuery || queryToSearch;
+
         const assistantMsg: ChatThreadMessage = {
           id: `asst-${Date.now()}`,
           role: 'assistant',
-          content: searchRes.events?.length
-            ? `Here are the matching events for **"${query || 'music'}"**:`
-            : `No events found matching **"${query || 'music'}"**.`,
+          content: hasEvents
+            ? `Here are the matching events for **"${displayTerm}"**:`
+            : `No events found matching **"${displayTerm}"**.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           events: searchRes.events,
         };
@@ -277,6 +288,7 @@ export const AIAssistantWidget: React.FC = () => {
         content: parsed.displayText || res.reply || '',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         events: parsed.events,
+        eventDetail: parsed.eventDetail,
         draft: parsed.draft,
         validationIssues: parsed.validationIssues,
       };
@@ -618,8 +630,15 @@ export const AIAssistantWidget: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Rich Cards (Event Results) */}
-                      {!isUser && msg.events && msg.events.length > 0 && (
+                      {/* Rich Cards (Single Event Detail View) */}
+                      {!isUser && msg.eventDetail && (
+                        <div className="mt-1 w-full pl-8 max-w-[95%]">
+                          <AssistantEventDetailCard event={msg.eventDetail} />
+                        </div>
+                      )}
+
+                      {/* Rich Cards (Event Results List) */}
+                      {!isUser && !msg.eventDetail && msg.events && msg.events.length > 0 && (
                         <div className="mt-1 space-y-2 w-full pl-8 max-w-[95%]">
                           {msg.events.map((evt) => (
                             <AssistantEventCard key={evt.id} event={evt} />
