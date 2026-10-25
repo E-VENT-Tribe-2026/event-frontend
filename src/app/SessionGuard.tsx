@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AccountRefusalGate from '@/components/AccountRefusalGate';
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import { AUTH_EXPIRED_EVENT, clearAuthToken, getAuthToken } from '@/lib/auth';
 import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
@@ -8,6 +9,7 @@ import { clearAllQueries } from '@/lib/queries';
 import { extendSession, startSessionTimeout, stopSessionTimeout } from '@/lib/sessionTimeout';
 import { logout } from '@/lib/storage';
 import { syncSupabaseSession } from '@/lib/supabase';
+import type { SuspensionNotice } from '@/lib/suspension';
 
 /**
  * App-wide session: load profile once, warn before idle logout, leave on 401.
@@ -66,14 +68,14 @@ export default function SessionGuard({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [showWarning]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback((state?: { suspension: SuspensionNotice }) => {
     stopSessionTimeout();
     logout();
     clearAuthToken();
     clearCache();
     clearAllQueries();
-    navigate('/login', { replace: true });
-  };
+    navigate('/login', state ? { replace: true, state } : { replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     const onExpired = () => {
@@ -89,6 +91,7 @@ export default function SessionGuard({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
+      <AccountRefusalGate onSignOut={handleLogout} />
       <SessionTimeoutModal
         show={showWarning}
         secondsLeft={secondsLeft}
