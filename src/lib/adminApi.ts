@@ -10,6 +10,29 @@ export function isAdministratorRole(role: unknown): boolean {
   return normalized === 'administrator' || normalized === 'admin';
 }
 
+/** Backend may send `is_suspended`, `status: "suspended"`, or an open `suspension` object. */
+export function isSuspendedAccount(user: {
+  is_suspended?: boolean | null;
+  status?: string | null;
+  account_status?: string | null;
+  suspension?: { lifted_at?: string | null } | null;
+}): boolean {
+  if (user.is_suspended === true) return true;
+  const status = String(user.status ?? user.account_status ?? '').trim().toLowerCase();
+  if (status === 'suspended') return true;
+  return Boolean(user.suspension && !user.suspension.lifted_at);
+}
+
+function eventBuckets(
+  value: AdminUserDetails['organized_events'] | undefined,
+): AdminUserDetails['organized_events'] {
+  return {
+    upcoming: Array.isArray(value?.upcoming) ? value.upcoming : [],
+    past: Array.isArray(value?.past) ? value.past : [],
+    cancelled: Array.isArray(value?.cancelled) ? value.cancelled : [],
+  };
+}
+
 export interface AdminCountsResponse {
   total_users: number;
   events?: {
@@ -30,6 +53,10 @@ export interface AdminUserSummary {
   icon_id?: string | null;
   role: string;
   created_at: string;
+  status?: string | null;
+  is_suspended?: boolean;
+  warnings_count?: number;
+  is_pro?: boolean;
 }
 
 export interface AdminUsersResponse {
@@ -154,6 +181,8 @@ export interface AdminUserSuspension {
 
 export interface AdminUserDetailsFull extends AdminUserDetails {
   email?: string | null;
+  status?: string | null;
+  account_status?: string | null;
   is_suspended: boolean;
   suspension?: AdminUserSuspension | null;
   warnings: AdminUserWarning[];
@@ -213,9 +242,17 @@ export interface AdminAuditEntry {
   action: string;
   admin_id: string;
   admin_name: string;
+  admin_username?: string | null;
+  admin_avatar_url?: string | null;
   target_id?: string | null;
   target_type?: string | null;
+  target_name?: string | null;
+  target_username?: string | null;
+  target_avatar_url?: string | null;
+  target_email?: string | null;
+  target_title?: string | null;
   details?: string | null;
+  reason?: string | null;
   created_at: string;
 }
 
@@ -225,6 +262,56 @@ export interface AdminAuditResponse {
   page: number;
   limit: number;
   total_pages: number;
+  has_more: boolean;
+  next_before: string | null;
+}
+
+export type AdminAuditFilters = {
+  admin?: string;
+  action?: string;
+  date?: string;
+};
+
+export function localDateFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function normalizeAuditAction(action: string): string {
+  return action.trim().toLowerCase().replace(/_/g, '-');
+}
+
+export function auditActionFilterKey(action: string): string {
+  const n = normalizeAuditAction(action);
+  if (n.includes('dismiss')) return 'dismiss-report';
+  if (n.includes('withdraw')) return 'withdraw-warning';
+  if (n.includes('grant')) return 'grant-admin';
+  if (n.includes('invite')) return 'invite-user';
+  if (n.includes('remove')) return 'remove';
+  if (n.includes('suspend') && !n.includes('lift')) return 'suspend';
+  if (n.includes('lift')) return 'lift-suspension';
+  if (n.includes('warn')) return 'warn';
+  return n;
+}
+
+export function matchesAuditFilters(entry: AdminAuditEntry, filters: AdminAuditFilters): boolean {
+  const adminQ = filters.admin?.trim().toLowerCase().replace(/^@/, '');
+  if (adminQ) {
+    const name = entry.admin_name.toLowerCase();
+    const username = (entry.admin_username ?? '').toLowerCase().replace(/^@/, '');
+    const id = entry.admin_id.toLowerCase();
+    if (!name.includes(adminQ) && !username.includes(adminQ) && id !== adminQ) return false;
+  }
+  if (filters.action) {
+    const wanted = auditActionFilterKey(filters.action);
+    if (auditActionFilterKey(entry.action) !== wanted) return false;
+  }
+  if (filters.date && localDateFromIso(entry.created_at) !== filters.date) return false;
+  return true;
 }
 
 // ---- Reports ----
@@ -396,7 +483,14 @@ export async function fetchAdminUsers(
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminUsersResponse>(res);
+  const body = await handleAdminResponse<AdminUsersResponse>(res);
+  return {
+    ...body,
+    items: (body.items ?? []).map((item) => ({
+      ...item,
+      is_suspended: isSuspendedAccount(item),
+    })),
+  };
 }
 
 /**
@@ -410,7 +504,14 @@ export async function fetchAdminUserDetails(userId: string): Promise<AdminUserDe
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminUserDetailsFull>(res);
+  const data = await handleAdminResponse<AdminUserDetailsFull>(res);
+  return {
+    ...data,
+    is_suspended: isSuspendedAccount(data),
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    organized_events: eventBuckets(data.organized_events),
+    joined_events: eventBuckets(data.joined_events),
+  };
 }
 
 /**
@@ -430,8 +531,30 @@ export async function grantAdminRole(userId: string): Promise<GrantAdminResponse
   return handleAdminResponse<GrantAdminResponse>(res);
 }
 
+function warningRowsFromBody(body: unknown): AdminUserWarning[] {
+  if (Array.isArray(body)) return body as AdminUserWarning[];
+  if (!body || typeof body !== 'object') return [];
+  const row = body as Record<string, unknown>;
+  const nested = row.warnings ?? row.items ?? row.data;
+  return Array.isArray(nested) ? (nested as AdminUserWarning[]) : [];
+}
+
 /**
- * Issues a warning to a user.
+ * GET /api/admin/users/{user_id}/warnings
+ */
+export async function fetchUserWarnings(userId: string): Promise<AdminUserWarning[]> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WARNINGS(userId));
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<unknown>(res);
+  return warningRowsFromBody(body);
+}
+
+/**
+ * POST /api/admin/users/{user_id}/warnings
  */
 export async function warnUser(userId: string, reason: string): Promise<AdminWarnResponse> {
   const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WARN(userId));
@@ -448,17 +571,13 @@ export async function warnUser(userId: string, reason: string): Promise<AdminWar
 }
 
 /**
- * Withdraws (removes) a previously issued warning from a user.
+ * POST /api/admin/warnings/{warning_id}/withdraw
  */
-export async function withdrawWarning(userId: string, warningId: string): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WITHDRAW_WARNING(userId));
+export async function withdrawWarning(_userId: string, warningId: string): Promise<AdminActionResponse> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_WARNING_WITHDRAW(warningId));
   const res = await fetch(url, {
-    method: 'DELETE',
-    headers: {
-      ...getAdminHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ warning_id: warningId }),
+    method: 'POST',
+    headers: getAdminHeaders(),
     cache: 'no-store',
   });
   return handleAdminResponse<AdminActionResponse>(res);
@@ -482,9 +601,13 @@ export async function suspendUser(userId: string, reason: string): Promise<Admin
 }
 
 /**
- * Lifts a suspension from a user account.
+ * Lifts a suspension from a user account. A reason is required for the audit log.
  */
-export async function liftSuspension(userId: string): Promise<AdminActionResponse> {
+export async function liftSuspension(userId: string, reason: string): Promise<AdminActionResponse> {
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    throw new Error('A reason is required to lift a suspension.');
+  }
   const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_LIFT(userId));
   const res = await fetch(url, {
     method: 'POST',
@@ -492,6 +615,7 @@ export async function liftSuspension(userId: string): Promise<AdminActionRespons
       ...getAdminHeaders(),
       'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ reason: trimmed }),
     cache: 'no-store',
   });
   return handleAdminResponse<AdminActionResponse>(res);
@@ -569,23 +693,185 @@ export async function removeEvent(eventId: string): Promise<AdminActionResponse>
   return handleAdminResponse<AdminActionResponse>(res);
 }
 
+function readPerson(value: unknown): AdminEventPerson | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === 'string' ? row.id : '';
+  const username = typeof row.username === 'string' ? row.username : null;
+  const full_name = typeof row.full_name === 'string' ? row.full_name : '';
+  const display_name = typeof row.display_name === 'string' ? row.display_name : undefined;
+  if (!id && !full_name && !username && !display_name) return null;
+  return {
+    id,
+    username,
+    full_name,
+    display_name,
+    avatar_url: typeof row.avatar_url === 'string' ? row.avatar_url : null,
+    avatar_kind: typeof row.avatar_kind === 'string' ? row.avatar_kind : undefined,
+    icon_id: typeof row.icon_id === 'string' ? row.icon_id : null,
+  };
+}
+
+export function personDisplayName(
+  person: { full_name?: string | null; display_name?: string | null; username?: string | null } | null | undefined,
+): string {
+  if (!person) return '';
+  const full = person.full_name?.trim();
+  if (full) return full;
+  const display = person.display_name?.trim();
+  if (display) return display;
+  const username = person.username?.trim().replace(/^@/, '');
+  return username || '';
+}
+
+function asId(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function readTitle(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value && typeof value === 'object') {
+    const row = value as Record<string, unknown>;
+    return readTitle(row.title) || readTitle(row.name);
+  }
+  return null;
+}
+
+function firstEmail(...chunks: unknown[]): string | null {
+  const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+  for (const chunk of chunks) {
+    if (typeof chunk === 'string') {
+      const prefixed = chunk.match(/email\s*[:=]\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+      if (prefixed?.[1]) return prefixed[1];
+      const match = chunk.match(EMAIL);
+      if (match) return match[0];
+      continue;
+    }
+    if (Array.isArray(chunk)) {
+      const nested = firstEmail(...chunk);
+      if (nested) return nested;
+      continue;
+    }
+    if (chunk && typeof chunk === 'object') {
+      const row = chunk as Record<string, unknown>;
+      if (typeof row.email === 'string' && row.email.includes('@')) return row.email.trim();
+    }
+  }
+  return null;
+}
+
+function mapAuditEntry(raw: unknown, index: number): AdminAuditEntry {
+  const row = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const admin = readPerson(row.administrator ?? row.admin);
+  const targetObj = row.target && typeof row.target === 'object' ? (row.target as Record<string, unknown>) : null;
+  const targetUser = readPerson(targetObj?.user);
+
+  const admin_id =
+    admin?.id || (typeof row.admin_id === 'string' ? row.admin_id : '');
+  const admin_name =
+    personDisplayName(admin) ||
+    (typeof row.admin_name === 'string' ? row.admin_name.trim() : '') ||
+    'Unknown administrator';
+  const admin_username =
+    admin?.username?.trim() ||
+    (typeof row.admin_username === 'string' ? row.admin_username : null) ||
+    null;
+
+  const target_id = asId(targetObj?.id) || asId(row.target_id);
+  const target_type =
+    (typeof targetObj?.type === 'string' ? targetObj.type : null) ||
+    (typeof row.target_type === 'string' ? row.target_type : null);
+  const target_name =
+    personDisplayName(targetUser) ||
+    (typeof row.target_name === 'string' ? row.target_name.trim() : '') ||
+    null;
+  const target_title =
+    readTitle(targetObj?.event) ||
+    readTitle(targetObj?.title) ||
+    readTitle(targetObj?.chat) ||
+    readTitle(row.target_title) ||
+    null;
+
+  const description = typeof row.description === 'string' ? row.description.trim() : '';
+  const reasonFlat = typeof row.reason === 'string' ? row.reason.trim() : '';
+  const detailsList = Array.isArray(row.details)
+    ? row.details.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : typeof row.details === 'string' && row.details.trim()
+      ? [row.details.trim()]
+      : [];
+  const detailsJoined = detailsList.join(' · ');
+  const target_email =
+    firstEmail(
+      targetObj,
+      targetUser,
+      row.target_email,
+      row.email,
+      description,
+      reasonFlat,
+      ...detailsList,
+    ) || null;
+
+  return {
+    id: typeof row.id === 'string' && row.id ? row.id : `audit-${index}`,
+    action: typeof row.action === 'string' ? row.action : '',
+    admin_id,
+    admin_name,
+    admin_username,
+    admin_avatar_url: admin?.avatar_url ?? null,
+    target_id,
+    target_type,
+    target_name,
+    target_username: targetUser?.username ?? null,
+    target_avatar_url: targetUser?.avatar_url ?? null,
+    target_email,
+    target_title,
+    reason: reasonFlat || description || null,
+    details: detailsJoined || null,
+    created_at: typeof row.created_at === 'string' ? row.created_at : '',
+  };
+}
+
 /**
- * Fetches the paginated admin audit log.
+ * GET /api/admin/audit-log — cursor-paginated (`before` / `next_before`).
  */
 export async function fetchAdminAudit(
   page = 1,
   limit = 20,
+  before?: string | null,
 ): Promise<AdminAuditResponse> {
   const params = new URLSearchParams();
-  params.set('page', String(page));
   params.set('limit', String(limit));
+  if (before) params.set('before', before);
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_AUDIT)}?${params.toString()}`;
   const res = await fetch(url, {
     method: 'GET',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminAuditResponse>(res);
+  const body = await handleAdminResponse<
+    AdminAuditResponse & { entries?: unknown[]; data?: unknown[]; items?: unknown[] }
+  >(res);
+  const rawItems = Array.isArray(body.items)
+    ? body.items
+    : Array.isArray(body.entries)
+      ? body.entries
+      : Array.isArray(body.data)
+        ? body.data
+        : [];
+  const items = rawItems.map((entry, index) => mapAuditEntry(entry, index));
+  const hasMore = body.has_more === true;
+  const nextBefore = typeof body.next_before === 'string' ? body.next_before : null;
+  return {
+    items,
+    total: Number(body.total ?? items.length),
+    page: Number(body.page ?? page),
+    limit: Number(body.limit ?? limit),
+    total_pages: Number(body.total_pages ?? (hasMore ? page + 1 : Math.max(page, 1))),
+    has_more: hasMore,
+    next_before: nextBefore,
+  };
 }
 
 /**
@@ -660,4 +946,31 @@ export async function actionReport(
     cache: 'no-store',
   });
   return handleAdminResponse<AdminActionResponse>(res);
+}
+
+export interface SignupInviteSendResult {
+  email: string;
+  code?: string | null;
+  message?: string;
+  expires_at?: string | null;
+}
+
+/** POST /api/admin/invite_user/{email} — email a registration code (admin MFA session). */
+export async function sendSignupInvite(email: string): Promise<SignupInviteSendResult> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_INVITE_USER(email));
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  const nested =
+    body.data && typeof body.data === 'object' ? (body.data as Record<string, unknown>) : body;
+  const codeRaw = nested.code ?? nested.invite_code;
+  return {
+    email: typeof nested.email === 'string' ? nested.email : email,
+    code: typeof codeRaw === 'string' ? codeRaw : null,
+    message: typeof nested.message === 'string' ? nested.message : undefined,
+    expires_at: typeof nested.expires_at === 'string' ? nested.expires_at : null,
+  };
 }

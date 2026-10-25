@@ -9,6 +9,7 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import {
   FULL_NAME_RULES_HINT,
   USERNAME_RULES_HINT,
+  destinationAfterSignIn,
   getFullNameValidationError,
   getUsernameValidationError,
   hasChosenUsername,
@@ -16,6 +17,7 @@ import {
   normalizeUsername,
   profileFromMeResponse,
 } from '@/lib/username';
+import { getCurrentUser } from '@/lib/storage';
 
 const GOOGLE_NAME_KEY = 'eventapp:google-name';
 
@@ -34,6 +36,7 @@ export default function ChooseUsernamePage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
+  const [role, setRole] = useState<string | null>(getCurrentUser()?.role ?? null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,8 +57,10 @@ export default function ChooseUsernamePage() {
         const profile = profileFromMeResponse(await res.json().catch(() => ({})));
         if (cancelled) return;
         const username = typeof profile.username === 'string' ? profile.username : null;
+        const nextRole = typeof profile.role === 'string' ? profile.role : getCurrentUser()?.role ?? null;
+        setRole(nextRole);
         if (res.ok && hasChosenUsername(username)) {
-          navigate('/home', { replace: true });
+          navigate(destinationAfterSignIn(username, nextRole), { replace: true });
           return;
         }
         const existing = typeof profile.full_name === 'string' ? profile.full_name.trim() : '';
@@ -115,7 +120,7 @@ export default function ChooseUsernamePage() {
       }
 
       sessionStorage.removeItem(GOOGLE_NAME_KEY);
-      navigate('/home', { replace: true });
+      navigate(destinationAfterSignIn(normalizeUsername(username), role), { replace: true });
     } catch {
       setToast({ show: true, message: 'Could not save. Please try again.', type: 'error' });
     } finally {

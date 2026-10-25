@@ -10,7 +10,8 @@
  *       403/404 when the profile is unavailable (owner blocked the viewer, account
  *       suspended, administrator, or no such user)
  * - GET /api/profile/{user_id}/friends?page&limit  that user's friends (UserSummary), in pages
- * - PUT /api/profile/me  { visibility }            'public' | 'friends_only'
+ * - PUT /api/profile/me  { visibility }            'public' | 'private'
+ *       (older APIs also accept 'friends_only' for a private profile)
  *
  * Friendship and block actions live in the shared friendsApi.
  */
@@ -33,7 +34,7 @@ export type ProfileEventGroup = {
   past?: Array<Record<string, unknown>>;
 };
 
-export type ProfileVisibility = 'public' | 'friends_only';
+export type ProfileVisibility = 'public' | 'private';
 
 export type UserProfile = {
   id: string;
@@ -52,6 +53,9 @@ export type UserProfile = {
   /** True when the viewer has blocked this user. */
   blocked_by_me?: boolean;
   friendship?: Friendship | null;
+  /** Present when an administrator is viewing a suspended account. */
+  is_suspended?: boolean;
+  suspension?: { reason?: string | null } | null;
 };
 
 export const PROFILE_UNAVAILABLE_MESSAGE = 'This profile is unavailable';
@@ -94,9 +98,14 @@ export function isProfileUnavailable(error: unknown): boolean {
   return error instanceof ProfileLoadError && (error.status === 403 || error.status === 404);
 }
 
-/** Visibility as the profile editor shows it; the legacy "private" value reads as friends only. */
+/** Visibility as the profile editor shows it. `friends_only` is the older name for private. */
 export function toProfileVisibility(value: unknown): ProfileVisibility {
-  return value === 'friends_only' || value === 'private' ? 'friends_only' : 'public';
+  return value === 'friends_only' || value === 'private' ? 'private' : 'public';
+}
+
+/** Value sent on PUT /api/profile/me. */
+export function visibilityForApi(value: ProfileVisibility): 'public' | 'private' {
+  return value === 'private' ? 'private' : 'public';
 }
 
 function authHeaders(): Record<string, string> {

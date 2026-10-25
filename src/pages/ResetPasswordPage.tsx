@@ -6,6 +6,7 @@ import AppToast from '@/components/AppToast';
 import AppLogo from '@/components/AppLogo';
 import { getApiUrl } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { authCallbackLocation, isSignInAuthType, readAuthLinkType } from '@/lib/authLink';
 
 type VerifyState = 'verifying' | 'valid' | 'invalid';
 
@@ -45,6 +46,13 @@ export default function ResetPasswordPage() {
     let cancelled = false;
 
     const verify = async () => {
+      // Email confirmation / magic links must sign the user in, not ask for a new password.
+      const linkType = readAuthLinkType();
+      if (isSignInAuthType(linkType)) {
+        navigate(authCallbackLocation(window.location.search, window.location.hash), { replace: true });
+        return;
+      }
+
       // Case 1: PKCE code — exchange it for a session via Supabase
       if (pkceCode && supabase) {
         try {
@@ -105,7 +113,7 @@ export default function ResetPasswordPage() {
 
     verify();
     return () => { cancelled = true; };
-  }, [token, pkceCode]);
+  }, [token, pkceCode, navigate]);
 
   // Step 2: Submit new password
   const handleSubmit = async (e: React.FormEvent) => {

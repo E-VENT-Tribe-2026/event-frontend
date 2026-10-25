@@ -13,6 +13,7 @@ function renderGuarded(initialPath = '/home') {
         <Route path="/login" element={<div>Login Screen</div>} />
         <Route path="/admin-verify" element={<div>Admin Verify Screen</div>} />
         <Route path="/choose-username" element={<div>Choose Username Screen</div>} />
+        <Route path="/admin" element={<div>Admin Screen</div>} />
         <Route
           path="/home"
           element={
@@ -93,5 +94,15 @@ describe('RequireUsername — ticket #247 admin-verification gate', () => {
     );
     renderGuarded();
     expect(await screen.findByText('Choose Username Screen')).toBeInTheDocument();
+  });
+
+  it('sends a verified administrator to /admin instead of choose-username', async () => {
+    setAuthToken('verified-token');
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ username: null, role: 'administrator' }), { status: 200 }),
+    );
+    renderGuarded();
+    expect(await screen.findByText('Admin Screen')).toBeInTheDocument();
+    expect(screen.queryByText('Choose Username Screen')).not.toBeInTheDocument();
   });
 });

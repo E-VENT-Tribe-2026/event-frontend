@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasChosenUsername, profileFromMeResponse } from '@/lib/username';
+import { destinationAfterSignIn, hasChosenUsername, profileFromMeResponse } from '@/lib/username';
 
 describe('profileFromMeResponse', () => {
   it('reads a flat profile', () => {
@@ -23,5 +23,20 @@ describe('hasChosenUsername', () => {
     expect(hasChosenUsername('maya')).toBe(true);
     expect(hasChosenUsername('  ')).toBe(false);
     expect(hasChosenUsername(null)).toBe(false);
+  });
+});
+
+describe('destinationAfterSignIn', () => {
+  it('sends a verified administrator to /admin even without a username', () => {
+    expect(destinationAfterSignIn(null, 'administrator')).toBe('/admin');
+    expect(destinationAfterSignIn('', 'admin')).toBe('/admin');
+  });
+
+  it('sends accounts without a username to choose-username', () => {
+    expect(destinationAfterSignIn(null, 'participant')).toBe('/choose-username');
+  });
+
+  it('sends everyone else with a username home', () => {
+    expect(destinationAfterSignIn('maya', 'participant')).toBe('/home');
   });
 });

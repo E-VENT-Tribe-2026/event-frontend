@@ -62,7 +62,6 @@ describe('ProfilePage identity', () => {
     expect(usernames[0]).toHaveTextContent('john_42');
 
     expect(screen.getByTestId('profile-full-name')).toHaveTextContent('John Smith');
-    expect(screen.getByTestId('plan-badge')).toHaveTextContent('Basic');
     expect(screen.getByTestId('profile-picture')).toHaveAttribute('data-avatar-kind', 'icon');
     expect(screen.getByTestId('profile-banner').style.backgroundImage).toBe('');
 
@@ -72,6 +71,7 @@ describe('ProfilePage identity', () => {
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     expect(screen.queryByText('a@b.com')).not.toBeInTheDocument();
+    expect(screen.queryByText(/change password/i)).not.toBeInTheDocument();
   });
 
   it('shows an uploaded photo and the chosen banner', async () => {
@@ -215,7 +215,7 @@ describe('ProfilePage identity', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/profile/me') && init?.method === 'PUT') {
-        return json({ ...baseProfile, visibility: 'friends_only' });
+        return json({ ...baseProfile, visibility: 'private' });
       }
       if (url.includes('/api/profile/me')) return json({ ...baseProfile, visibility: 'public' });
       return json([]);
@@ -224,17 +224,17 @@ describe('ProfilePage identity', () => {
 
     renderPage();
 
-    expect(await screen.findByTestId('profile-visibility')).toHaveTextContent('Public');
-    fireEvent.click(await screen.findByRole('button', { name: /edit profile/i }));
-    fireEvent.click(screen.getByRole('radio', { name: 'Friends only' }));
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
-
-    expect(await screen.findByTestId('profile-visibility')).toHaveTextContent('Friends only');
+    const toggle = await screen.findByRole('switch', { name: 'Private profile' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Private profile' })).toHaveAttribute('aria-checked', 'true');
+    });
     const puts = fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.method === 'PUT',
     );
     expect(puts).toHaveLength(1);
-    expect(JSON.parse(String((puts[0][1] as RequestInit).body)).visibility).toBe('friends_only');
+    expect(JSON.parse(String((puts[0][1] as RequestInit).body)).visibility).toBe('private');
   });
 
   it('refuses an empty full name and does not save a stand-in', async () => {

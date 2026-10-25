@@ -12,6 +12,11 @@ import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsA
 import { CHAT_MESSAGES_CHANGED_EVENT } from '@/lib/realtimeEvents';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 
+function prefetchMap() {
+  void import('@/pages/MapPage');
+  void import('leaflet');
+}
+
 export default function BottomNav() {
   const location = useLocation();
   const [user, setUser] = useState(getCurrentUser);
@@ -102,6 +107,8 @@ export default function BottomNav() {
             <Link
               key={path}
               to={path}
+              onPointerEnter={path === '/map' ? prefetchMap : undefined}
+              onFocus={path === '/map' ? prefetchMap : undefined}
               className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors ${baseText}`}
               aria-label={
                 path === '/friends' && requestCount > 0

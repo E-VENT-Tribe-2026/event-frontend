@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Flag, Loader2, ChevronRight } from 'lucide-react';
 import {
   fetchAdminReports,
@@ -259,45 +259,43 @@ export default function AdminReportsTab({ onOpenReport, onErrorToast }: AdminRep
   const [loadingAll, setLoadingAll] = useState(true);
   const [loadingMoreAll, setLoadingMoreAll] = useState(false);
 
-  const loadOpenReports = useCallback(
-    async (targetPage: number, append = false) => {
-      if (append) setLoadingMoreOpen(true);
-      else setLoadingOpen(true);
-      try {
-        const res = await fetchAdminReports(targetPage, PAGE_SIZE, 'pending');
-        setOpenReports((prev) => (append ? [...prev, ...res.items] : res.items));
-        setOpenPage(res.page);
-        setOpenTotalPages(res.total_pages);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to load open reports';
-        onErrorToast(msg);
-      } finally {
-        setLoadingOpen(false);
-        setLoadingMoreOpen(false);
-      }
-    },
-    [onErrorToast],
-  );
+  // Inline toast from the parent must not restart the fetch (that looped forever).
+  const onErrorToastRef = useRef(onErrorToast);
+  onErrorToastRef.current = onErrorToast;
 
-  const loadAllReports = useCallback(
-    async (targetPage: number, append = false) => {
-      if (append) setLoadingMoreAll(true);
-      else setLoadingAll(true);
-      try {
-        const res = await fetchAdminReports(targetPage, PAGE_SIZE);
-        setAllReports((prev) => (append ? [...prev, ...res.items] : res.items));
-        setAllPage(res.page);
-        setAllTotalPages(res.total_pages);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to load reports';
-        onErrorToast(msg);
-      } finally {
-        setLoadingAll(false);
-        setLoadingMoreAll(false);
-      }
-    },
-    [onErrorToast],
-  );
+  const loadOpenReports = useCallback(async (targetPage: number, append = false) => {
+    if (append) setLoadingMoreOpen(true);
+    else setLoadingOpen(true);
+    try {
+      const res = await fetchAdminReports(targetPage, PAGE_SIZE, 'pending');
+      setOpenReports((prev) => (append ? [...prev, ...res.items] : res.items));
+      setOpenPage(res.page);
+      setOpenTotalPages(res.total_pages);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load open reports';
+      onErrorToastRef.current(msg);
+    } finally {
+      setLoadingOpen(false);
+      setLoadingMoreOpen(false);
+    }
+  }, []);
+
+  const loadAllReports = useCallback(async (targetPage: number, append = false) => {
+    if (append) setLoadingMoreAll(true);
+    else setLoadingAll(true);
+    try {
+      const res = await fetchAdminReports(targetPage, PAGE_SIZE);
+      setAllReports((prev) => (append ? [...prev, ...res.items] : res.items));
+      setAllPage(res.page);
+      setAllTotalPages(res.total_pages);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load reports';
+      onErrorToastRef.current(msg);
+    } finally {
+      setLoadingAll(false);
+      setLoadingMoreAll(false);
+    }
+  }, []);
 
   useEffect(() => {
     void loadOpenReports(1);

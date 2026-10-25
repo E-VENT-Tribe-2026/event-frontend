@@ -6,6 +6,7 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
+import { fetchOrganizerProfile } from '@/lib/organizerProfile';
 import { useParticipantCount, invalidateFavorites } from '@/lib/queries';
 import FriendsAttendingCount from '@/components/FriendsAttendingCount';
 
@@ -59,37 +60,20 @@ export default function EventCard({ event, onJoin, isFavorite: initialIsFavorite
     }
   }, [isAlreadyJoined, event.id]);
 
-  // Fetch organizer profile via created_by / organizerId GUID if name is generic
   useEffect(() => {
     const creatorId = event.organizerId || (event as any).created_by;
     if (!creatorId) return;
+    const alreadyKnown = Boolean(
+      event.organizerFullName || (event.organizer && event.organizer !== 'Organizer'),
+    );
+    if (alreadyKnown) return;
 
     let cancelled = false;
-    (async () => {
-      try {
-        const token = getAuthToken();
-        const headers: Record<string, string> = { Accept: 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-        const res = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
-        if (res.ok) {
-          const profData = await res.json().catch(() => null);
-          const prof = profData?.data || profData?.profile || profData;
-          if (prof && !cancelled) {
-            setOrganizerProfile({
-              full_name: prof.full_name || prof.name,
-              username: prof.username,
-              avatar_url: prof.avatar_url,
-            });
-          }
-        }
-      } catch {
-        // ignore profile lookup failure
-      }
-    })();
-
+    void fetchOrganizerProfile(String(creatorId)).then((prof) => {
+      if (prof && !cancelled) setOrganizerProfile(prof);
+    });
     return () => { cancelled = true; };
-  }, [event.organizerId, (event as any).created_by]);
+  }, [event.organizerId, event.organizer, event.organizerFullName, event.organizerAvatar, event.organizerUsername, (event as any).created_by]);
 
 
   const handleFavorite = async (e: React.MouseEvent) => {
@@ -162,10 +146,12 @@ export default function EventCard({ event, onJoin, isFavorite: initialIsFavorite
       className="block rounded-2xl overflow-hidden glass-card card-lift animate-fade-in relative"
     >
       <div className="relative h-40 overflow-hidden">
-        <img 
-          src={event.image || getCategoryBanner(event.category)} 
-          alt={event.title} 
-          className="h-full w-full object-cover transition-transform duration-500 hover:scale-110" 
+        <img
+          src={event.image || getCategoryBanner(event.category)}
+          alt={event.title}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover transition-transform duration-500 hover:scale-110"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
         <div className="absolute top-2 right-2 rounded-full bg-primary/90 px-3 py-1 text-xs font-semibold text-primary-foreground backdrop-blur-sm">

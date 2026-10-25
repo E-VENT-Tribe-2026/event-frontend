@@ -211,6 +211,12 @@ describe('HomePage — Upcoming For You section (#244)', () => {
           has_more: false,
         }));
       }
+      if (url.includes('/api/profile/')) {
+        return Promise.resolve(jsonOk({
+          id: 'f1',
+          events: { joined: { upcoming: [] } },
+        }));
+      }
       if (url.includes('/api/events')) {
         return Promise.resolve(jsonOk({
           data: [apiEventRow({ id: 'jazz-1', title: 'Quiet Jazz Night', friends_attending_count: 1 })],

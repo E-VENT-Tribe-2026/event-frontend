@@ -135,7 +135,74 @@ describe('useFriendsGoingEvents', () => {
     });
     expect(result.current.rows[0].event.title).toBe('Quiet Jazz Night');
     expect(result.current.rows[0].friends).toEqual([]);
-    expect(fetchUserProfileMock).not.toHaveBeenCalled();
+  });
+
+  it('merges every friend’s upcoming events instead of stopping at the first counted homepage event', async () => {
+    const alex: UserSummary = {
+      id: 'f2',
+      username: 'alex',
+      full_name: 'Alex',
+      display_name: 'Alex',
+      avatar_kind: 'icon',
+      icon_id: 'moon',
+      avatar_url: null,
+    };
+    fetchAllFriendsMock.mockResolvedValue([friend, alex]);
+    fetchFriendsAttendingMock.mockResolvedValue([
+      { user_id: 'f1', is_friend: true, user: friend },
+    ]);
+    fetchUserProfileMock.mockImplementation(async (id: string) => {
+      if (id === 'f1') {
+        return {
+          id: 'f1',
+          avatar_url: null,
+          avatar_kind: null,
+          icon_id: null,
+          joined_events: {
+            upcoming: [{
+              id: 'evt-jazz',
+              title: 'Quiet Jazz Night',
+              start_datetime: '2030-06-15T18:00:00.000Z',
+            }],
+          },
+        };
+      }
+      return {
+        id: 'f2',
+        avatar_url: null,
+        avatar_kind: null,
+        icon_id: null,
+        events: {
+          joined: {
+            upcoming: [
+              {
+                id: 'evt-jazz',
+                title: 'Quiet Jazz Night',
+                start_datetime: '2030-06-15T18:00:00.000Z',
+              },
+              {
+                id: 'evt-brunch',
+                title: 'Sunday Brunch',
+                category: 'Food',
+                start_datetime: '2030-06-20T11:00:00.000Z',
+                location_name: 'Paris',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const { result } = renderHook(() => useFriendsGoingEvents([event]));
+
+    await waitFor(() => {
+      expect(result.current.rows).toHaveLength(2);
+    });
+    const jazz = result.current.rows.find((row) => row.event.id === 'evt-jazz');
+    const brunch = result.current.rows.find((row) => row.event.id === 'evt-brunch');
+    expect(jazz?.friends.map((f) => f.id).sort()).toEqual(['f1', 'f2']);
+    expect(brunch?.event.title).toBe('Sunday Brunch');
+    expect(brunch?.friends.map((f) => f.id)).toEqual(['f2']);
   });
 
   it("falls back to friends' upcoming joined events when the homepage list has no friends-attending counts", async () => {

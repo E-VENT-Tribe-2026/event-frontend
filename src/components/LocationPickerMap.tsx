@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import 'leaflet/dist/leaflet.css';
+import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
 
 export type LocationPickerMapProps = {
   latitude: number | null;
@@ -87,10 +88,7 @@ export default function LocationPickerMap({
       mapInstanceRef.current = map;
       leafletRef.current = L;
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        noWrap: true,
-      }).addTo(map);
+      L.tileLayer(LEAFLET_TILE_URL, LEAFLET_TILE_OPTIONS).addTo(map);
 
       map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
         const { lat, lng } = e.latlng;

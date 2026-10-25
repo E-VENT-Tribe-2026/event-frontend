@@ -1,10 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   checkAdminVerified,
+  fetchAdminAudit,
+  matchesAuditFilters,
+  auditActionFilterKey,
+  localDateFromIso,
   fetchAdminCounts,
   fetchAdminUsers,
   fetchAdminUserDetails,
+  fetchUserWarnings,
   grantAdminRole,
+  warnUser,
+  withdrawWarning,
+  liftSuspension,
+  isSuspendedAccount,
+  sendSignupInvite,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 import * as storageModule from '@/lib/storage';
@@ -172,6 +182,7 @@ describe('adminApi service', () => {
 
     const data = await fetchAdminUserDetails('u1');
     expect(data.full_name).toBe('Alice Wonder');
+    expect(data.is_suspended).toBe(false);
     expect(data.organized_events.upcoming).toHaveLength(1);
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -203,5 +214,232 @@ describe('adminApi service', () => {
     );
 
     await expect(grantAdminRole('u1')).rejects.toThrow('Account is already an administrator.');
+  });
+
+  it('fetches warnings from GET /api/admin/users/{id}/warnings', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ warnings: [{ id: 'w1', reason: 'Spam', issued_at: '2026-01-01T00:00:00Z', issued_by: 'ada' }] }),
+    );
+
+    const rows = await fetchUserWarnings('u1');
+    expect(rows).toHaveLength(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/users/u1/warnings');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('posts a warning to /api/admin/users/{id}/warnings', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Warned', warning_id: 'w2' }));
+
+    const res = await warnUser('u1', 'Be kind');
+    expect(res.warning_id).toBe('w2');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/users/u1/warnings');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reason: 'Be kind' });
+  });
+
+  it('withdraws a warning via POST /api/admin/warnings/{id}/withdraw', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Withdrawn' }));
+
+    await withdrawWarning('u1', 'w2');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/warnings/w2/withdraw');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+  });
+
+  it('loads the audit log from GET /api/admin/audit-log', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [{ id: 'a1', action: 'warn', admin_id: 'ada', admin_name: 'Ada', created_at: '2026-01-01T00:00:00Z' }],
+        total: 1,
+        page: 1,
+        limit: 20,
+        total_pages: 1,
+      }),
+    );
+
+    const data = await fetchAdminAudit(1, 20);
+    expect(data.items).toHaveLength(1);
+    expect(data.items[0].admin_name).toBe('Ada');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/audit-log?limit=20');
+  });
+
+  it('matches audit filters by administrator, action, and local date', () => {
+    const noon = new Date(2026, 9, 25, 12, 0, 0).toISOString();
+    const entry = {
+      id: 'a1',
+      action: 'lift_suspension',
+      admin_id: 'ada',
+      admin_name: 'Ada Lovelace',
+      admin_username: 'ada.admin',
+      created_at: noon,
+    };
+    expect(auditActionFilterKey('lift_suspension')).toBe('lift-suspension');
+    expect(localDateFromIso(noon)).toBe('2026-10-25');
+    expect(matchesAuditFilters(entry, { admin: 'ada.admin' })).toBe(true);
+    expect(matchesAuditFilters(entry, { admin: 'bob' })).toBe(false);
+    expect(matchesAuditFilters(entry, { action: 'lift-suspension' })).toBe(true);
+    expect(matchesAuditFilters(entry, { action: 'warn' })).toBe(false);
+    expect(matchesAuditFilters(entry, { date: '2026-10-25' })).toBe(true);
+    expect(matchesAuditFilters(entry, { date: '2026-10-24' })).toBe(false);
+  });
+
+  it('maps nested administrator onto admin_name', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a3',
+            action: 'warn',
+            created_at: '2026-01-01T00:00:00Z',
+            administrator: {
+              id: 'ada-id',
+              username: 'ada_admin',
+              full_name: 'Ada Lovelace',
+              display_name: 'Ada',
+            },
+            target: { type: 'user', id: 'u1', user: { id: 'u1', username: 'bob', full_name: 'Bob Baker' } },
+            description: 'Warned for spam',
+            details: [],
+          },
+        ],
+        has_more: false,
+        next_before: null,
+      }),
+    );
+
+    const data = await fetchAdminAudit();
+    expect(data.items[0].admin_id).toBe('ada-id');
+    expect(data.items[0].admin_name).toBe('Ada Lovelace');
+    expect(data.items[0].admin_username).toBe('ada_admin');
+    expect(data.items[0].target_name).toBe('Bob Baker');
+    expect(data.items[0].target_username).toBe('bob');
+    expect(data.items[0].reason).toBe('Warned for spam');
+  });
+
+  it('maps an invite audit row to the invitee email', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a4',
+            action: 'registration_invite',
+            created_at: '2026-10-25T19:17:00Z',
+            administrator: { id: 'ada', username: 'soniam', full_name: 'Sonia' },
+            target: { type: 'invite', id: '1' },
+            description: 'Sent a registration invitation to soniamangane@gmail.com.',
+            details: ['email:soniamangane@gmail.com'],
+          },
+        ],
+        has_more: false,
+      }),
+    );
+
+    const data = await fetchAdminAudit();
+    expect(data.items[0].target_email).toBe('soniamangane@gmail.com');
+  });
+
+  it('keeps a reported chat as a chat/report target, not an email', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a5',
+            action: 'dismiss_report',
+            created_at: '2026-10-04T14:10:00Z',
+            administrator: { id: 'ada', username: 'alex.admin', full_name: 'Alex Morgan' },
+            target: { type: 'report', id: 1033, event: { title: 'Pasta Workshop' } },
+            description: 'Spam in the event chat.',
+            details: ['chat'],
+          },
+        ],
+        has_more: false,
+      }),
+    );
+
+    const data = await fetchAdminAudit();
+    expect(data.items[0].target_type).toBe('report');
+    expect(data.items[0].target_id).toBe('1033');
+    expect(data.items[0].target_title).toBe('Pasta Workshop');
+  });
+
+  it('treats status "suspended" as a suspended account', () => {
+    expect(isSuspendedAccount({ status: 'suspended' })).toBe(true);
+    expect(isSuspendedAccount({ is_suspended: true })).toBe(true);
+    expect(isSuspendedAccount({ status: 'active' })).toBe(false);
+  });
+
+  it('maps status "suspended" on admin user details', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 'u9',
+        username: 'paused',
+        full_name: 'Paused User',
+        role: 'user',
+        created_at: '2026-01-01T00:00:00Z',
+        status: 'suspended',
+        suspension: { reason: 'Spam', suspended_at: '2026-01-02T00:00:00Z', suspended_by: 'ada' },
+      }),
+    );
+
+    const data = await fetchAdminUserDetails('u9');
+    expect(data.is_suspended).toBe(true);
+    expect(data.warnings).toEqual([]);
+    expect(data.organized_events.upcoming).toEqual([]);
+  });
+
+  it('posts a lift-suspension reason to /api/admin/users/{id}/lift-suspension', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Suspension lifted.' }));
+
+    const res = await liftSuspension('u1', 'Appeal accepted');
+    expect(res.message).toBe('Suspension lifted.');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/users/u1/lift-suspension');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reason: 'Appeal accepted' });
+  });
+
+  it('refuses to lift a suspension without a reason', async () => {
+    await expect(liftSuspension('u1', '   ')).rejects.toThrow('A reason is required to lift a suspension.');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the lift reason on audit-log entries', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a2',
+            action: 'lift_suspension',
+            admin_id: 'ada',
+            admin_name: 'Ada',
+            target_id: 'u1',
+            target_type: 'user',
+            reason: 'Appeal accepted',
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        total_pages: 1,
+      }),
+    );
+
+    const data = await fetchAdminAudit(1, 20);
+    expect(data.items[0].action).toBe('lift_suspension');
+    expect(data.items[0].reason).toBe('Appeal accepted');
+  });
+
+  it('sendSignupInvite posts to invite_user with the encoded email', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ email: 'guest@example.com', invite_code: 'ABCD-2345', message: 'Invitation sent.' }),
+    );
+    const result = await sendSignupInvite('guest@example.com');
+    expect(result.code).toBe('ABCD-2345');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/admin/invite_user/guest%40example.com'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer mock_admin_token' }),
+      }),
+    );
   });
 });

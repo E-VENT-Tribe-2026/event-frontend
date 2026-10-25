@@ -1,52 +1,52 @@
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+﻿import { Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getEvents, getCurrentUser, addJoinRequest, getJoinRequests, joinEvent, leaveEvent, getUsers, updateEvent, cancelEvent, type EventItem } from '@/lib/storage';
-import { ArrowLeft, MapPin, Clock, Users, ShieldCheck, Pencil, LogOut, UserPlus, ExternalLink, UserMinus, Ban, CalendarPlus, MapPinned } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
 import { supabase } from '@/lib/supabase';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
+import { hasSignedInSession } from '@/lib/signedIn';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
-import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { formatPageTitle } from '@/lib/documentTitle';
-import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
-import EventLocationMap from '@/components/EventLocationMap';
 import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
-import { getCategoryBanner } from '@/lib/categoryBanners';
-import { invalidatePrefix } from '@/lib/queryCache';
+import { cachedFetch, invalidatePrefix, peekCache, TTL } from '@/lib/queryCache';
+import { fetchOrganizerProfile } from '@/lib/organizerProfile';
 import { formatUserIdentity } from '@/lib/userIdentity';
 import InvitedByBanner from '@/components/InvitedByBanner';
-import FriendsAttendingSection from '@/components/FriendsAttendingSection';
 import { fetchFriendsAttending, fetchParticipantCount, fetchParticipantList, type ParticipantRow } from '@/lib/eventAttendeesApi';
-import InviteFriendsDialog from '@/components/InviteFriendsDialog';
 import type { EventInvitationSummary } from '@/lib/invitationsApi';
-import FriendsGoing from '@/components/FriendsGoing';
 import { fetchAllFriends, friendsGoingToEvent } from '@/lib/eventSocial';
 import { type UserSummary } from '@/lib/friendsApi';
-import { addCheckin, CHECKINS_CHANGED_EVENT, isCheckedIn, isCheckinWindow, listCheckins, parseTicketQr, type CheckinRecord } from '@/lib/checkin';
+import {
+  CheckinApiError,
+  fetchEventCheckinCode,
+  fetchEventCheckins,
+  submitEventCheckin,
+  type EventCheckinSummary,
+} from '@/lib/checkinsApi';
 import { postEventChatMessage } from '@/lib/chatPayload';
-import { downloadIcs, googleCalendarUrl } from '@/lib/calendar';
-
-type ParticipationStatus = 'none' | 'going' | 'removed';
-
-async function readApiErrorMessage(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => ({}))) as { detail?: unknown };
-  const d = body.detail;
-  if (typeof d === 'string' && d.trim()) return d;
-  if (d && typeof d === 'object' && !Array.isArray(d)) {
-    const msg = (d as { message?: unknown }).message;
-    if (typeof msg === 'string' && msg.trim()) return msg;
-  }
-  if (Array.isArray(d) && d[0] && typeof (d[0] as { msg?: string }).msg === 'string') {
-    return (d[0] as { msg: string }).msg;
-  }
-  if (res.status === 404) return 'Event not found';
-  return `Something went wrong (HTTP ${res.status})`;
-}
+import EventDetailsActions from '@/pages/eventDetails/EventDetailsActions';
+import EventDetailsAttendees from '@/pages/eventDetails/EventDetailsAttendees';
+import EventDetailsBanner from '@/pages/eventDetails/EventDetailsBanner';
+import EventDetailsCheckin from '@/pages/eventDetails/EventDetailsCheckin';
+import EventDetailsHero from '@/pages/eventDetails/EventDetailsHero';
+import EventDetailsMap from '@/pages/eventDetails/EventDetailsMap';
+import EventDetailsRemoved from '@/pages/eventDetails/EventDetailsRemoved';
+import EventDetailsBalloonLoader from '@/pages/eventDetails/EventDetailsBalloonLoader';
+import EventDetailsStatus from '@/pages/eventDetails/EventDetailsStatus';
+import EventDetailsVenueModal from '@/pages/eventDetails/EventDetailsVenueModal';
+import {
+  type AttendeeRow,
+  type OrganizerProfile,
+  type ParticipationStatus,
+  isEventChatExpired,
+  joinButtonText,
+  readApiErrorMessage,
+} from '@/pages/eventDetails/eventDetailsModel';
 
 export default function EventDetailsPage() {
   const { id } = useParams();
@@ -57,6 +57,7 @@ export default function EventDetailsPage() {
   const [apiEventStatus, setApiEventStatus] = useState<string | null>(null);
   const [apiNotFound, setApiNotFound] = useState(false);
   const [loadingApi, setLoadingApi] = useState(true);
+  const [balloonFinished, setBalloonFinished] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [showVenuePaymentModal, setShowVenuePaymentModal] = useState(false);
   const [apiParticipants, setApiParticipants] = useState<ParticipantRow[]>([]);
@@ -66,16 +67,16 @@ export default function EventDetailsPage() {
   const [attendeeCount, setAttendeeCount] = useState<number | null>(null);
   const [myParticipationStatus, setMyParticipationStatus] = useState<ParticipationStatus | null>(null);
   const [participationKnown, setParticipationKnown] = useState(false);
-  const [organizerProfile, setOrganizerProfile] = useState<{ full_name?: string; username?: string; avatar_url?: string } | null>(null);
+  const [organizerProfile, setOrganizerProfile] = useState<OrganizerProfile | null>(null);
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
   const [isCancellingEvent, setIsCancellingEvent] = useState(false);
   const [backendAuthUserId, setBackendAuthUserId] = useState<string | null>(null);
   const [invitation, setInvitation] = useState<EventInvitationSummary | null>(null);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [friendSummaries, setFriendSummaries] = useState<UserSummary[]>([]);
-  const [checkins, setCheckins] = useState<CheckinRecord[]>([]);
+  const [checkinSummary, setCheckinSummary] = useState<EventCheckinSummary | null>(null);
   const [checkinBusy, setCheckinBusy] = useState(false);
-  const [ticketScan, setTicketScan] = useState('');
+  const [checkinError, setCheckinError] = useState('');
   const user = getCurrentUser();
   const allUsers = getUsers();
 
@@ -122,6 +123,7 @@ export default function EventDetailsPage() {
       setInvitation(null); // joining removes the invitation
       setToast({ show: true, message: 'Successfully joined!', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
+      invalidatePrefix(`/api/events/${event.id}`);
       invalidatePrefix('/api/events?');
       invalidatePrefix('/api/participants/my/events');
       return true;
@@ -237,8 +239,23 @@ export default function EventDetailsPage() {
       return;
     }
     let cancelled = false;
-    setLoadingApi(true);
     setApiNotFound(false);
+    const eventKey = `/api/events/${id}`;
+    const applyEvent = (data: Record<string, unknown>) => {
+      const mapped = mapApiEventToItem(data);
+      setApiEvent(mapped);
+      setApiNotFound(false);
+      setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
+      setInvitation((data?.invitation as EventInvitationSummary | null | undefined) ?? null);
+      return mapped;
+    };
+    const cached = peekCache<Record<string, unknown>>(eventKey);
+    if (cached?.id) {
+      applyEvent(cached);
+      setLoadingApi(false);
+    } else {
+      setLoadingApi(true);
+    }
 
     (async () => {
       const token = await getApiToken();
@@ -246,49 +263,42 @@ export default function EventDetailsPage() {
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
       try {
-        const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
-        if (!res.ok) {
-          if (res.status === 404) {
-            if (!cancelled) {
-              setApiNotFound(true);
-              setApiEvent(null);
-              setApiEventStatus(null);
+        const data = await cachedFetch(
+          eventKey,
+          async () => {
+            const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
+            if (!res.ok) {
+              if (res.status === 404) {
+                const err = new Error('Event not found') as Error & { status?: number };
+                err.status = 404;
+                throw err;
+              }
+              throw new Error();
             }
-            return;
-          }
-          throw new Error();
-        }
-        const data = await res.json();
+            return res.json() as Promise<Record<string, unknown>>;
+          },
+          TTL.MEDIUM,
+        );
         if (cancelled) return;
 
-        const mapped = mapApiEventToItem(data);
-        setApiEvent(mapped);
-        setApiNotFound(false);
-        setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
-        setInvitation((data?.invitation as EventInvitationSummary | null | undefined) ?? null);
+        const mapped = applyEvent(data);
         setParticipationKnown(false);
 
-        const creatorId = data.created_by || data.organizer_id || mapped.organizerId;
+        const creatorId = String(data.created_by || data.organizer_id || mapped.organizerId || '');
         if (creatorId) {
-          try {
-            const profRes = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
-            if (profRes.ok) {
-              const profData = await profRes.json().catch(() => null);
-              const prof = profData?.data || profData?.profile || profData;
-              if (prof && !cancelled) {
-                setOrganizerProfile({
-                  full_name: prof.full_name || prof.name || prof.username,
-                  username: prof.username,
-                  avatar_url: prof.avatar_url,
-                });
-              }
-            }
-          } catch {
-            // ignore profile fetch failure
-          }
+          const prof = await fetchOrganizerProfile(creatorId);
+          if (prof && !cancelled) setOrganizerProfile(prof);
         }
-      } catch {
-        if (!cancelled) {
+      } catch (err) {
+        if ((err as { status?: number })?.status === 404) {
+          if (!cancelled) {
+            setApiNotFound(true);
+            setApiEvent(null);
+            setApiEventStatus(null);
+          }
+          return;
+        }
+        if (!cancelled && !cached?.id) {
           setApiEvent(null);
           setApiEventStatus(null);
         }
@@ -336,21 +346,6 @@ export default function EventDetailsPage() {
     return () => { cancelled = true; };
   }, [user?.id]);
 
-  useEffect(() => {
-    if (!id) {
-      setCheckins([]);
-      return;
-    }
-    const refresh = () => setCheckins(listCheckins(id));
-    refresh();
-    const onChange = (event: Event) => {
-      const eventId = (event as CustomEvent<{ eventId?: string }>).detail?.eventId;
-      if (!eventId || eventId === id) refresh();
-    };
-    window.addEventListener(CHECKINS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(CHECKINS_CHANGED_EVENT, onChange);
-  }, [id]);
-
   const attendeeDisplayCount =
     useApiParticipation && attendeeCount !== null ? attendeeCount : participantIds.length;
 
@@ -378,6 +373,48 @@ export default function EventDetailsPage() {
     String(apiEventStatus || '').toLowerCase() === 'cancelled' ||
     String(apiEventStatus || '').toLowerCase() === 'canceled';
   const canAccessEventChat = Boolean(user && (isEventOwner || hasJoined));
+
+  const loadCheckin = useCallback(async (eventId: string, asOrganizer: boolean) => {
+    const empty: EventCheckinSummary = {
+      checked_in_count: 0,
+      participant_count: 0,
+      viewer_checked_in: false,
+      include_times: asOrganizer,
+      checkins: [],
+    };
+    try {
+      const list = (await fetchEventCheckins(eventId)) ?? empty;
+      if (!asOrganizer) {
+        setCheckinSummary(list);
+        return;
+      }
+      const door = await fetchEventCheckinCode(eventId);
+      setCheckinSummary({
+        ...list,
+        code: door?.code ?? null,
+        qr_content: door?.qr_content ?? door?.code ?? null,
+      });
+    } catch {
+      setCheckinSummary(empty);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!id || !user || isCancelledEvent) {
+      setCheckinSummary(null);
+      return;
+    }
+    if (!isEventOwner && !hasJoined) {
+      setCheckinSummary(null);
+      return;
+    }
+    void loadCheckin(id, isEventOwner);
+  }, [id, user, isCancelledEvent, isEventOwner, hasJoined, loadCheckin]);
+
+  const checkedInUserIds = useMemo(
+    () => new Set((checkinSummary?.checkins ?? []).map((c) => c.user_id)),
+    [checkinSummary],
+  );
 
   const existingRequest = user && event ? getJoinRequests().find(r => r.eventId === event.id && r.userId === user.id) : null;
 
@@ -411,7 +448,6 @@ export default function EventDetailsPage() {
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
   const fullAttendeeRows = useMemo(() => {
-    type AttendeeRow = { id: string; profilePhoto?: string; avatar?: string; name: string; email?: string; username?: string; isFriend?: boolean };
     if (!event || !canViewFullAttendeeList) {
       return [] as AttendeeRow[];
     }
@@ -437,11 +473,11 @@ export default function EventDetailsPage() {
       .filter(Boolean) as AttendeeRow[];
   }, [event, allUsers, apiParticipants, canViewFullAttendeeList, useApiParticipation]);
 
-  const recordCheckin = useCallback(async (userId: string, name: string, ticketId?: string) => {
-    if (!event) return;
-    addCheckin(event.id, { userId, name, ticketId });
-    await postEventChatMessage(event.id, { v: 1, type: 'checkin', text: `${name} is here` });
-  }, [event]);
+  useEffect(() => {
+    setBalloonFinished(false);
+  }, [id]);
+
+  const finishBalloon = useCallback(() => setBalloonFinished(true), []);
 
   useEffect(() => {
     if (loadingApi && !localEvent) return;
@@ -453,53 +489,30 @@ export default function EventDetailsPage() {
     document.title = formatPageTitle(ev.title);
   }, [loadingApi, localEvent, routeEvent, apiEvent]);
 
-  if (loadingApi && !localEvent) {
-    return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Loading…</div>;
+  if (!hasSignedInSession()) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!localEvent && !balloonFinished) {
+    return <EventDetailsBalloonLoader ready={!loadingApi} onBurstDone={finishBalloon} />;
   }
   if (!event) {
-    return <div className="flex min-h-screen items-center justify-center bg-background text-foreground">Event not found</div>;
+    return <EventDetailsStatus message="Event not found" />;
   }
 
   const isEventPassed = !isEventUpcoming(event);
   const isPastEvent = !isCancelledEvent && isEventPassed;
   const isUpcomingEvent = !isCancelledEvent && isEventUpcoming(event);
   const canInviteFriends = Boolean(user && useApiParticipation && isUpcomingEvent && (isEventOwner || hasJoined));
-  const isChatExpired = isEventPassed && (() => {
-    const normalized = /[Zz]$\vert{}[+-]\d{2}:\d{2}$/.test(event.date) ? event.date : `${event.date}T${event.time || '00:00'}:00Z`;
-    const ts = new Date(normalized).getTime();
-    return !Number.isNaN(ts) && Date.now() - ts > 48 * 60 * 60 * 1000;
-  })();
+  const isChatExpired = isEventPassed && isEventChatExpired(event.date, event.time);
 
   if (wasRemovedFromEvent) {
     return (
-      <div className="min-h-screen bg-background pb-28">
-        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-lg">
-          <button type="button" onClick={() => navigate(-1)} className="rounded-full glass-card p-2.5" aria-label="Back">
-            <ArrowLeft className="h-5 w-5 text-foreground" />
-          </button>
-          <h1 className="text-lg font-bold text-foreground">Event</h1>
-        </header>
-        <div className="mx-auto max-w-lg space-y-4 px-4 pt-8">
-          <div className="rounded-2xl glass-card p-6 space-y-3 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/15">
-              <UserMinus className="h-6 w-6 text-destructive" />
-            </div>
-            <h2 className="text-lg font-semibold text-foreground">You no longer have access</h2>
-            <p className="text-sm text-muted-foreground">
-              The organizer removed you from <span className="font-medium text-foreground">{event.title}</span>. You
-              can't rejoin this event from the app.
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate('/home')}
-              className="mt-2 w-full rounded-xl gradient-primary py-3 text-sm font-semibold text-primary-foreground shadow-glow"
-            >
-              Browse events
-            </button>
-          </div>
-        </div>
-        <BottomNav />
-      </div>
+      <EventDetailsRemoved
+        title={event.title}
+        onBack={() => navigate(-1)}
+        onBrowse={() => navigate('/home')}
+      />
     );
   }
 
@@ -559,6 +572,7 @@ export default function EventDetailsPage() {
           setEventsState(getEvents());
           setToast({ show: true, message: 'You left the event.', type: 'success' });
           invalidatePrefix(`/api/participants/${event.id}`);
+          invalidatePrefix(`/api/events/${event.id}`);
           invalidatePrefix('/api/events?');
           invalidatePrefix('/api/participants/my/events');
         } catch {
@@ -572,6 +586,7 @@ export default function EventDetailsPage() {
       setEventsState(getEvents());
       setToast({ show: true, message: 'You left the event.', type: 'success' });
       invalidatePrefix(`/api/participants/${event.id}`);
+      invalidatePrefix(`/api/events/${event.id}`);
       invalidatePrefix('/api/events?');
       invalidatePrefix('/api/participants/my/events');
       setIsUpdatingParticipation(false);
@@ -735,23 +750,20 @@ export default function EventDetailsPage() {
       !isEventOwner,
   );
 
-  const getJoinButtonText = () => {
-    if (isCancelledEvent) return 'Event Cancelled';
-    if (isUpdatingParticipation) return 'Please wait...';
-    if (participationLoading) return 'Checking attendance…';
-    if (isPastEvent) return 'Event Ended';
-    if (isEventOwner) return "You're hosting";
-    if (hasJoined) return 'Leave Event';
-    if (isAtCapacity) return 'Event Full';
-    if (isOrganizer) return "Organizers can't join";
-    if (event.requiresApproval) {
-      if (existingRequest?.status === 'pending') return 'Request Pending...';
-      if (existingRequest?.status === 'approved') return !isFreeEvent ? 'Approved — Pay at Venue' : 'Approved — Join Now';
-      if (existingRequest?.status === 'rejected') return 'Request Rejected';
-      return 'Request to Join';
-    }
-    return !isFreeEvent ? `Join — Pay €${event.budget} at Venue` : 'Join Event';
-  };
+  const joinLabel = joinButtonText({
+    isCancelledEvent,
+    isUpdatingParticipation,
+    participationLoading,
+    isPastEvent,
+    isEventOwner,
+    hasJoined,
+    isAtCapacity,
+    isOrganizer,
+    requiresApproval: event.requiresApproval,
+    requestStatus: existingRequest?.status,
+    isFreeEvent,
+    budget: event.budget,
+  });
 
   const showSplitJoinLeave =
     !event.requiresApproval && isFreeEvent && !isEventOwner && !isOrganizer && !isPastEvent && !isCancelledEvent;
@@ -764,502 +776,142 @@ export default function EventDetailsPage() {
 
   const resolvedOrganizerAvatar = organizerProfile?.avatar_url || event.organizerAvatar;
 
+
   return (
     <div className="min-h-screen bg-background pb-28">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
 
-      {/* Banner */}
-      <div className="relative h-60">
-        <img src={event.image || getCategoryBanner(event.category)} alt={event.title} className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-transparent" />
-        <button onClick={() => navigate(-1)} className="absolute top-4 left-4 rounded-full glass-card p-2.5">
-          <ArrowLeft className="h-5 w-5 text-foreground" />
-        </button>
-        <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
-          {isCancelledEvent && (
-            <div className="flex items-center gap-1 rounded-full bg-destructive/90 px-3 py-1 text-xs font-semibold text-destructive-foreground backdrop-blur-sm shadow-md">
-              <Ban className="h-3.5 w-3.5" /> Cancelled
-            </div>
-          )}
-          {event.requiresApproval && !isCancelledEvent && (
-            <div className="flex items-center gap-1 rounded-full bg-accent/90 px-3 py-1 text-xs font-semibold text-accent-foreground backdrop-blur-sm">
-              <ShieldCheck className="h-3 w-3" /> Approval Required
-            </div>
-          )}
-        </div>
-      </div>
+      <EventDetailsBanner
+        title={event.title}
+        image={event.image}
+        category={event.category}
+        isCancelledEvent={isCancelledEvent}
+        requiresApproval={event.requiresApproval}
+        onBack={() => navigate(-1)}
+      />
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-auto max-w-lg px-4 -mt-10 relative z-10 space-y-6">
         <InvitedByBanner invitation={invitation} />
-        <div className="rounded-2xl glass-card p-5 space-y-4">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold text-foreground">{event.title}</h1>
-              {isCancelledEvent && (
-                <span
-                  data-testid="cancelled-badge"
-                  className="rounded-full bg-destructive/15 text-destructive border border-destructive/30 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide"
-                >
-                  Cancelled
-                </span>
-              )}
-            </div>
-            <span className="shrink-0 rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">{event.category}</span>
-          </div>
+        <EventDetailsHero
+          event={event}
+          isCancelledEvent={isCancelledEvent}
+          isFreeEvent={isFreeEvent}
+          organizerProfile={organizerProfile}
+          organizerName={resolvedOrganizerName}
+          organizerFullName={organizerProfile?.full_name || event.organizerFullName || (event.organizer !== 'Organizer' ? event.organizer : '') || 'Organizer'}
+          organizerAvatar={resolvedOrganizerAvatar}
+          attendeeDisplayCount={attendeeDisplayCount}
+          friendsGoing={friendsGoing}
+          canViewFullAttendeeList={canViewFullAttendeeList}
+          participantPreview={participantUsers}
+          userSignedIn={Boolean(user)}
+        />
 
-          <div className="flex items-center gap-3">
-            <UserAvatar
-              src={resolvedOrganizerAvatar}
-              seed={event.organizerId || event.id}
-              name={resolvedOrganizerName}
-              size="md"
-              className="h-10 w-10 ring-2 ring-primary/30"
-            />
-            <div>
-              <p className="text-sm font-medium text-foreground" data-testid="organizer-full-name">
-                {organizerProfile?.full_name || event.organizerFullName || (event.organizer !== 'Organizer' ? event.organizer : '') || 'Organizer'}
-              </p>
-              {(organizerProfile?.username || event.organizerUsername) ? (
-                <p className="text-xs text-muted-foreground" data-testid="organizer-username">
-                  @{(organizerProfile?.username || event.organizerUsername || '').replace(/^@/, '')}
-                </p>
-              ) : null}
-              <p className="text-xs text-muted-foreground">Organizer</p>
-            </div>
-          </div>
-
-          <p className="text-sm text-muted-foreground leading-relaxed">{event.description}</p>
-
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4 text-primary" />{event.date} · {event.time}</div>
-            <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4 text-accent" /><span className="truncate">{event.location}</span></div>
-            <div className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4 text-primary" />{attendeeDisplayCount}/{event.participantsLimit}</div>
-            <div className="flex items-center gap-2 text-foreground font-semibold">
-              {isFreeEvent ? 'Free' : `€${event.budget} at venue`}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <a
-              href={googleCalendarUrl(event)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80"
-            >
-              <CalendarPlus className="h-3.5 w-3.5 text-primary" />
-              Google Calendar
-            </a>
-            <button
-              type="button"
-              onClick={() => downloadIcs(event)}
-              className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80"
-            >
-              <CalendarPlus className="h-3.5 w-3.5 text-primary" />
-              Download .ics
-            </button>
-          </div>
-
-          <FriendsGoing friends={friendsGoing} />
-
-          <div className="space-y-1">
-            {canViewFullAttendeeList ? (
-              <div className="flex items-center gap-2">
-                <div className="flex -space-x-2">
-                  {participantUsers.map((p) => (
-                    <UserAvatar
-                      key={p.id}
-                      src={p.profilePhoto}
-                      srcSecondary={p.avatar}
-                      seed={p.id}
-                      name={p.name}
-                      email={p.email}
-                      size="sm"
-                      className="border-2 border-card"
-                    />
-                  ))}
-                  {attendeeDisplayCount > 6 && (
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-card bg-secondary text-xs text-muted-foreground">
-                      +{attendeeDisplayCount - 6}
-                    </div>
-                  )}
-                </div>
-                {attendeeDisplayCount > 0 && (
-                  <p className="text-xs text-muted-foreground">{attendeeDisplayCount} attending</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">{attendeeDisplayCount}</span>{' '}
-                {attendeeDisplayCount === 1 ? 'person is' : 'people are'} attending.
-                {user ? ' Join the event to see who is going.' : ' Sign in and join to see who is going.'}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Full attendee list */}
-        <div className="rounded-2xl glass-card p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Users className="h-4 w-4 text-primary" />
-              Attendees
-            </h2>
-            {canInviteFriends && (
-              <button
-                type="button"
-                onClick={() => setShowInviteDialog(true)}
-                className="inline-flex items-center gap-1 rounded-full gradient-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow"
-              >
-                <UserPlus className="h-3.5 w-3.5" /> Invite friends
-              </button>
-            )}
-          </div>
-          {canViewFullAttendeeList ? (
-            (!participationKnown || (useApiParticipation && apiParticipants.length === 0 && !participationKnown)) && useApiParticipation ? (
-              <div className="space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-2 rounded-xl bg-secondary/40 px-3 py-2.5">
-                    <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-secondary" />
-                    <div className="h-3 w-32 animate-pulse rounded bg-secondary" />
-                  </div>
-                ))}
-              </div>
-            ) : fullAttendeeRows.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No attendees yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {fullAttendeeRows.map((row) => (
-                  <li
-                    key={row.id}
-                    className="flex items-center justify-between gap-2 rounded-xl bg-secondary/40 px-3 py-2.5"
-                  >
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <UserAvatar
-                        src={row.profilePhoto}
-                        srcSecondary={row.avatar}
-                        seed={row.id}
-                        name={row.name}
-                        email={row.email}
-                        size="sm"
-                        className="shrink-0 border border-border/50"
-                      />
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {formatUserIdentity({ fullName: row.name })}
-                        {row.username && (
-                          <p className="text-sm text-muted-foreground" data-testid="profile-username">@{row.username}</p>
-                        )}
-                      </span>
-                      {row.isFriend && (
-                        <span
-                          data-testid="friend-label"
-                          className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"
-                        >
-                          Friend
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                    {isEventOwner && !isCancelledEvent && (
-                      <button
-                        type="button"
-                        disabled={checkinBusy || isCheckedIn(event.id, row.id)}
-                        onClick={() => void recordCheckin(row.id, row.name)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-primary/35 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <MapPinned className="h-3 w-3" />
-                        {isCheckedIn(event.id, row.id) ? 'Here' : 'Mark here'}
-                      </button>
-                    )}
-                    {isEventOwner && user && String(row.id) !== String(user.id) && !isPastEvent && !isCancelledEvent && (
-                      <button
-                        type="button"
-                        disabled={removingParticipantId === row.id}
-                        onClick={() => void handleRemoveAttendee(row.id)}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-destructive/35 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <UserMinus className="h-3 w-3" />
-                        {removingParticipantId === row.id ? '…' : 'Remove'}
-                      </button>
-                    )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )
-          ) : attendingFriends.length > 0 ? (
-            <FriendsAttendingSection
-              friends={attendingFriends}
-              othersCount={Math.max(0, attendeeDisplayCount - attendingFriends.length)}
-            />
-          ) : (
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              For privacy, only the count is shown here:{' '}
-              <span className="font-semibold text-foreground">{attendeeDisplayCount}</span>{' '}
-              {attendeeDisplayCount === 1 ? 'person is' : 'people are'} going.
-            </p>
-          )}
-        </div>
-
-        {canInviteFriends && (
-          <InviteFriendsDialog open={showInviteDialog} onOpenChange={setShowInviteDialog} eventId={event.id} />
-        )}
+        <EventDetailsAttendees
+          eventId={event.id}
+          currentUserId={user?.id}
+          canViewFullAttendeeList={canViewFullAttendeeList}
+          canInviteFriends={canInviteFriends}
+          showInviteDialog={showInviteDialog}
+          onInviteDialogChange={setShowInviteDialog}
+          participationKnown={participationKnown}
+          useApiParticipation={useApiParticipation}
+          apiParticipantsEmpty={apiParticipants.length === 0}
+          fullAttendeeRows={fullAttendeeRows}
+          attendingFriends={attendingFriends}
+          attendeeDisplayCount={attendeeDisplayCount}
+          isEventOwner={isEventOwner}
+          isCancelledEvent={isCancelledEvent}
+          isPastEvent={isPastEvent}
+          checkedInUserIds={checkedInUserIds}
+          removingParticipantId={removingParticipantId}
+          onRemove={(userId) => void handleRemoveAttendee(userId)}
+        />
 
         {!isCancelledEvent && user && (isEventOwner || hasJoined) && (
-          <div className="rounded-2xl glass-card p-4 space-y-3">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <MapPinned className="h-4 w-4 text-primary" />
-              Door check-in
-              <span className="ml-auto rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                {checkins.length} here
-              </span>
-            </h2>
-            {checkins.length > 0 && (
-              <ul className="space-y-1.5">
-                {checkins.map((c) => (
-                  <li key={c.userId} className="text-xs text-muted-foreground">
-                    <span className="font-semibold text-foreground">{c.name}</span> checked in
-                  </li>
-                ))}
-              </ul>
-            )}
-            {hasJoined && isCheckinWindow(eventStartMs(event)) && (
-              <button
-                type="button"
-                disabled={checkinBusy || isCheckedIn(event.id, user.id)}
-                onClick={async () => {
-                  setCheckinBusy(true);
-                  await recordCheckin(user.id, user.name || 'You');
-                  setCheckinBusy(false);
-                  setToast({ show: true, message: "You're here. Enjoy the event!", type: 'success' });
-                }}
-                className="w-full rounded-xl gradient-primary py-3 text-sm font-semibold text-primary-foreground shadow-glow disabled:opacity-50"
-              >
-                {isCheckedIn(event.id, user.id) ? "You're here" : "I'm here"}
-              </button>
-            )}
-            {isEventOwner && (
-              <form
-                className="flex gap-2"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const parsed = parseTicketQr(ticketScan);
-                  if (!parsed?.ticketId && !parsed?.name) return;
-                  setCheckinBusy(true);
-                  await recordCheckin(
-                    parsed.ticketId || `guest-${Date.now()}`,
-                    parsed.name || 'Guest',
-                    parsed.ticketId,
-                  );
-                  setTicketScan('');
-                  setCheckinBusy(false);
-                }}
-              >
-                <input
-                  value={ticketScan}
-                  onChange={(e) => setTicketScan(e.target.value)}
-                  placeholder="Paste ticket QR or ID"
-                  aria-label="Ticket QR or ID"
-                  className="flex-1 rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-primary/40"
-                />
-                <button
-                  type="submit"
-                  disabled={checkinBusy || !ticketScan.trim()}
-                  className="rounded-xl bg-secondary px-3 py-2 text-xs font-semibold disabled:opacity-50"
-                >
-                  Check in
-                </button>
-              </form>
-            )}
-          </div>
+          <EventDetailsCheckin
+            eventStartMs={eventStartMs(event)}
+            currentUserId={user.id}
+            isEventOwner={isEventOwner}
+            hasJoined={hasJoined}
+            summary={
+              checkinSummary ?? {
+                checked_in_count: 0,
+                participant_count: attendeeDisplayCount,
+                viewer_checked_in: false,
+                include_times: isEventOwner,
+                checkins: [],
+              }
+            }
+            checkinBusy={checkinBusy}
+            error={checkinError}
+            onSubmitCode={async (value, via) => {
+              setCheckinBusy(true);
+              setCheckinError('');
+              try {
+                const result = await submitEventCheckin(event.id, value, via);
+                await loadCheckin(event.id, isEventOwner);
+                setToast({
+                  show: true,
+                  message: result.already_checked_in ? 'You are already checked in.' : "You're checked in.",
+                  type: 'success',
+                });
+                if (!result.already_checked_in) {
+                  await postEventChatMessage(event.id, {
+                    v: 1,
+                    type: 'checkin',
+                    text: `${user.name || 'Someone'} is here`,
+                  });
+                }
+              } catch (err) {
+                const message = err instanceof CheckinApiError ? err.message : 'Could not check in.';
+                setCheckinError(message);
+                setToast({ show: true, message, type: 'error' });
+              } finally {
+                setCheckinBusy(false);
+              }
+            }}
+          />
         )}
 
-        {/* Map */}
-        <div className="rounded-2xl glass-card p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <MapPin className="h-4 w-4 text-primary" /> Location
-            </h2>
-            <a
-              href={openInGoogleMapsUrl({ lat: event.lat, lng: event.lng, placeName: event.location })}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-secondary/80"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open in Google Maps
-            </a>
-          </div>
-          <EventLocationMap latitude={event.lat} longitude={event.lng} className="h-52" />
-          <p className="text-xs text-muted-foreground">{event.location}</p>
-        </div>
+        <EventDetailsMap location={event.location} lat={event.lat} lng={event.lng} />
 
-        {/* Join / Leave */}
-        <div className="space-y-2">
-          <h2 className="text-base font-semibold text-foreground">
-            {isEventOwner ? 'Your event' : 'Join or leave'}
-          </h2>
-        </div>
-
-        {/* Event Chat Access */}
-        <div className="space-y-2">
-          <h2 className="text-base font-semibold text-foreground">Event chat</h2>
-          {!user ? (
-            <p className="text-xs text-muted-foreground">Sign in and join this event to access the event chat.</p>
-          ) : canAccessEventChat ? (
-            <div className="space-y-1.5">
-              <button
-                type="button"
-                onClick={() => navigate(`/chat?eventId=${event.id}`)}
-                className="w-full rounded-xl bg-secondary/80 py-3 text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
-              >
-                Open Event Chat
-              </button>
-              {isCancelledEvent && (
-                <p className="text-[11px] text-center text-muted-foreground">
-                  This event is cancelled. Chat is read-only.
-                </p>
-              )}
-              {isChatExpired && !isCancelledEvent && (
-                <p className="text-[11px] text-center text-muted-foreground">
-                  This event ended more than 48 hours ago. Chat is read-only.
-                </p>
-              )}
-            </div>
-          ) : isCancelledEvent ? (
-            <p className="text-xs text-muted-foreground">This event is cancelled.</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">Join this event to access its chat.</p>
-          )}
-        </div>
-
-        <div className="flex gap-3">
-          {isEventOwner ? (
-            <>
-              <button
-                type="button"
-                disabled={isPastEvent || isCancelledEvent}
-                onClick={() => !isPastEvent && !isCancelledEvent && navigate(`/event/${event.id}/edit`)}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
-                  isPastEvent || isCancelledEvent
-                    ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
-                    : 'border-primary/45 bg-primary/15 text-primary hover:bg-primary/25'
-                }`}
-              >
-                <Pencil className="h-4 w-4 shrink-0" />
-                Edit event
-              </button>
-              {!isEventPassed && (
-                <button
-                  type="button"
-                  disabled={isCancellingEvent || isCancelledEvent}
-                  onClick={() => void handleCancelEvent()}
-                  className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-semibold transition-colors active:scale-[0.98] ${
-                    isCancelledEvent
-                      ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
-                      : 'border-destructive/45 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-60'
-                  }`}
-                >
-                  <Ban className="h-4 w-4 shrink-0" />
-                  {isCancellingEvent ? 'Cancelling…' : isCancelledEvent ? 'Cancelled' : 'Cancel event'}
-                </button>
-              )}
-            </>
-          ) : showSplitJoinLeave ? (
-            <>
-              <button
-                type="button"
-                onClick={() => { if (!hasJoined && !participationLoading && !isPastEvent && !isCancelledEvent && !isAtCapacity) void handleJoinOrRequest(); }}
-                disabled={isPastEvent || isCancelledEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation || existingRequest?.status === 'rejected'}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isPastEvent || isCancelledEvent || isAtCapacity || hasJoined || participationLoading || isUpdatingParticipation
-                    ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                    : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
-                }`}
-              >
-                <UserPlus className="h-4 w-4 shrink-0" />
-                {isCancelledEvent ? 'Event Cancelled' : isPastEvent ? 'Event Ended' : isAtCapacity ? 'Event Full' : 'Join Event'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (hasJoined && !isUpdatingParticipation && !participationLoading && !isCancelledEvent) void handleJoinOrRequest();
-                }}
-                disabled={!hasJoined || participationLoading || isUpdatingParticipation || isCancelledEvent}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border border-border py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  !hasJoined || participationLoading || isUpdatingParticipation || isCancelledEvent
-                    ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
-                    : 'bg-secondary text-foreground hover:bg-secondary/80'
-                }`}
-              >
-                <LogOut className="h-4 w-4 shrink-0" />
-                Leave Event
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => { if (!isCancelledEvent) void handleJoinOrRequest(); }}
-                disabled={isCancelledEvent || isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold transition-transform active:scale-[0.98] ${
-                  isCancelledEvent || isPastEvent || isAtCapacity || isOrganizer || isEventOwner || existingRequest?.status === 'rejected' || isUpdatingParticipation || participationLoading
-                    ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                    : hasJoined
-                      ? 'border border-border bg-secondary text-foreground hover:bg-secondary/80'
-                      : 'gradient-primary text-primary-foreground shadow-glow ripple-container'
-                }`}
-              >
-                {useApiParticipation && !event.requiresApproval && isFreeEvent && !isCancelledEvent ? (
-                  hasJoined ? <LogOut className="h-4 w-4 shrink-0" /> : <UserPlus className="h-4 w-4 shrink-0" />
-                ) : null}
-                {getJoinButtonText()}
-              </button>
-            </>
-          )}
-        </div>
+        <EventDetailsActions
+          signedIn={Boolean(user)}
+          canAccessEventChat={canAccessEventChat}
+          isCancelledEvent={isCancelledEvent}
+          isChatExpired={isChatExpired}
+          isEventOwner={isEventOwner}
+          isEventPassed={isEventPassed}
+          isPastEvent={isPastEvent}
+          isAtCapacity={isAtCapacity}
+          isOrganizer={isOrganizer}
+          hasJoined={hasJoined}
+          participationLoading={participationLoading}
+          isUpdatingParticipation={isUpdatingParticipation}
+          isCancellingEvent={isCancellingEvent}
+          showSplitJoinLeave={showSplitJoinLeave}
+          useApiParticipation={useApiParticipation}
+          requiresApproval={event.requiresApproval}
+          isFreeEvent={isFreeEvent}
+          requestRejected={existingRequest?.status === 'rejected'}
+          joinLabel={joinLabel}
+          onOpenChat={() => navigate(`/chat?eventId=${event.id}`)}
+          onEdit={() => navigate(`/event/${event.id}/edit`)}
+          onCancelEvent={() => void handleCancelEvent()}
+          onJoin={() => void handleJoinOrRequest()}
+          onLeave={() => void handleJoinOrRequest()}
+          eventId={event.id}
+          onReportSuccess={(message) => setToast({ show: true, message, type: 'success' })}
+        />
       </motion.div>
 
-      {/* Modals */}
-      <AnimatePresence>
-        {showVenuePaymentModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm px-6"
-          >
-            <motion.div
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.9 }}
-              className="w-full max-w-sm rounded-2xl glass-card p-6 space-y-4"
-            >
-              <h3 className="text-lg font-bold text-foreground">Payment at Venue</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                This event has a fee of{' '}
-                <span className="font-semibold text-foreground">€{event.budget}</span>. Payment is
-                collected at the venue on arrival. By joining, you agree to pay when you get there.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => void handleVenuePaymentConfirm()}
-                  className="flex-1 gradient-primary rounded-xl py-2.5 text-sm font-semibold text-primary-foreground"
-                >
-                  Okay, Join Event
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowVenuePaymentModal(false)}
-                  className="flex-1 rounded-xl bg-secondary py-2.5 text-sm text-muted-foreground"
-                >
-                  Cancel
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <EventDetailsVenueModal
+        open={showVenuePaymentModal}
+        budget={event.budget}
+        onConfirm={() => void handleVenuePaymentConfirm()}
+        onCancel={() => setShowVenuePaymentModal(false)}
+      />
 
       <BottomNav />
     </div>

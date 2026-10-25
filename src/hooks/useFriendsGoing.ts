@@ -9,7 +9,48 @@ import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { EVENTS_CHANGED_EVENT } from '@/lib/realtimeEvents';
 import { eventStartMs, isEventUpcoming } from '@/lib/eventTime';
 
-const MAX_FRIEND_PROFILES = 8;
+const MAX_FRIEND_PROFILES = 50;
+
+type FriendEventRow = { event: EventItem; friends: UserSummary[] };
+
+function upcomingJoinedFromProfile(profile: Awaited<ReturnType<typeof fetchUserProfile>>): Record<string, unknown>[] {
+  const rec = profile as typeof profile & {
+    joined_events?: { upcoming?: unknown[] };
+    events?: { joined?: { upcoming?: unknown[] }; joined_events?: { upcoming?: unknown[] } } | null;
+  };
+  const lists = [rec.events?.joined?.upcoming, rec.joined_events?.upcoming, rec.events?.joined_events?.upcoming];
+  const out: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') continue;
+      const row = raw as Record<string, unknown>;
+      const id = String(row.id || '').trim().toLowerCase();
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+function mergeFriendRows(groups: FriendEventRow[]): FriendEventRow[] {
+  const byId = new Map<string, FriendEventRow>();
+  for (const row of groups) {
+    const existing = byId.get(row.event.id);
+    if (!existing) {
+      byId.set(row.event.id, { event: row.event, friends: [...row.friends] });
+      continue;
+    }
+    for (const friend of row.friends) {
+      const id = friend.id.trim().toLowerCase();
+      if (!id || existing.friends.some((f) => f.id.trim().toLowerCase() === id)) continue;
+      existing.friends.push(friend);
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => eventStartMs(a.event) - eventStartMs(b.event));
+}
 
 export function useFriendsGoing(eventId: string | undefined) {
   const [friends, setFriends] = useState<UserSummary[]>([]);
@@ -47,8 +88,6 @@ export function useFriendsGoing(eventId: string | undefined) {
   return { friends, loading };
 }
 
-type FriendEventRow = { event: EventItem; friends: UserSummary[] };
-
 async function eventsFromFriendsProfiles(friends: UserSummary[]): Promise<FriendEventRow[]> {
   const slice = friends.slice(0, MAX_FRIEND_PROFILES);
   const profiles = await Promise.all(
@@ -61,23 +100,16 @@ async function eventsFromFriendsProfiles(friends: UserSummary[]): Promise<Friend
     }),
   );
 
-  const byEvent = new Map<string, FriendEventRow>();
+  const rows: FriendEventRow[] = [];
   for (const item of profiles) {
     if (!item) continue;
-    const upcoming = item.profile.events?.joined?.upcoming ?? [];
-    for (const raw of upcoming) {
-      if (!raw || typeof raw !== 'object') continue;
-      const event = mapApiEventToItem(raw as Record<string, unknown>);
+    for (const raw of upcomingJoinedFromProfile(item.profile)) {
+      const event = mapApiEventToItem(raw);
       if (!event.id || !isEventUpcoming(event) || String(event.status || '').toLowerCase() === 'cancelled') continue;
-      const existing = byEvent.get(event.id);
-      if (existing) {
-        if (!existing.friends.some((row) => row.id === item.friend.id)) existing.friends.push(item.friend);
-      } else {
-        byEvent.set(event.id, { event, friends: [item.friend] });
-      }
+      rows.push({ event, friends: [item.friend] });
     }
   }
-  return Array.from(byEvent.values()).sort((a, b) => eventStartMs(a.event) - eventStartMs(b.event));
+  return mergeFriendRows(rows);
 }
 
 export function useFriendsGoingEvents(events: EventItem[], limit = 24) {
@@ -111,8 +143,8 @@ export function useFriendsGoingEvents(events: EventItem[], limit = 24) {
       setFriendCount(allFriends.length);
 
       const ids = key.split(',').filter(Boolean);
-      const fromCounts = (
-        await Promise.all(
+      const [fromCounts, fromProfiles] = await Promise.all([
+        Promise.all(
           ids.map(async (id) => {
             try {
               const attending = await fetchFriendsAttending(id, token);
@@ -126,25 +158,12 @@ export function useFriendsGoingEvents(events: EventItem[], limit = 24) {
               return event ? { event, friends: [] as UserSummary[] } : null;
             }
           }),
-        )
-      ).filter(Boolean) as FriendEventRow[];
+        ).then((rows) => rows.filter(Boolean) as FriendEventRow[]),
+        allFriends.length === 0 ? Promise.resolve([] as FriendEventRow[]) : eventsFromFriendsProfiles(allFriends),
+      ]);
 
       if (cancelled) return;
-      if (fromCounts.length > 0) {
-        setRows(fromCounts.slice(0, limit));
-        setLoading(false);
-        return;
-      }
-
-      if (allFriends.length === 0) {
-        setRows([]);
-        setLoading(false);
-        return;
-      }
-
-      const fromProfiles = await eventsFromFriendsProfiles(allFriends);
-      if (cancelled) return;
-      setRows(fromProfiles.slice(0, limit));
+      setRows(mergeFriendRows([...fromCounts, ...fromProfiles]).slice(0, limit));
       setLoading(false);
     };
     void load();

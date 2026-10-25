@@ -9,7 +9,7 @@ import { logout, setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
-import { destinationAfterSignIn, hasChosenUsername } from '@/lib/username';
+import { destinationAfterSignIn, profileFromMeResponse } from '@/lib/username';
 import {
   getPendingAdminVerification,
   clearPendingAdminVerification,
@@ -98,7 +98,7 @@ export default function AdminVerifyPage() {
         headers: { Authorization: `Bearer ${result.accessToken}`, Accept: 'application/json' },
       });
       const profileData = await profileRes.json().catch(() => ({} as Record<string, unknown>));
-      const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
+      const p = profileFromMeResponse(profileData);
       avatarUrl = String(p.avatar_url || '');
       fullName = String(p.full_name || p.name || fullName);
       bio = String(p.bio || '');

@@ -264,18 +264,6 @@ function ParticipantRow({
           <p className="truncate text-sm font-semibold" style={{ color: 'var(--adm-fg)' }}>
             {participant.full_name}
           </p>
-          {participant.is_pro && (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-              style={{
-                background: 'hsl(45 93% 50% / .15)',
-                color: 'hsl(45 93% 60%)',
-                borderColor: 'hsl(45 93% 50% / .4)',
-              }}
-            >
-              Pro
-            </span>
-          )}
         </div>
         {participant.username && (
           <p className="truncate text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>

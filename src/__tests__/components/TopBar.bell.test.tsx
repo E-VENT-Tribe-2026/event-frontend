@@ -159,6 +159,5 @@ describe('TopBar bell dot (#296)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     const item = await screen.findByRole('menuitem', { name: 'Manage account' });
     expect(item).toHaveAttribute('href', '/account');
-    expect(screen.getByTestId('plan-badge')).toHaveTextContent('Basic');
   });
 });

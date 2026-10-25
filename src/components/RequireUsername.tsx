@@ -4,9 +4,11 @@ import { getAuthToken, notifyAuthExpired } from '@/lib/auth';
 import { fetchMyProfile, ProfileMeError } from '@/lib/profileMe';
 import { hasChosenUsername, profileFromMeResponse } from '@/lib/username';
 import { getPendingAdminVerification } from '@/lib/adminAuth';
+import { getCurrentUser } from '@/lib/storage';
+import { isAdministratorRole } from '@/lib/adminApi';
 
 /** Paths that administrators are allowed to stay on without being redirected to /admin. */
-const ADMIN_EXEMPT_PATHS = ['/admin', '/admin-verify', '/choose-username'];
+const ADMIN_EXEMPT_PATHS = ['/admin', '/admin-verify'];
 
 /** Signed-in accounts without a username stay on the selection step. */
 export default function RequireUsername({ children }: { children: React.ReactNode }) {
@@ -54,13 +56,13 @@ export default function RequireUsername({ children }: { children: React.ReactNod
 
   if (!token) return <Navigate to="/login" replace />;
   if (state === 'checking') return null;
-  if (state === 'need') return <Navigate to="/choose-username" replace />;
+
+  const isAdmin = isAdministratorRole(role) || isAdministratorRole(getCurrentUser()?.role);
+  // A verified administrator must reach the admin panel, not choose-username / password setup.
+  if (state === 'need' && !isAdmin) return <Navigate to="/choose-username" replace />;
 
   // Redirect verified administrators away from non-admin pages
-  if (
-    role === 'administrator' &&
-    !ADMIN_EXEMPT_PATHS.includes(location.pathname)
-  ) {
+  if (isAdmin && !ADMIN_EXEMPT_PATHS.includes(location.pathname)) {
     return <Navigate to="/admin" replace />;
   }
 

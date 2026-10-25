@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { getCurrentUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { AUTH_TOKEN_EVENT, getAuthToken, clearAuthToken } from '@/lib/auth';
+import { NOTIFICATION_PREFS_EVENT, readNotificationPrefs } from '@/lib/accountSettings';
 import { countBellUnreads, fetchNotifications, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
 import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
 import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
@@ -11,7 +12,6 @@ import { invalidatePrefix } from '@/lib/queryCache';
 import { useEffect, useState, useRef } from 'react';
 import AppLogo from '@/components/AppLogo';
 import TopNavProfile from '@/components/TopNavProfile';
-import PlanBadge from '@/components/PlanBadge';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TopBarProps {
@@ -81,7 +81,10 @@ export default function TopBar({
         fetchNotifications(token).catch(() => [] as Awaited<ReturnType<typeof fetchNotifications>>),
         fetchIncomingRequestCount().catch(() => 0),
       ]).then(([rows, pending]) => {
-        if (!cancelled) setUnreadCount(countBellUnreads(rows, pending));
+        if (!cancelled) {
+          const prefs = readNotificationPrefs(getCurrentUser()?.id);
+          setUnreadCount(countBellUnreads(rows, pending, prefs));
+        }
       });
     };
 
@@ -90,12 +93,14 @@ export default function TopBar({
     const onFocus = () => check(false);
     window.addEventListener(FRIENDS_CHANGED_EVENT, onLive);
     window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onLive);
+    window.addEventListener(NOTIFICATION_PREFS_EVENT, onLive);
     window.addEventListener(AUTH_TOKEN_EVENT, onLive);
     window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
       window.removeEventListener(FRIENDS_CHANGED_EVENT, onLive);
       window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onLive);
+      window.removeEventListener(NOTIFICATION_PREFS_EVENT, onLive);
       window.removeEventListener(AUTH_TOKEN_EVENT, onLive);
       window.removeEventListener('focus', onFocus);
     };
@@ -190,7 +195,6 @@ export default function TopBar({
                       <p className="text-[11px] text-muted-foreground truncate">
                         {user?.name || 'Preferences'}
                       </p>
-                      {user ? <PlanBadge plan={user} /> : null}
                     </div>
                   </div>
                 </div>

@@ -213,6 +213,47 @@ export function fetchBlockedUsers(page = 1, limit = 20): Promise<Page<BlockedUse
   return cachedFetch(`/api/blocks:${cacheScope()}:${path}`, () => request<Page<BlockedUserItem>>(path), TTL.MEDIUM);
 }
 
+function suggestionRows(body: unknown): UserSearchResult[] {
+  const rows = Array.isArray(body)
+    ? body
+    : body && typeof body === 'object' && Array.isArray((body as { data?: unknown }).data)
+      ? (body as { data: unknown[] }).data
+      : [];
+  const out: UserSearchResult[] = [];
+  for (const item of rows) {
+    const raw =
+      item && typeof item === 'object' && 'user' in item
+        ? (item as { user: Record<string, unknown> }).user
+        : (item as Record<string, unknown> | null);
+    if (!raw || typeof raw.id !== 'string' || !raw.id.trim()) continue;
+    out.push({
+      id: raw.id,
+      username: typeof raw.username === 'string' ? raw.username : '',
+      full_name: typeof raw.full_name === 'string' ? raw.full_name : null,
+      avatar_url: typeof raw.avatar_url === 'string' ? raw.avatar_url : null,
+      avatar_kind: typeof raw.avatar_kind === 'string' ? raw.avatar_kind : null,
+      icon_id: typeof raw.icon_id === 'string' ? raw.icon_id : null,
+    });
+  }
+  return out;
+}
+
+/** People the backend thinks you may know. Empty when the endpoint is missing. */
+export function fetchFriendSuggestions(): Promise<UserSearchResult[]> {
+  const path = '/api/friends/suggestions';
+  return cachedFetch(
+    friendsKey(path),
+    async () => {
+      try {
+        return suggestionRows(await request<unknown>(path));
+      } catch {
+        return [];
+      }
+    },
+    TTL.MEDIUM,
+  );
+}
+
 /** Pending incoming requests. Cached briefly; friendship mutations clear this prefix. */
 export async function fetchIncomingRequestCount(): Promise<number> {
   const path = '/api/friends/requests/count';

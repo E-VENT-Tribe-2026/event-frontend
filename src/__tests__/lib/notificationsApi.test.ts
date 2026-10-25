@@ -93,4 +93,16 @@ describe('countBellUnreads', () => {
       row({ id: '2', type: 'event_updated', read: false }),
     ], 1)).toBe(2);
   });
+
+  it('ignores muted kinds and pending friend requests', () => {
+    expect(countBellUnreads([
+      row({ id: '1', type: 'event_invitation', read: false }),
+      row({ id: '2', type: 'warning', read: false }),
+    ], 3, {
+      friend_requests: false,
+      invitations: false,
+      event_chat: true,
+      reminders: true,
+    })).toBe(1);
+  });
 });

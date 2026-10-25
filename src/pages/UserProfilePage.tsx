@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import { ArrowLeft, Ban, Calendar, Clock, Flag, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import ReportContentDialog from '@/components/ReportContentDialog';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
-import PlanBadge from '@/components/PlanBadge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +48,7 @@ import {
   type ProfileEventGroup,
   type UserProfile,
 } from '@/lib/userProfileApi';
+import { fetchAdminUserDetails, isAdministratorRole, type AdminUserDetailsFull } from '@/lib/adminApi';
 
 type MainTab = 'events' | 'friends';
 type EventTab = 'upcoming' | 'past';
@@ -106,6 +108,29 @@ function availableEventTabs(groups: Array<ProfileEventGroup | undefined>): Event
   return (['upcoming', 'past'] as const).filter((tab) => groups.some((g) => Array.isArray(g?.[tab])));
 }
 
+function userProfileFromAdmin(data: AdminUserDetailsFull): UserProfile {
+  return {
+    id: data.id,
+    username: data.username,
+    full_name: data.full_name,
+    avatar_url: data.avatar_url ?? null,
+    avatar_kind: data.avatar_kind ?? 'icon',
+    icon_id: data.icon_id ?? null,
+    events: {
+      organized: {
+        upcoming: data.organized_events?.upcoming,
+        past: data.organized_events?.past,
+      },
+      joined: {
+        upcoming: data.joined_events?.upcoming,
+        past: data.joined_events?.past,
+      },
+    },
+    is_suspended: data.is_suspended,
+    suspension: data.suspension,
+  };
+}
+
 export default function UserProfilePage() {
   const navigate = useNavigate();
   const { userId = '' } = useParams<{ userId: string }>();
@@ -116,6 +141,7 @@ export default function UserProfilePage() {
   const [eventTab, setEventTab] = useState<EventTab>('upcoming');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [confirmBlock, setConfirmBlock] = useState<BlockAction | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Friends of the viewed user beyond the first page, which comes with the profile.
   const [moreFriends, setMoreFriends] = useState<UserSummary[]>([]);
@@ -142,10 +168,39 @@ export default function UserProfilePage() {
     };
   }, [tokenReady]);
 
-  const { data: profile, isLoading, error, refetch } = useUserProfile(
+  const { data: publicProfile, isLoading, error, refetch } = useUserProfile(
     isSelf || !tokenReady ? undefined : viewer?.id,
     userId,
   );
+
+  const viewerIsAdmin = isAdministratorRole(viewer?.role);
+  const [adminOverride, setAdminOverride] = useState<UserProfile | null>(null);
+  const [adminOverrideLoading, setAdminOverrideLoading] = useState(false);
+  const publicUnavailable = isProfileUnavailable(error);
+
+  useEffect(() => {
+    if (!viewerIsAdmin || !publicUnavailable || !userId) {
+      setAdminOverride(null);
+      return;
+    }
+    let cancelled = false;
+    setAdminOverrideLoading(true);
+    fetchAdminUserDetails(userId)
+      .then((data) => {
+        if (!cancelled) setAdminOverride(userProfileFromAdmin(data));
+      })
+      .catch(() => {
+        if (!cancelled) setAdminOverride(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAdminOverrideLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerIsAdmin, publicUnavailable, userId]);
+
+  const profile = publicProfile ?? adminOverride;
 
   // A new first page (other user, refetch after an action) restarts the friends list.
   const firstFriendsPage = profile?.friends;
@@ -309,6 +364,14 @@ export default function UserProfilePage() {
           <button type="button" onClick={() => setConfirmBlock('unblock')} disabled={busy} className={outline}>
             <Ban className="h-3.5 w-3.5" /> Unblock
           </button>
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            disabled={busy}
+            className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
+          >
+            <Flag className="h-3.5 w-3.5" /> Report
+          </button>
         </div>
       );
     }
@@ -322,6 +385,14 @@ export default function UserProfilePage() {
           className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
         >
           <Ban className="h-3.5 w-3.5" /> Block
+        </button>
+        <button
+          type="button"
+          onClick={() => setReportOpen(true)}
+          disabled={busy}
+          className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
+        >
+          <Flag className="h-3.5 w-3.5" /> Report
         </button>
       </div>
     );
@@ -350,8 +421,8 @@ export default function UserProfilePage() {
         <h1 className="text-lg font-bold text-foreground">Profile</h1>
       </header>
 
-      {!tokenReady || isLoading ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading profile…</p>
+      {!tokenReady || isLoading || adminOverrideLoading ? (
+        <ProfileLoadingRunner compact />
       ) : !getAuthToken() ? (
         <div className="px-4 py-16 text-center" role="alert">
           <p className="text-sm text-muted-foreground">You are not signed in on this tab. Please log in again.</p>
@@ -363,11 +434,11 @@ export default function UserProfilePage() {
             Log in
           </button>
         </div>
-      ) : isProfileUnavailable(error) ? (
+      ) : publicUnavailable && !adminOverride ? (
         <div className="px-4 py-16 text-center" role="alert">
           <p className="text-sm text-muted-foreground">{PROFILE_UNAVAILABLE_MESSAGE}</p>
         </div>
-      ) : error || !profile ? (
+      ) : (error && !adminOverride) || !profile ? (
         <div className="px-4 py-16 text-center" role="alert">
           <p className="text-sm text-muted-foreground">{profileLoadMessage(error)}</p>
           <button
@@ -404,12 +475,31 @@ export default function UserProfilePage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
-                <PlanBadge plan={profile} />
+                {profile.is_suspended && (
+                  <span
+                    data-testid="account-status-badge"
+                    className="inline-flex items-center rounded-full border border-destructive/40 bg-destructive/10 px-2.5 py-0.5 text-[11px] font-semibold text-destructive"
+                  >
+                    Suspended
+                  </span>
+                )}
               </div>
               {profile.username && <p className="text-sm text-muted-foreground">@{profile.username}</p>}
             </div>
 
-            {renderActions(profile)}
+            {profile.is_suspended && (
+              <div
+                className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-foreground"
+                role="status"
+              >
+                <p>
+                  <strong>This account is suspended.</strong>
+                  {profile.suspension?.reason ? ` Reason: ${profile.suspension.reason}` : ''}
+                </p>
+              </div>
+            )}
+
+            {!profile.is_suspended && renderActions(profile)}
 
             {profile.bio ? (
               <p className="whitespace-pre-line text-sm text-foreground/90">{profile.bio}</p>
@@ -556,6 +646,19 @@ export default function UserProfilePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {profile && (
+        <ReportContentDialog
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+          targetType="user"
+          targetId={profile.id}
+          origin="profile"
+          title={`Report ${displayName}`}
+          onSuccess={(message) => setToast({ show: true, message, type: 'success' })}
+          onError={(message) => setToast({ show: true, message, type: 'error' })}
+        />
+      )}
 
       <BottomNav />
     </div>

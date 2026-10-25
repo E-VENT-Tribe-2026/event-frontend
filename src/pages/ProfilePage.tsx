@@ -11,15 +11,16 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, Lock, Eye, EyeOff, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette, Mail } from 'lucide-react';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette, Mail } from 'lucide-react';
 import ColorSchemePicker from '@/components/ColorSchemePicker';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Switch } from '@/components/ui/switch';
+import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import AppToast from '@/components/AppToast';
 import { getAuthToken, clearAuthToken, notifyAuthExpired } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import { mapApiEventToItem, parseJoinedEventsApiList } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -29,12 +30,11 @@ import { FULL_NAME_RULES_HINT, getFullNameValidationError, normalizeFullName } f
 import { uploadProfilePhotoToStorage } from '@/lib/uploadAvatar';
 import { storageRefusalMessage } from '@/lib/profilePhoto';
 import { PROFILE_ICONS } from '@/lib/profileAssets';
-import { toProfileVisibility, type ProfileVisibility } from '@/lib/userProfileApi';
+import { toProfileVisibility, visibilityForApi, type ProfileVisibility } from '@/lib/userProfileApi';
 import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
 import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
 import InvitationsTab from '@/components/InvitationsTab';
-import PlanBadge from '@/components/PlanBadge';
-import { accountPlanFrom } from '@/lib/accountPlan';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import { useMyInvitations } from '@/hooks/useMyInvitations';
 import { 
   fetchFriends, 
@@ -66,15 +66,6 @@ const PROFILE_AVATARS = AVATAR_SEEDS.map((seed) => ({
   id: seed,
   url: getGeneratedAvatarUrl(seed),
 }));
-
-const PROFILE_VISIBILITY_OPTIONS: Array<{ value: ProfileVisibility; label: string; hint: string }> = [
-  { value: 'public', label: 'Public', hint: 'Everyone can see your profile. Only your friends see your upcoming events.' },
-  {
-    value: 'friends_only',
-    label: 'Friends only',
-    hint: 'People who are not your friends see only your username, full name, profile picture and banner.',
-  },
-];
 
 function sameUserId(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -138,16 +129,6 @@ export default function ProfilePage() {
   const [visibleEvents, setVisibleEvents] = useState(4);
   const [visibleFavorites, setVisibleFavorites] = useState(4);
 
-  // Password Modal State
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  
   // Data State
   const [remoteJoinedEvents, setRemoteJoinedEvents] = useState<EventItem[]>([]);
   const [remoteOrganizedEvents, setRemoteOrganizedEvents] = useState<EventItem[]>([]);
@@ -293,7 +274,6 @@ export default function ProfilePage() {
               bio: String(data.bio || ""),
               avatar: data.avatar_url,
               interests: Array.isArray(data.interests) ? data.interests : [],
-              isPremium: accountPlanFrom(data) === 'pro',
             });
             const loadedName = String(data.full_name || data.name || '');
             const loadedAvatar = typeof data.avatar_url === 'string' ? data.avatar_url : '';
@@ -366,8 +346,7 @@ export default function ProfilePage() {
 
         if (cancelled) return;
 
-        const joinedRows = Array.isArray(joinedBody?.data) ? joinedBody.data : Array.isArray(joinedBody) ? joinedBody : [];
-        const mappedJoined = joinedRows.map((row: any) => mapApiEventToItem(row.events || row)).filter(Boolean);
+        const mappedJoined = parseJoinedEventsApiList(joinedBody).map(mapApiEventToItem);
         setRemoteJoinedEvents(mappedJoined);
 
         const createdRows = Array.isArray(createdBody?.data) ? createdBody.data : Array.isArray(createdBody) ? createdBody : [];
@@ -504,7 +483,7 @@ export default function ProfilePage() {
       interests,
     };
     // Sent only when changed, so saving other fields never rewrites the stored setting.
-    if (visibility !== savedVisibility) textPayload.visibility = visibility;
+    if (visibility !== savedVisibility) textPayload.visibility = visibilityForApi(visibility);
     const payload: Record<string, unknown> = { ...textPayload };
     if (previewAvatarUrl !== avatarUrl || previewAvatarKind !== avatarKind) {
       payload.avatar_url = previewAvatarUrl || null;
@@ -535,8 +514,12 @@ export default function ProfilePage() {
         payload.icon_id !== undefined ||
         payload.banner_url !== undefined
       );
+      if (!saveRes.ok && saveRes.status === 422 && payload.visibility === 'private') {
+        saveRes = await putProfile({ ...payload, visibility: 'friends_only' });
+      }
       if (!saveRes.ok && saveRes.status === 422 && hasMediaFields) {
         const withoutKind: Record<string, unknown> = { ...textPayload };
+        if (payload.visibility === 'private') withoutKind.visibility = 'friends_only';
         if (payload.avatar_url !== undefined) withoutKind.avatar_url = payload.avatar_url;
         if (payload.banner_url !== undefined) withoutKind.banner_url = payload.banner_url;
         saveRes = await putProfile(withoutKind);
@@ -588,6 +571,51 @@ export default function ProfilePage() {
     }
   };
 
+  const persistVisibility = async (next: ProfileVisibility) => {
+    setVisibility(next);
+    if (editing || next === savedVisibility) return;
+    const token = getAuthToken();
+    if (!token) {
+      setVisibility(savedVisibility);
+      setToast({ show: true, message: 'Your session expired. Please sign in again.', type: 'error' });
+      return;
+    }
+    const put = (value: string) =>
+      fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ visibility: value }),
+      });
+    try {
+      let res = await put(visibilityForApi(next));
+      if (!res.ok && res.status === 422 && next === 'private') {
+        res = await put('friends_only');
+      }
+      if (!res.ok) {
+        setVisibility(savedVisibility);
+        const failed = await res.json().catch(() => ({}));
+        setToast({ show: true, message: profileSaveErrorMessage(failed, 'Could not update visibility.'), type: 'error' });
+        return;
+      }
+      const saved = await res.json().catch(() => ({} as Record<string, unknown>));
+      const savedProfile = (saved as { data?: Record<string, unknown> }).data || saved;
+      const stored = toProfileVisibility(savedProfile?.visibility ?? next);
+      setVisibility(stored);
+      setSavedVisibility(stored);
+      invalidate(`/api/profile/me:${user?.id ?? ''}`);
+      invalidate('/api/profile/me');
+      invalidatePrefix('/api/profile');
+      setToast({ show: true, message: stored === 'private' ? 'Profile is now private.' : 'Profile is now public.', type: 'success' });
+    } catch {
+      setVisibility(savedVisibility);
+      setToast({ show: true, message: 'Could not update visibility.', type: 'error' });
+    }
+  };
+
   const toggleInterest = (interest: string) => {
     setInterests((prev) => (
       prev.includes(interest) ? prev.filter((entry) => entry !== interest) : [...prev, interest]
@@ -622,30 +650,6 @@ export default function ProfilePage() {
         invalidatePrefix('/api/favorites');
       }
     } catch (err) { console.error(err); }
-  };
-
-  const handleChangePassword = async () => {
-    if (!currentPassword) { setToast({ show: true, message: 'Please enter current password.', type: 'error' }); return; }
-    if (newPassword.length < 8) { setToast({ show: true, message: 'Password must be at least 8 chars.', type: 'error' }); return; }
-    if (newPassword !== confirmPassword) { setToast({ show: true, message: 'Passwords do not match.', type: 'error' }); return; }
-
-    const token = getAuthToken();
-    if (!token) return;
-    setPasswordLoading(true);
-    try {
-      const res = await fetch(getApiUrl('/api/auth/reset-password'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ access_token: token, current_password: currentPassword, new_password: newPassword, confirm_password: confirmPassword }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setToast({ show: true, message: 'Password updated successfully.', type: 'success' });
-        setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setShowPasswordModal(false);
-      } else {
-        setToast({ show: true, message: data.detail || 'Failed to update password.', type: 'error' });
-      }
-    } catch { setToast({ show: true, message: 'Something went wrong.', type: 'error' }); } finally { setPasswordLoading(false); }
   };
 
   const handleLogout = () => { logout(); clearAuthToken(); navigate('/login'); };
@@ -720,7 +724,7 @@ export default function ProfilePage() {
 
   const openProfile = (userId: string) => navigate(userProfilePath(userId, user?.id ?? null));
 
-  if (profileLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" /></div>;
+  if (profileLoading) return <ProfileLoadingRunner />;
   if (!user) { navigate('/login'); return null; }
 
   const currentDisplayBanner = editing ? previewBannerUrl : bannerUrl;
@@ -781,9 +785,6 @@ export default function ProfilePage() {
                   </button>
                 </h2>
                 <p className="text-sm text-muted-foreground" data-testid="profile-username">@{username}</p>
-                <div className="flex justify-center pt-1">
-                  <PlanBadge plan={user} />
-                </div>
               </div>
             )}
           </div>
@@ -910,34 +911,22 @@ export default function ProfilePage() {
         </div>
 
         {/* Profile visibility */}
-        <div className="rounded-2xl glass-card p-4 space-y-2">
-          <h3 className="text-sm font-semibold">Profile visibility</h3>
-          {editing ? (
-            <div className="flex gap-1 rounded-xl bg-secondary/60 p-1" role="radiogroup" aria-label="Profile visibility">
-              {PROFILE_VISIBILITY_OPTIONS.map((option) => {
-                const selected = visibility === option.value;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => setVisibility(option.value)}
-                    className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-all ${selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
+        <div className="rounded-2xl glass-card p-4 space-y-2" data-testid="profile-visibility">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">Private profile</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {visibility === 'private'
+                  ? 'Only you and your friends can view your profile.'
+                  : 'Anyone can find and view your profile.'}
+              </p>
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground" data-testid="profile-visibility">
-              {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.label}
-            </p>
-          )}
-          <p className="text-[11px] text-muted-foreground">
-            {PROFILE_VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.hint}
-          </p>
+            <Switch
+              checked={visibility === 'private'}
+              onCheckedChange={(on) => void persistVisibility(on ? 'private' : 'public')}
+              aria-label="Private profile"
+            />
+          </div>
         </div>
 
         {/* Save/Cancel Buttons */}
@@ -958,62 +947,6 @@ export default function ProfilePage() {
           </h3>
           <ColorSchemePicker />
         </div>
-
-        {/* Change Password Modal Trigger */}
-        <div className="rounded-2xl glass-card p-4">
-          <button onClick={() => setShowPasswordModal(true)} className="flex w-full items-center justify-between">
-            <h3 className="flex items-center gap-2 text-sm font-semibold"><Lock className="h-4 w-4 text-primary" /> Change Password</h3>
-            <span className="text-xs text-primary font-medium hover:underline">Update</span>
-          </button>
-        </div>
-
-        {/* Password Popup Modal */}
-        <AnimatePresence>
-          {showPasswordModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full max-w-sm rounded-3xl glass-card p-6 space-y-4 border border-border bg-background shadow-xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold">Change Password</h3>
-                  <button onClick={() => setShowPasswordModal(false)} className="p-1 text-muted-foreground hover:text-foreground">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                
-                <div className="space-y-3 pt-2">
-                  <div className="relative">
-                    <input type={showCurrentPassword ? 'text' : 'password'} value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Current password" className="w-full rounded-xl bg-secondary/80 px-4 py-3 pr-10 text-sm outline-none border border-border/50" />
-                    <button type="button" onClick={() => setShowCurrentPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                      {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-
-                  <div className="relative">
-                    <input type={showNewPassword ? 'text' : 'password'} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password (min 8 chars)" className="w-full rounded-xl bg-secondary/80 px-4 py-3 pr-10 text-sm outline-none border border-border/50" />
-                    <button type="button" onClick={() => setShowNewPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-
-                  <div className="relative">
-                    <input type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password" className="w-full rounded-xl bg-secondary/80 px-4 py-3 pr-10 text-sm outline-none border border-border/50" />
-                    <button type="button" onClick={() => setShowConfirmPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-3">
-                  <button onClick={() => setShowPasswordModal(false)} className="flex-1 rounded-xl border border-border bg-secondary py-3 text-xs font-semibold hover:bg-secondary/80">
-                    Cancel
-                  </button>
-                  <button onClick={handleChangePassword} disabled={passwordLoading} className="flex-1 gradient-primary rounded-xl py-3 text-xs font-semibold text-primary-foreground shadow-glow">
-                    {passwordLoading ? 'Updating...' : 'Update Password'}
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
 
         {/* Pending Payments */}
         {approvedRequests.length > 0 && (

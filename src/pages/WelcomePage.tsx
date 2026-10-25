@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { MapPin, Sparkles, UserPlus, Zap, Users, Calendar, ArrowRight, Music, Cpu, Utensils, Dumbbell, Palette, Gamepad2 } from 'lucide-react';
 import { seedDatabase } from '@/lib/seedData';
 import { categoryCardStyle } from '@/lib/categoryStyle';
+import { authCallbackLocation, isSignInAuthType, readAuthLinkType } from '@/lib/authLink';
 
 const PREVIEW_EVENTS = [
   { title: 'Neon Nights Festival', category: 'Music', location: 'NYC' },
@@ -42,10 +43,15 @@ export default function WelcomePage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    const isRecovery = (hashParams.get('type') || '').toLowerCase() === 'recovery';
-    const accessToken = hashParams.get('access_token') || hashParams.get('token') || '';
-    if (isRecovery && accessToken.trim()) {
+    const queryParams = new URLSearchParams(window.location.search);
+    const linkType = readAuthLinkType();
+    const accessToken = hashParams.get('access_token') || hashParams.get('token') || queryParams.get('access_token') || queryParams.get('token') || '';
+    if (linkType === 'recovery' && accessToken.trim()) {
       navigate(`/forgot-password?access_token=${encodeURIComponent(accessToken.trim())}`, { replace: true });
+      return;
+    }
+    if (isSignInAuthType(linkType) && (accessToken.trim() || queryParams.get('code'))) {
+      navigate(authCallbackLocation(window.location.search, window.location.hash), { replace: true });
     }
   }, [navigate]);
 

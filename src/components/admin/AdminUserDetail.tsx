@@ -35,11 +35,13 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   fetchAdminUserDetails,
+  fetchUserWarnings,
   grantAdminRole,
   warnUser,
   withdrawWarning,
   suspendUser,
   liftSuspension,
+  isSuspendedAccount,
   type AdminUserDetailsFull,
   type AdminEventSummary,
   type AdminUserWarning,
@@ -441,10 +443,16 @@ export default function AdminUserDetail({
     setLoading(true);
     setError('');
 
-    fetchAdminUserDetails(userId)
-      .then((data) => {
+    Promise.all([
+      fetchAdminUserDetails(userId),
+      fetchUserWarnings(userId).catch(() => [] as AdminUserWarning[]),
+    ])
+      .then(([data, warnings]) => {
         if (!cancelled) {
-          setUser(data);
+          setUser({
+            ...data,
+            warnings: warnings.length ? warnings : (data.warnings ?? []),
+          });
           setLoading(false);
         }
       })
@@ -490,11 +498,24 @@ export default function AdminUserDetail({
         onSuccessToast(res.message || 'Warning issued.');
       } else if (dialogKind === 'suspend') {
         const res = await suspendUser(user.id, reason.trim());
-        setUser((prev) => (prev ? { ...prev, is_suspended: true } : null));
+        setUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                is_suspended: true,
+                status: 'suspended',
+                suspension: {
+                  reason: reason.trim(),
+                  suspended_at: new Date().toISOString(),
+                  suspended_by: 'You',
+                },
+              }
+            : null,
+        );
         onSuccessToast(res.message || 'User suspended.');
       } else if (dialogKind === 'lift') {
-        const res = await liftSuspension(user.id);
-        setUser((prev) => (prev ? { ...prev, is_suspended: false, suspension: null } : null));
+        const res = await liftSuspension(user.id, reason.trim());
+        setUser((prev) => (prev ? { ...prev, is_suspended: false, status: 'active', suspension: null } : null));
         onSuccessToast(res.message || 'Suspension lifted.');
       } else if (dialogKind === 'makeAdmin') {
         const res = await grantAdminRole(user.id);
@@ -530,8 +551,8 @@ export default function AdminUserDetail({
   };
 
   const isAdmin = Boolean(user?.is_admin || user?.role === 'administrator');
-  const isSuspended = Boolean(user?.is_suspended);
-  const needsReason = dialogKind === 'warn' || dialogKind === 'suspend';
+  const isSuspended = user ? isSuspendedAccount(user) : false;
+  const needsReason = dialogKind === 'warn' || dialogKind === 'suspend' || dialogKind === 'lift';
 
   const extra = (user ?? {}) as UserExtra;
   const warnings = (user?.warnings ?? []) as WarningExtra[];
@@ -550,7 +571,7 @@ export default function AdminUserDetail({
   const dialogDescription: Record<NonNullable<DialogKind>, string> = {
     warn: `Provide a reason for warning ${user?.full_name ?? 'this user'}.`,
     suspend: `Provide a reason for suspending ${user?.full_name ?? 'this user'}.`,
-    lift: `Lift the suspension on ${user?.full_name ?? 'this user'}. They will regain access immediately.`,
+    lift: `Provide a reason for lifting the suspension on ${user?.full_name ?? 'this user'}. They will regain access immediately.`,
     makeAdmin: `Promote ${user?.full_name ?? 'this user'} to administrator? They will receive full administrative access.`,
   };
 
@@ -680,6 +701,7 @@ export default function AdminUserDetail({
                   <span style={{ color: 'var(--adm-muted-fg)' }}>Account status</span>
                   {isSuspended ? (
                     <span
+                      data-testid="account-status-badge"
                       className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
                       style={{
                         background: 'hsl(0 84% 60% / .15)',
@@ -691,6 +713,7 @@ export default function AdminUserDetail({
                     </span>
                   ) : (
                     <span
+                      data-testid="account-status-badge"
                       className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
                       style={{
                         background: 'hsl(152 60% 42% / .15)',
@@ -790,6 +813,34 @@ export default function AdminUserDetail({
                   </button>
                 )}
               </div>
+
+              {isSuspended && (
+                <div
+                  className="mt-4 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px]"
+                  style={{
+                    background: 'hsl(0 84% 60% / .08)',
+                    borderColor: 'hsl(0 84% 60% / .3)',
+                    color: 'var(--adm-fg)',
+                  }}
+                  role="status"
+                >
+                  <Ban
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    style={{ color: 'var(--adm-danger-text)' }}
+                  />
+                  <p>
+                    <strong>This account is suspended.</strong>
+                    {user.suspension?.reason ? (
+                      <>
+                        {' '}
+                        Reason: {user.suspension.reason}
+                      </>
+                    ) : (
+                      ' The profile stays visible to administrators.'
+                    )}
+                  </p>
+                </div>
+              )}
 
               {/* Warning banner */}
               {warningCount > 0 && !isSuspended && (

@@ -5,7 +5,6 @@ import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import * as authModule from '@/lib/auth';
 import * as assistantApiModule from '@/lib/assistantApi';
 import * as storageModule from '@/lib/storage';
-import type { User } from '@/lib/storage';
 import { BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
 
 describe('AIAssistantWidget — Ticket #196', () => {
@@ -31,6 +30,49 @@ describe('AIAssistantWidget — Ticket #196', () => {
       </MemoryRouter>
     );
 
+    expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
+  });
+
+  it('does not render on the administrator panel', () => {
+    render(
+      <MemoryRouter initialEntries={['/admin']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
+  });
+
+  it('does not render on nested administrator pages', () => {
+    render(
+      <MemoryRouter initialEntries={['/admin/events/e1']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
+  });
+
+  it('does not render on administrator verification', () => {
+    render(
+      <MemoryRouter initialEntries={['/admin-verify']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
+  });
+
+  it('does not render for an administrator session on other screens', () => {
+    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue({
+      id: 'admin-1',
+      name: 'Admin',
+      email: 'admin@x.com',
+      role: 'administrator',
+    } as storageModule.User);
+
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
     expect(screen.queryByTestId('ai-assistant-fab')).not.toBeInTheDocument();
   });
 
@@ -320,25 +362,5 @@ describe('AIAssistantWidget — Ticket #196', () => {
 
     expect(sendChatSpy).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('ai-chat-send')).toBeDisabled();
-  });
-
-  it('does not limit Pro accounts', async () => {
-    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue({
-      id: 'pro-1',
-      isPremium: true,
-    } as User);
-    vi.spyOn(assistantApiModule, 'sendAssistantChat').mockResolvedValue({
-      reply: 'Unlimited reply',
-    });
-
-    render(
-      <MemoryRouter initialEntries={['/home']}>
-        <AIAssistantWidget />
-      </MemoryRouter>
-    );
-
-    fireEvent.click(screen.getByTestId('ai-assistant-fab'));
-    await screen.findByTestId('ai-assistant-drawer');
-    expect(screen.getByText('Pro · unlimited asks')).toBeInTheDocument();
   });
 });

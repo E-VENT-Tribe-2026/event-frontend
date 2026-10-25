@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Shield, Users, Calendar, ClipboardList, Flag, LogOut, Eye } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AppToast from '@/components/AppToast';
@@ -61,9 +61,9 @@ export default function AdminPanelPage() {
     type: 'success' | 'error' | 'info';
   }>({ show: false, message: '', type: 'success' });
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'error') => {
     setToast({ show: true, message, type });
-  };
+  }, []);
 
   // Fetch the admin's name and avatar from the profile endpoint
   useEffect(() => {
@@ -400,7 +400,13 @@ export default function AdminPanelPage() {
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+      <main
+        className={`mx-auto px-4 py-6 sm:px-6 ${
+          activeTab === 'audit' && !showAccount && !userView.active && stack.length === 0
+            ? 'max-w-7xl'
+            : 'max-w-5xl'
+        }`}
+      >
         {/* Priority 1: My Account view */}
         {showAccount ? (
           <AdminMyAccount adminId={adminId} onClose={() => setShowAccount(false)} />
@@ -462,6 +468,7 @@ export default function AdminPanelPage() {
               <AdminUsersTab
                 onOpenUser={pushUserDetail}
                 onErrorToast={(msg) => showToast(msg, 'error')}
+                onSuccessToast={(msg) => showToast(msg, 'success')}
               />
             )}
 

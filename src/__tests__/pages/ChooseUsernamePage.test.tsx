@@ -82,6 +82,18 @@ describe('ChooseUsernamePage', () => {
     });
   });
 
+  it('sends an administrator with a username to the admin panel', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ username: 'admin_1', role: 'administrator' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })),
+    );
+    renderPage();
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/admin', { replace: true }));
+  });
+
   it('skips the form when a wrapped profile already has a username', async () => {
     vi.stubGlobal(
       'fetch',

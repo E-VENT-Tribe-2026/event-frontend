@@ -89,6 +89,18 @@ function mockBackend(
       }
       return json(200, { ...profile, blocked_by_me: false });
     }
+    if (method === 'POST' && url.endsWith('/api/reports')) {
+      return json(201, {
+        id: 3,
+        status: 'open',
+        target_type: 'user',
+        target_id: OTHER_ID,
+        reason: 'spam',
+        origin: 'profile',
+        created_at: '2026-10-25T00:00:00Z',
+        message: 'Thanks. We received your report.',
+      });
+    }
     if (method === 'POST' && url.endsWith('/api/blocks')) {
       blocked = true;
       friendship = { status: 'none', request_id: null };
@@ -157,7 +169,6 @@ describe('UserProfilePage', () => {
 
     expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
     expect(screen.getByText('@jane_doe')).toBeInTheDocument();
-    expect(screen.getByTestId('plan-badge')).toHaveTextContent('Basic');
     expect(screen.getByText('I love live music.')).toBeInTheDocument();
     expect(screen.getByText('Music')).toBeInTheDocument();
     expect(screen.getByTestId('profile-banner')).toBeInTheDocument();
@@ -167,12 +178,6 @@ describe('UserProfilePage', () => {
     fireEvent.click(screen.getByTestId('user-tab-past'));
     expect(screen.getByText('Organized Past')).toBeInTheDocument();
     expect(screen.getByText('Joined Past')).toBeInTheDocument();
-  });
-
-  it('shows a Pro tag when the profile is on Pro', async () => {
-    mockBackend({ status: 'none', request_id: null }, { profile: { is_premium: true } });
-    renderPage();
-    expect(await screen.findByTestId('plan-badge')).toHaveTextContent('Pro');
   });
 
   it('shows no owner-only parts or cancelled events', async () => {
@@ -286,6 +291,56 @@ describe('UserProfilePage', () => {
     renderPage();
     expect(await screen.findByText('This profile is unavailable')).toBeInTheDocument();
     expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
+  });
+
+  it('lets an administrator see a suspended profile that the public API hides', async () => {
+    setCurrentUserFromOAuth({
+      id: 'viewer-1',
+      email: 'v@test.com',
+      name: 'Viewer',
+      username: 'viewer',
+      role: 'administrator',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(`/api/profile/${OTHER_ID}`)) {
+          return {
+            ok: false,
+            status: 404,
+            json: async () => ({ detail: { code: 'profile_unavailable' } }),
+          } as Response;
+        }
+        if (url.includes(`/api/admin/users/${OTHER_ID}`)) {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              id: OTHER_ID,
+              username: 'jane_doe',
+              full_name: 'Jane Doe',
+              is_admin: false,
+              role: 'user',
+              created_at: '2026-01-01T00:00:00Z',
+              status: 'suspended',
+              suspension: { reason: 'Spam', suspended_at: '2026-01-01T00:00:00Z', suspended_by: 'ada' },
+              organized_events: { upcoming: [], past: [], cancelled: [] },
+              joined_events: { upcoming: [], past: [], cancelled: [] },
+              warnings: [],
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
+    expect(screen.getByTestId('account-status-badge')).toHaveTextContent('Suspended');
+    expect(screen.getByText(/Reason: Spam/)).toBeInTheDocument();
+    expect(screen.queryByText('This profile is unavailable')).not.toBeInTheDocument();
   });
 
   it('shows only the parts the backend returns, with no empty sections', async () => {
@@ -432,6 +487,27 @@ describe('UserProfilePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
 
     expect(await screen.findByText('You have reached the limit of friend requests for today.')).toBeInTheDocument();
+  });
+
+  it('reports the user from their profile', async () => {
+    const calls = mockBackend({ status: 'none', request_id: null });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^report$/i }));
+    expect(await screen.findByText('Report Jane Doe')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Thanks. We received your report.')).toBeInTheDocument();
+    });
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/reports'));
+    expect(JSON.parse(post!.body!)).toEqual({
+      target_type: 'user',
+      target_id: OTHER_ID,
+      reason: 'spam',
+      origin: 'profile',
+      description: null,
+    });
   });
 
   it('opens the own profile tab instead when the id is the viewer\'s own', async () => {

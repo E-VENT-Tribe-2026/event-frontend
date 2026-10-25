@@ -1,5 +1,10 @@
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  notificationAllowed,
+  type NotificationPrefs,
+} from '@/lib/accountSettings';
 import { cachedFetch, invalidate, invalidatePrefix, TTL } from '@/lib/queryCache';
 
 export const NOTIFICATIONS_CHANGED_EVENT = 'eventapp:notifications-changed';
@@ -26,10 +31,16 @@ export function isIncomingFriendRequestType(type: string): boolean {
  * Bell badge: unread notifications plus pending requests that are not already
  * an unread friend-request row (the notifications page merges those the same way).
  */
-export function countBellUnreads(notifications: ApiNotification[], pendingRequestCount: number): number {
-  const unread = notifications.filter((n) => !n.read);
+export function countBellUnreads(
+  notifications: ApiNotification[],
+  pendingRequestCount: number,
+  prefs: NotificationPrefs = DEFAULT_NOTIFICATION_PREFS,
+): number {
+  const allowed = notifications.filter((n) => notificationAllowed(n.type, prefs));
+  const unread = allowed.filter((n) => !n.read);
+  const pending = prefs.friend_requests ? pendingRequestCount : 0;
   const unreadRequestNotifs = unread.filter((n) => isIncomingFriendRequestType(n.type)).length;
-  const extraPending = Math.max(0, pendingRequestCount - unreadRequestNotifs);
+  const extraPending = Math.max(0, pending - unreadRequestNotifs);
   return unread.length + extraPending;
 }
 

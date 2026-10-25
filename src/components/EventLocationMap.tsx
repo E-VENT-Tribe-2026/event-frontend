@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -65,9 +66,8 @@ export default function EventLocationMap({
       mapRef.current = map;
       map.setMaxBounds(WORLD_BOUNDS);
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        noWrap: true,
+      L.tileLayer(LEAFLET_TILE_URL, {
+        ...LEAFLET_TILE_OPTIONS,
         bounds: WORLD_BOUNDS,
       }).addTo(map);
 

@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
+import { HOME_LOCATION_EVENT, mapStartView, readHomeLocation } from '@/lib/accountSettings';
+import { getCurrentUser, getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
+import { hasSignedInSession } from '@/lib/signedIn';
 import BottomNav from '@/components/BottomNav';
 import TopBar from '@/components/TopBar';
 import { LocateFixed, RefreshCw } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
-import { getApiUrl } from '@/lib/api';
-import { getAuthToken } from '@/lib/auth';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
 import { friendsAttendingHtml } from '@/lib/friendsAttendingPopup';
-import { fetchMapEvents } from '@/lib/mapEventsApi';
+import { fetchMapEvents, peekMapEvents } from '@/lib/mapEventsApi';
+import { fetchOrganizerProfile } from '@/lib/organizerProfile';
+import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
+
+const leafletReady = import('leaflet');
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -74,7 +78,9 @@ export default function MapPage() {
 
   const [category, setCategory] = useState('All');
   const [filterDate, setFilterDate] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
+  const [selectedCity, setSelectedCity] = useState(
+    () => readHomeLocation(getCurrentUser()?.id)?.city ?? '',
+  );
   const [titleSearch, setTitleSearch] = useState('');
   const [debouncedTitle, setDebouncedTitle] = useState('');
   const [debouncedFilterDate, setDebouncedFilterDate] = useState('');
@@ -111,47 +117,37 @@ export default function MapPage() {
       if (currentCategory !== 'All') params.set('category', currentCategory);
       if (currentTitle) params.set('search', currentTitle);
       if (currentDate) params.set('date', currentDate);
-      
-      const token = getAuthToken();
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
 
       // Through the client-side cache (events list), cleared with the other events lists.
       const rows = await fetchMapEvents(params, controller.signal);
+      if (controller.signal.aborted) return;
       const list = rows.map(mapApiEventToItem);
       const local = getLocalEvents().filter((e) => !e.isDraft);
       const byId = new Map<string, EventItem>();
       [...list, ...local].forEach((e) => byId.set(e.id, e));
       const combinedEvents = Array.from(byId.values());
+      setRawEvents(combinedEvents);
+      setLoading(false);
+
+      const missingIds = [...new Set(
+        combinedEvents
+          .filter((e) => !e.organizerFullName && (!e.organizer || e.organizer === 'Organizer'))
+          .map((e) => String(e.organizerId || '').trim())
+          .filter(Boolean),
+      )];
+      if (missingIds.length === 0) return;
 
       const profileMap: Record<string, { full_name?: string; username?: string; avatar_url?: string }> = {};
       await Promise.all(
-        rows.map(async (row: any) => {
-          const creatorId = row.created_by || row.organizer_id;
-          if (creatorId && !profileMap[creatorId]) {
-            try {
-              const profRes = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
-              if (profRes.ok) {
-                const profData = await profRes.json().catch(() => null);
-                const prof = profData?.data || profData?.profile || profData;
-                if (prof) {
-                  profileMap[creatorId] = {
-                    full_name: prof.full_name || prof.name,
-                    username: prof.username,
-                    avatar_url: prof.avatar_url,
-                  };
-                }
-              }
-            } catch {
-              // ignore
-            }
-          }
-        })
+        missingIds.map(async (creatorId) => {
+          const prof = await fetchOrganizerProfile(creatorId);
+          if (prof) profileMap[creatorId] = prof;
+        }),
       );
+      if (controller.signal.aborted) return;
       if (Object.keys(profileMap).length > 0) {
         setOrganizerProfiles((prev) => ({ ...prev, ...profileMap }));
       }
-      setRawEvents(combinedEvents);
     } catch {
       if (loadEventsAbortRef.current !== controller) return;
       const local = getLocalEvents().filter((e) => !e.isDraft);
@@ -167,6 +163,18 @@ export default function MapPage() {
         setLoading(false);
       }
     }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ page: '1', limit: '50' });
+    const cached = peekMapEvents(params);
+    if (!cached?.length) return;
+    const list = cached.map(mapApiEventToItem);
+    const local = getLocalEvents().filter((e) => !e.isDraft);
+    const byId = new Map<string, EventItem>();
+    [...list, ...local].forEach((e) => byId.set(e.id, e));
+    setRawEvents(Array.from(byId.values()));
+    setLoading(false);
   }, []);
 
   const availableCities = useMemo(() => getEventCities(rawEvents), [rawEvents]);
@@ -192,17 +200,11 @@ export default function MapPage() {
     let cancelled = false;
 
     const initMap = async () => {
-      const L = await import('leaflet');
+      const L = await leafletReady;
       if (cancelled || !mapRef.current || mapInstance.current) return;
       leafletRef.current = L;
 
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-      });
-
+      const start = mapStartView(getCurrentUser()?.id);
       const map = L.map(mapRef.current, {
         zoomControl: true,
         bounceAtZoomLimits: false,
@@ -210,13 +212,13 @@ export default function MapPage() {
         maxBounds: WORLD_BOUNDS,
         maxBoundsViscosity: 1,
         minZoom: 3,
-      }).setView([40.7128, -74.006], 3);
+        preferCanvas: true,
+      }).setView(start.center, start.zoom);
       mapInstance.current = map;
       map.setMaxBounds(WORLD_BOUNDS);
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        noWrap: true,
+      L.tileLayer(LEAFLET_TILE_URL, {
+        ...LEAFLET_TILE_OPTIONS,
         bounds: WORLD_BOUNDS,
       }).addTo(map);
 
@@ -245,6 +247,19 @@ export default function MapPage() {
   }, []);
 
   useEffect(() => {
+    const applyHome = () => {
+      const userId = getCurrentUser()?.id;
+      setSelectedCity(readHomeLocation(userId)?.city ?? '');
+      const map = mapInstance.current;
+      if (!map) return;
+      const start = mapStartView(userId);
+      map.setView(start.center, start.zoom);
+    };
+    window.addEventListener(HOME_LOCATION_EVENT, applyHome);
+    return () => window.removeEventListener(HOME_LOCATION_EVENT, applyHome);
+  }, []);
+
+  useEffect(() => {
     const map = mapInstance.current;
     const L = leafletRef.current;
     const layer = markersLayerRef.current;
@@ -254,7 +269,14 @@ export default function MapPage() {
     const spread = spreadOverlapping(filteredEvents);
 
     spread.forEach(({ item: event, lat, lng }) => {
-      const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
+      const marker = L.marker(clampToWorld(lat, lng), {
+        icon: L.divIcon({
+          className: 'event-map-pin',
+          html: '<span style="display:block;width:16px;height:16px;border-radius:999px;background:#7c3aed;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>',
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
+        }),
+      }).addTo(layer);
 
       const creatorId = event.organizerId || (event as any).created_by;
       const prof = creatorId ? organizerProfiles[creatorId] : null;
@@ -373,6 +395,8 @@ export default function MapPage() {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     );
   };
+
+  if (!hasSignedInSession()) return <Navigate to="/login" replace />;
 
   return (
     <div className="min-h-screen bg-background pb-20 relative">
