@@ -400,7 +400,13 @@ export default function AdminPanelPage() {
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+      <main
+        className={`mx-auto px-4 py-6 sm:px-6 ${
+          activeTab === 'audit' && !showAccount && !userView.active && stack.length === 0
+            ? 'max-w-7xl'
+            : 'max-w-5xl'
+        }`}
+      >
         {/* Priority 1: My Account view */}
         {showAccount ? (
           <AdminMyAccount adminId={adminId} onClose={() => setShowAccount(false)} />
@@ -462,6 +468,7 @@ export default function AdminPanelPage() {
               <AdminUsersTab
                 onOpenUser={pushUserDetail}
                 onErrorToast={(msg) => showToast(msg, 'error')}
+                onSuccessToast={(msg) => showToast(msg, 'success')}
               />
             )}
 

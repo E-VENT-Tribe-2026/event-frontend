@@ -112,6 +112,8 @@ describe('Admin Panel — Ticket #248', () => {
       page: 1,
       limit: 20,
       total_pages: 1,
+      has_more: false,
+      next_before: null,
     });
     vi.spyOn(adminApi, 'fetchAdminReports').mockResolvedValue({
       items: [],
@@ -275,8 +277,11 @@ describe('Admin Panel — Ticket #248', () => {
           action: 'lift_suspension',
           admin_id: 'ada',
           admin_name: 'Ada Admin',
+          admin_username: 'ada.admin',
           target_id: 'user-1',
           target_type: 'user',
+          target_name: 'Alex Smith',
+          target_username: 'alex_smith',
           reason: 'Appeal accepted',
           details: null,
           created_at: '2026-01-01T00:00:00Z',
@@ -286,6 +291,8 @@ describe('Admin Panel — Ticket #248', () => {
       page: 1,
       limit: 20,
       total_pages: 1,
+      has_more: false,
+      next_before: null,
     });
 
     render(
@@ -295,9 +302,10 @@ describe('Admin Panel — Ticket #248', () => {
     );
 
     fireEvent.click(await screen.findByRole('tab', { name: /Audit Log/i }));
-    expect(await screen.findAllByText('Lift Suspension')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Lifted suspension')).not.toHaveLength(0);
     expect(screen.getAllByTestId('audit-reason').some((el) => el.textContent === 'Appeal accepted')).toBe(true);
     expect(screen.getAllByText('Ada Admin').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('@ada.admin').length).toBeGreaterThan(0);
   });
 
   it('shows no make admin button for an already administrator account', async () => {

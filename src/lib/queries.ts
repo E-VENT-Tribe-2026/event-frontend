@@ -72,30 +72,57 @@ export function useUserProfile(viewerId: string | undefined, userId: string | un
   });
 }
 
+const EVENTS_PAGE_SIZE = 50;
+const EVENTS_MAX_PAGES = 40;
+
+function eventsListHasMore(body: unknown, pageSize: number, rowCount: number): boolean {
+  if (body && typeof body === 'object') {
+    const b = body as Record<string, unknown>;
+    if (b.has_more === true) return true;
+    if (b.has_more === false) return false;
+  }
+  return rowCount >= pageSize;
+}
+
+/** Every page of GET /api/events for the home All events list. */
+export async function fetchAllPublicEvents(filters: Record<string, string> = {}): Promise<EventItem[]> {
+  const collected: EventItem[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 1; page <= EVENTS_MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      ...filters,
+      limit: String(EVENTS_PAGE_SIZE),
+      page: String(page),
+    });
+    const data = await apiFetch<unknown>(`/api/events?${params.toString()}`);
+    const rows = parseEventsApiList(data);
+    for (const row of rows) {
+      const item = mapApiEventToItem(row);
+      if (!item.id || seen.has(item.id)) continue;
+      seen.add(item.id);
+      collected.push(item);
+    }
+    if (!eventsListHasMore(data, EVENTS_PAGE_SIZE, rows.length)) break;
+  }
+
+  return collected;
+}
+
 // ── Events list ───────────────────────────────────────────────────────────────
 export function useEvents(params: {
   category?: string;
   search?: string;
   event_date?: string;
-  limit?: number;
-  page?: number;
 }) {
-  const p: Record<string, string> = {
-    limit: String(params.limit ?? 50),
-    page: String(params.page ?? 1),
-  };
+  const p: Record<string, string> = {};
   if (params.category && params.category !== 'All') p.category = params.category;
   if (params.search) p.search = params.search;
   if (params.event_date) p.event_date = params.event_date;
 
-  const qs = new URLSearchParams(p).toString();
-
   return useQuery({
     queryKey: QK.events(p),
-    queryFn: async () => {
-      const data = await apiFetch<unknown>(`/api/events?${qs}`);
-      return parseEventsApiList(data).map(mapApiEventToItem) as EventItem[];
-    },
+    queryFn: () => fetchAllPublicEvents(p),
     staleTime: 2 * 60 * 1000,
   });
 }
@@ -201,11 +228,25 @@ export function useParticipantCount(eventId: string | undefined) {
 }
 
 // ── Invalidation helpers ──────────────────────────────────────────────────────
+/** Put a just-created event at the front of cached home lists so All events updates immediately. */
+export function prependCreatedEvent(event: EventItem) {
+  const insert = (old: EventItem[] | undefined) => {
+    if (!old) return [event];
+    if (old.some((row) => row.id === event.id)) {
+      return old.map((row) => (row.id === event.id ? { ...row, ...event } : row));
+    }
+    return [event, ...old];
+  };
+  queryClient.setQueriesData<EventItem[]>({ queryKey: ['events'] }, insert);
+  queryClient.setQueriesData<EventItem[]>({ queryKey: ['myEvents'] }, insert);
+  notifyEventsChanged();
+}
+
 export function invalidateEvents() {
-  queryClient.invalidateQueries({ queryKey: ['events'] });
+  queryClient.invalidateQueries({ queryKey: ['events'], refetchType: 'all' });
   queryClient.invalidateQueries({ queryKey: ['event'] });
   queryClient.invalidateQueries({ queryKey: ['recommendations'] });
-  queryClient.invalidateQueries({ queryKey: ['myEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['myEvents'], refetchType: 'all' });
   queryClient.invalidateQueries({ queryKey: ['joinedEvents'] });
   queryClient.invalidateQueries({ queryKey: ['participants'] });
   queryClient.invalidateQueries({ queryKey: ['maxPrice'] });

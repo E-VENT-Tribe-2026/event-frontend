@@ -1,5 +1,4 @@
 ﻿import { useState, useMemo, useEffect, useCallback } from 'react';
-import { HOME_LOCATION_EVENT, readHomeLocation } from '@/lib/accountSettings';
 import { getCurrentUser, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
 import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
@@ -11,6 +10,7 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
+import { EVENTS_CHANGED_EVENT } from '@/lib/realtimeEvents';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidate, invalidatePrefix, cachedFetch, TTL } from '@/lib/queryCache';
 import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
@@ -42,12 +42,11 @@ export default function HomePage() {
   const [budgetMax, setBudgetMax] = useState(500);
   const [filterDate, setFilterDate] = useState('');
   const [debouncedDate, setDebouncedDate] = useState('');
-  const [selectedCity, setSelectedCity] = useState(
-    () => readHomeLocation(getCurrentUser()?.id)?.city ?? '',
-  );
+  const [selectedCity, setSelectedCity] = useState('');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleAll, setVisibleAll] = useState(PAGE);
+  const [eventsEpoch, setEventsEpoch] = useState(0);
   const [upcomingLimit, setUpcomingLimit] = useState(UPCOMING_PREVIEW);
   const [showFilterModal, setShowFilterModal] = useState(false);
 
@@ -186,12 +185,9 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const applyHome = () => {
-      const city = readHomeLocation(getCurrentUser()?.id)?.city ?? '';
-      setSelectedCity(city);
-    };
-    window.addEventListener(HOME_LOCATION_EVENT, applyHome);
-    return () => window.removeEventListener(HOME_LOCATION_EVENT, applyHome);
+    const refresh = () => setEventsEpoch((n) => n + 1);
+    window.addEventListener(EVENTS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(EVENTS_CHANGED_EVENT, refresh);
   }, []);
 
   const toggleSection = (key: string) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -302,8 +298,8 @@ export default function HomePage() {
       if (!isEventUpcoming(e) || String(e.status || '').toLowerCase() === 'cancelled') continue;
       byId.set(e.id, e);
     }
-    return Array.from(byId.values());
-  }, [apiEvents]);
+    return Array.from(byId.values()).sort((a, b) => eventStartMs(a) - eventStartMs(b));
+  }, [apiEvents, eventsEpoch]);
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 

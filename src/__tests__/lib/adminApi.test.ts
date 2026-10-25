@@ -11,6 +11,7 @@ import {
   withdrawWarning,
   liftSuspension,
   isSuspendedAccount,
+  sendSignupInvite,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 import * as storageModule from '@/lib/storage';
@@ -254,7 +255,87 @@ describe('adminApi service', () => {
 
     const data = await fetchAdminAudit(1, 20);
     expect(data.items).toHaveLength(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/audit-log?page=1&limit=20');
+    expect(data.items[0].admin_name).toBe('Ada');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/audit-log?limit=20');
+  });
+
+  it('maps nested administrator onto admin_name', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a3',
+            action: 'warn',
+            created_at: '2026-01-01T00:00:00Z',
+            administrator: {
+              id: 'ada-id',
+              username: 'ada_admin',
+              full_name: 'Ada Lovelace',
+              display_name: 'Ada',
+            },
+            target: { type: 'user', id: 'u1', user: { id: 'u1', username: 'bob', full_name: 'Bob Baker' } },
+            description: 'Warned for spam',
+            details: [],
+          },
+        ],
+        has_more: false,
+        next_before: null,
+      }),
+    );
+
+    const data = await fetchAdminAudit();
+    expect(data.items[0].admin_id).toBe('ada-id');
+    expect(data.items[0].admin_name).toBe('Ada Lovelace');
+    expect(data.items[0].admin_username).toBe('ada_admin');
+    expect(data.items[0].target_name).toBe('Bob Baker');
+    expect(data.items[0].target_username).toBe('bob');
+    expect(data.items[0].reason).toBe('Warned for spam');
+  });
+
+  it('maps an invite audit row to the invitee email', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a4',
+            action: 'registration_invite',
+            created_at: '2026-10-25T19:17:00Z',
+            administrator: { id: 'ada', username: 'soniam', full_name: 'Sonia' },
+            target: { type: 'invite', id: '1' },
+            description: 'Sent a registration invitation to soniamangane@gmail.com.',
+            details: ['email:soniamangane@gmail.com'],
+          },
+        ],
+        has_more: false,
+      }),
+    );
+
+    const data = await fetchAdminAudit();
+    expect(data.items[0].target_email).toBe('soniamangane@gmail.com');
+  });
+
+  it('keeps a reported chat as a chat/report target, not an email', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 'a5',
+            action: 'dismiss_report',
+            created_at: '2026-10-04T14:10:00Z',
+            administrator: { id: 'ada', username: 'alex.admin', full_name: 'Alex Morgan' },
+            target: { type: 'report', id: 1033, event: { title: 'Pasta Workshop' } },
+            description: 'Spam in the event chat.',
+            details: ['chat'],
+          },
+        ],
+        has_more: false,
+      }),
+    );
+
+    const data = await fetchAdminAudit();
+    expect(data.items[0].target_type).toBe('report');
+    expect(data.items[0].target_id).toBe('1033');
+    expect(data.items[0].target_title).toBe('Pasta Workshop');
   });
 
   it('treats status "suspended" as a suspended account', () => {
@@ -322,5 +403,20 @@ describe('adminApi service', () => {
     const data = await fetchAdminAudit(1, 20);
     expect(data.items[0].action).toBe('lift_suspension');
     expect(data.items[0].reason).toBe('Appeal accepted');
+  });
+
+  it('sendSignupInvite posts to invite_user with the encoded email', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ email: 'guest@example.com', invite_code: 'ABCD-2345', message: 'Invitation sent.' }),
+    );
+    const result = await sendSignupInvite('guest@example.com');
+    expect(result.code).toBe('ABCD-2345');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/admin/invite_user/guest%40example.com'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer mock_admin_token' }),
+      }),
+    );
   });
 });

@@ -1,6 +1,7 @@
 import type { EventItem } from '@/lib/storage';
 import { getGeneratedAvatarUrl, pickImageUrl } from '@/lib/avatars';
 import { eventBannerFrom } from '@/lib/eventBanner';
+import { localDateTimeParts } from '@/lib/eventTime';
 
 /** @deprecated Use getCategoryBanner() for category-aware defaults. */
 export const DEFAULT_EVENT_IMAGE =
@@ -39,8 +40,7 @@ export function friendsAttendingCountFrom(value: unknown): number {
 /** Map backend event row to frontend EventItem */
 export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
   const start = parseEventStart(api.start_datetime);
-  const dateStr = start.toISOString().slice(0, 10);
-  const timeStr = start.toTimeString().slice(0, 5);
+  const { date: dateStr, time: timeStr } = localDateTimeParts(start);
   const cost = Number(api.cost);
   const capacity = Number(api.max_capacity);
   const organizer = nestedRecord(api.organizer);
@@ -113,6 +113,8 @@ export function parseEventsApiList(body: unknown): Record<string, unknown>[] {
   if (!body || typeof body !== 'object') return [];
   const b = body as Record<string, unknown>;
   if (Array.isArray(b.data)) return b.data as Record<string, unknown>[];
+  if (Array.isArray(b.events)) return b.events as Record<string, unknown>[];
+  if (Array.isArray(b.items)) return b.items as Record<string, unknown>[];
   if (Array.isArray(body)) return body as Record<string, unknown>[];
   return [];
 }

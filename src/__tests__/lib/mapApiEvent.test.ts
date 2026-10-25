@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import { isEventUpcoming, localDateTimeParts } from '@/lib/eventTime';
 
 const harryPotterNight = {
   id: 'db9627bd-84d2-460e-8a29-231ec963a1ee',
@@ -48,6 +49,10 @@ describe('mapApiEventToItem', () => {
     expect(item.budget).toBe(5);
     expect(item.participantsLimit).toBe(20);
     expect(item.location).toContain('InnoWi');
+    const start = localDateTimeParts(new Date(harryPotterNight.start_datetime));
+    expect(item.date).toBe(start.date);
+    expect(item.time).toBe(start.time);
+    expect(isEventUpcoming(item)).toBe(true);
   });
 
   it('still reads flat organizer_name / profiles fields', () => {

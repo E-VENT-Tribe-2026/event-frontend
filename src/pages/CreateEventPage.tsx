@@ -19,7 +19,9 @@ import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
-import { invalidateEvents } from '@/lib/queries';
+import { invalidateEvents, prependCreatedEvent } from '@/lib/queries';
+import { localDateTimeParts } from '@/lib/eventTime';
+import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { sanitizeText } from '@/lib/sanitize';
 
 function FormSection({
@@ -57,22 +59,28 @@ function previewWhen(date: string, time: string): string {
   }
 }
 
-function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
-  if (!res || typeof res !== 'object') return {};
+function unwrapCreatedEvent(res: unknown): Record<string, unknown> | null {
+  if (!res || typeof res !== 'object') return null;
   const r = res as Record<string, unknown>;
-  const fromObj = (o: Record<string, unknown>) => {
-    const id = o.id;
-    const created =
-      (typeof o.created_by === 'string' && o.created_by) ||
-      (typeof o.createdBy === 'string' && o.createdBy) ||
-      undefined;
-    return { id: typeof id === 'string' ? id : undefined, created_by: created };
-  };
-  const top = fromObj(r);
-  if (top.created_by || top.id) return top;
-  const data = r.data;
-  if (data && typeof data === 'object') return fromObj(data as Record<string, unknown>);
-  return {};
+  if (typeof r.id === 'string') return r;
+  if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
+    const data = r.data as Record<string, unknown>;
+    if (typeof data.id === 'string') return data;
+    if (data.event && typeof data.event === 'object') return data.event as Record<string, unknown>;
+  }
+  if (r.event && typeof r.event === 'object') return r.event as Record<string, unknown>;
+  return r;
+}
+
+function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: string } {
+  const o = unwrapCreatedEvent(res);
+  if (!o) return {};
+  const id = o.id;
+  const created =
+    (typeof o.created_by === 'string' && o.created_by) ||
+    (typeof o.createdBy === 'string' && o.createdBy) ||
+    undefined;
+  return { id: typeof id === 'string' ? id : undefined, created_by: created };
 }
 
 const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
@@ -281,11 +289,11 @@ export default function CreateEventPage() {
       let created = 0;
       let lastError: string | null = null;
       let organizerId = user?.id || authUser?.id || 'current_user';
+      const createdItems: EventItem[] = [];
 
       for (const start of starts) {
         const end = new Date(start.getTime() + durationMs);
-        const dateStr = start.toISOString().slice(0, 10);
-        const timeStr = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`;
+        const { date: dateStr, time: timeStr } = localDateTimeParts(start);
         const payload = {
           title: sanitizeText(form.title),
           description: sanitizeText(form.description),
@@ -319,6 +327,7 @@ export default function CreateEventPage() {
         }
 
         const responseData = await res.json();
+        const createdRow = unwrapCreatedEvent(responseData);
         const { id: apiEventId, created_by: apiCreatedBy } = extractCreatedEventPayload(responseData);
         if (apiCreatedBy) organizerId = apiCreatedBy;
         const organizerAvatar =
@@ -352,7 +361,12 @@ export default function CreateEventPage() {
           reports: [],
           collaborators: [],
         };
-        addEvent(localEvent);
+        const stored =
+          createdRow && typeof createdRow.id === 'string'
+            ? { ...mapApiEventToItem(createdRow), ...localEvent, id: createdRow.id as string }
+            : localEvent;
+        addEvent(stored);
+        createdItems.push(stored);
         created += 1;
       }
 
@@ -366,6 +380,7 @@ export default function CreateEventPage() {
           : 'Event Published Successfully!';
       setToast({ show: true, message, type: 'success' });
       invalidateEvents();
+      for (const item of createdItems) prependCreatedEvent(item);
       setTimeout(() => navigate('/home'), 1500);
     } catch (err: any) {
       clearTimeout(timeoutId);

@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
 import {
@@ -403,7 +404,7 @@ export default function UserProfilePage() {
       </header>
 
       {!tokenReady || isLoading || adminOverrideLoading ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading profile…</p>
+        <ProfileLoadingRunner compact />
       ) : !getAuthToken() ? (
         <div className="px-4 py-16 text-center" role="alert">
           <p className="text-sm text-muted-foreground">You are not signed in on this tab. Please log in again.</p>

@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import {
-  ClipboardList,
-  Loader2,
-  ChevronRight,
-} from 'lucide-react';
-import {
-  fetchAdminAudit,
-  type AdminAuditEntry,
-} from '@/lib/adminApi';
+import { ClipboardList, Loader2, Flag, Mail, MessageSquare, Calendar } from 'lucide-react';
+import { UserAvatar } from '@/components/UserAvatar';
+import { fetchAdminAudit, type AdminAuditEntry } from '@/lib/adminApi';
 
 interface AdminAuditTabProps {
   onNavigateToUser?: (userId: string) => void;
@@ -22,92 +16,74 @@ interface ActionStyle {
   style: React.CSSProperties;
 }
 
-const ACTION_STYLES: Record<string, ActionStyle> = {
+const PILL = {
+  muted: {
+    background: 'hsl(215 20% 28% / .85)',
+    color: 'hsl(210 20% 78%)',
+    borderColor: 'transparent',
+  },
   warn: {
-    label: 'Warn',
-    style: {
-      background: 'hsl(38 92% 52% / .15)',
-      color: 'var(--adm-warn-text)',
-      borderColor: 'hsl(38 92% 52% / .35)',
-    },
+    background: 'hsl(32 80% 42% / .35)',
+    color: 'hsl(32 90% 72%)',
+    borderColor: 'transparent',
   },
-  suspend: {
-    label: 'Suspend',
-    style: {
-      background: 'hsl(0 84% 60% / .15)',
-      color: 'var(--adm-danger-text)',
-      borderColor: 'hsl(0 84% 60% / .35)',
-    },
+  danger: {
+    background: 'hsl(350 70% 42% / .4)',
+    color: 'hsl(350 90% 78%)',
+    borderColor: 'transparent',
   },
-  lift: {
-    label: 'Lift Suspension',
-    style: {
-      background: 'hsl(152 60% 42% / .15)',
-      color: 'var(--adm-ok-text)',
-      borderColor: 'hsl(152 60% 42% / .35)',
-    },
+  ok: {
+    background: 'hsl(152 50% 28% / .45)',
+    color: 'hsl(152 60% 72%)',
+    borderColor: 'transparent',
   },
-  'lift-suspension': {
-    label: 'Lift Suspension',
-    style: {
-      background: 'hsl(152 60% 42% / .15)',
-      color: 'var(--adm-ok-text)',
-      borderColor: 'hsl(152 60% 42% / .35)',
-    },
+  accent: {
+    background: 'hsl(271 50% 38% / .4)',
+    color: 'hsl(271 80% 82%)',
+    borderColor: 'transparent',
   },
-  remove: {
-    label: 'Remove',
-    style: {
-      background: 'hsl(330 100% 59% / .15)',
-      color: 'hsl(330 100% 78%)',
-      borderColor: 'hsl(330 100% 59% / .35)',
-    },
-  },
-  dismiss: {
-    label: 'Dismiss',
-    style: {
-      background: 'var(--adm-secondary)',
-      color: 'var(--adm-muted-fg)',
-      borderColor: 'var(--adm-border)',
-    },
-  },
-  'grant-admin': {
-    label: 'Grant Admin',
-    style: {
-      background: 'hsl(271 76% 53% / .18)',
-      color: 'var(--adm-primary-text)',
-      borderColor: 'hsl(271 76% 53% / .4)',
-    },
-  },
-  'withdraw-warning': {
-    label: 'Withdraw Warning',
-    style: {
-      background: 'hsl(38 92% 52% / .1)',
-      color: 'var(--adm-warn-text)',
-      borderColor: 'hsl(38 92% 52% / .25)',
-    },
-  },
+} as const;
+
+const ACTION_STYLES: Record<string, ActionStyle> = {
+  warn: { label: 'Warned', style: PILL.warn },
+  warned: { label: 'Warned', style: PILL.warn },
+  suspend: { label: 'Suspended', style: PILL.danger },
+  suspended: { label: 'Suspended', style: PILL.danger },
+  lift: { label: 'Lifted suspension', style: PILL.ok },
+  'lift-suspension': { label: 'Lifted suspension', style: PILL.ok },
+  'lifted-suspension': { label: 'Lifted suspension', style: PILL.ok },
+  remove: { label: 'Removed event', style: PILL.danger },
+  dismiss: { label: 'Dismissed report', style: PILL.muted },
+  'dismiss-report': { label: 'Dismissed report', style: PILL.muted },
+  'dismissed-report': { label: 'Dismissed report', style: PILL.muted },
+  'grant-admin': { label: 'Granted admin', style: PILL.accent },
+  'withdraw-warning': { label: 'Withdrew warning', style: PILL.warn },
+  'invite-user': { label: 'Invited user', style: PILL.accent },
+  'registration-invite': { label: 'Invited user', style: PILL.accent },
 };
+
+const TABLE_COLS =
+  'w-full grid-cols-[8rem_minmax(13rem,1.15fr)_minmax(10.5rem,max-content)_minmax(14rem,1.25fr)_minmax(16rem,1.7fr)] gap-x-10 gap-y-3';
 
 function getActionStyle(action: string): ActionStyle {
   const normalized = action.toLowerCase().replace(/_/g, '-');
-  return (
-    ACTION_STYLES[normalized] ?? {
-      label: action,
-      style: {
-        background: 'var(--adm-secondary)',
-        color: 'var(--adm-muted-fg)',
-        borderColor: 'var(--adm-border)',
-      },
-    }
-  );
+  if (ACTION_STYLES[normalized]) return ACTION_STYLES[normalized];
+  if (normalized.includes('dismiss')) return ACTION_STYLES.dismiss;
+  if (normalized.includes('warn')) return ACTION_STYLES.warn;
+  if (normalized.includes('suspend') && !normalized.includes('lift')) return ACTION_STYLES.suspend;
+  if (normalized.includes('lift')) return ACTION_STYLES['lift-suspension'];
+  if (normalized.includes('invite')) return ACTION_STYLES['invite-user'];
+  return {
+    label: action.replace(/[_-]+/g, ' '),
+    style: PILL.muted,
+  };
 }
 
 function ActionPill({ action }: { action: string }) {
   const s = getActionStyle(action);
   return (
     <span
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+      className="inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium"
       style={s.style}
     >
       {s.label}
@@ -115,27 +91,249 @@ function ActionPill({ action }: { action: string }) {
   );
 }
 
-function auditNote(entry: AdminAuditEntry): string | null {
-  const reason = entry.reason?.trim();
-  if (reason) return reason;
-  const details = entry.details?.trim();
-  return details || null;
+function auditDetails(entry: AdminAuditEntry): string | null {
+  const reason = entry.reason?.trim() || '';
+  const extra = entry.details?.trim() || '';
+  if (reason && extra && extra !== reason && !reason.includes(extra)) {
+    return `${reason} ${extra}`;
+  }
+  return reason || extra || null;
 }
 
-function formatDate(isoString: string): string {
+function formatWhen(isoString: string): string {
   try {
     const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    if (Number.isNaN(d.getTime())) return isoString;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day} · ${hh}:${mm}`;
   } catch {
     return isoString;
   }
+}
+
+function handleOf(username?: string | null): string | null {
+  const value = username?.trim().replace(/^@/, '');
+  return value || null;
+}
+
+function reportLabel(id?: string | null): string {
+  if (!id) return 'Report';
+  const trimmed = id.trim();
+  if (/^r[-_]?\d+$/i.test(trimmed)) {
+    return `Report ${trimmed.replace(/_/g, '-').replace(/^r/i, 'R')}`;
+  }
+  if (/^\d+$/.test(trimmed)) return `Report R-${trimmed}`;
+  if (trimmed.length <= 16) return `Report ${trimmed}`;
+  return 'Report';
+}
+
+function AuditPersonCell({
+  id,
+  name,
+  username,
+  avatarUrl,
+  onClick,
+}: {
+  id: string;
+  name: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+  onClick?: () => void;
+}) {
+  const handle = handleOf(username);
+  const inner = (
+    <>
+      <UserAvatar
+        src={avatarUrl}
+        seed={id || name}
+        name={name}
+        size="xs"
+        className="ring-0"
+      />
+      <span className="min-w-0">
+        <span className="block break-words text-[13px] font-semibold leading-tight" style={{ color: 'var(--adm-fg)' }}>
+          {name}
+        </span>
+        {handle && (
+          <span className="block break-all text-[11px] leading-tight" style={{ color: 'var(--adm-muted-fg)' }}>
+            @{handle}
+          </span>
+        )}
+      </span>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 items-start gap-2.5 text-left"
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return <div className="flex min-w-0 items-start gap-2.5">{inner}</div>;
+}
+
+function isRegistrationInvite(action: string): boolean {
+  const normalized = action.toLowerCase().replace(/[_]+/g, '-');
+  return (
+    normalized.includes('registration-invite') ||
+    normalized.includes('signup-invite') ||
+    normalized === 'invite-user'
+  );
+}
+
+function looksLikeChat(entry: AdminAuditEntry): boolean {
+  const type = (entry.target_type || '').toLowerCase();
+  if (type.includes('chat') || type.includes('message')) return true;
+  const blob = `${entry.reason ?? ''} ${entry.details ?? ''} ${entry.target_title ?? ''}`.toLowerCase();
+  return type.includes('report') && blob.includes('chat');
+}
+
+function TargetIconBadge({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone: 'flag' | 'chat' | 'event' | 'mail';
+}) {
+  const styles = {
+    flag: { background: 'hsl(32 80% 42% / .22)', color: 'hsl(32 90% 70%)' },
+    chat: { background: 'hsl(199 80% 32% / .28)', color: 'hsl(199 90% 78%)' },
+    event: { background: 'hsl(213 50% 32% / .4)', color: 'hsl(210 40% 85%)' },
+    mail: { background: 'hsl(271 50% 38% / .28)', color: 'hsl(271 80% 82%)' },
+  } as const;
+  return (
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={styles[tone]}>
+      {children}
+    </span>
+  );
+}
+
+function TargetCell({
+  entry,
+  onNavigateToUser,
+  onNavigateToEvent,
+}: {
+  entry: AdminAuditEntry;
+  onNavigateToUser?: (userId: string) => void;
+  onNavigateToEvent?: (eventId: string) => void;
+}) {
+  const type = (entry.target_type || '').toLowerCase();
+  const isReport = type.includes('report');
+  const isUser = type === 'user';
+  const isEvent = type === 'event';
+  const chat = looksLikeChat(entry);
+
+  if (isRegistrationInvite(entry.action) && entry.target_email) {
+    return (
+      <div className="flex min-w-0 items-start gap-2.5">
+        <TargetIconBadge tone="mail">
+          <Mail className="h-3.5 w-3.5" />
+        </TargetIconBadge>
+        <span className="min-w-0 break-all text-[13px] font-medium leading-snug" style={{ color: 'var(--adm-fg)' }}>
+          {entry.target_email}
+        </span>
+      </div>
+    );
+  }
+
+  if (chat) {
+    return (
+      <div className="flex min-w-0 items-start gap-2.5">
+        <TargetIconBadge tone="chat">
+          <MessageSquare className="h-3.5 w-3.5" />
+        </TargetIconBadge>
+        <span className="min-w-0">
+          <span className="block break-words text-[13px] font-medium" style={{ color: 'var(--adm-fg)' }}>
+            {entry.target_title || (isReport ? 'Reported chat' : 'Chat')}
+          </span>
+          {isReport && (
+            <span className="block break-words text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+              {reportLabel(entry.target_id)}
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  }
+
+  if (isReport) {
+    return (
+      <div className="flex min-w-0 items-start gap-2.5">
+        <TargetIconBadge tone="flag">
+          <Flag className="h-3.5 w-3.5" />
+        </TargetIconBadge>
+        <span className="min-w-0">
+          <span className="block break-words text-[13px] font-medium" style={{ color: 'var(--adm-fg)' }}>
+            {entry.target_title || entry.target_name || reportLabel(entry.target_id)}
+          </span>
+          {(entry.target_title || entry.target_name) && (
+            <span className="block break-words text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+              {reportLabel(entry.target_id)}
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  }
+
+  if (isUser && (entry.target_name || entry.target_id)) {
+    const go = onNavigateToUser && entry.target_id ? () => onNavigateToUser(entry.target_id!) : undefined;
+    return (
+      <AuditPersonCell
+        id={entry.target_id || entry.target_name || 'user'}
+        name={entry.target_name || 'User'}
+        username={entry.target_username}
+        avatarUrl={entry.target_avatar_url}
+        onClick={go}
+      />
+    );
+  }
+
+  if (isEvent) {
+    const label = entry.target_title || entry.target_name || 'Event';
+    const inner = (
+      <div className="flex min-w-0 items-start gap-2.5">
+        <TargetIconBadge tone="event">
+          <Calendar className="h-3.5 w-3.5" />
+        </TargetIconBadge>
+        <span className="break-words text-[13px] font-medium" style={{ color: 'var(--adm-fg)' }}>
+          {label}
+        </span>
+      </div>
+    );
+    if (entry.target_id && onNavigateToEvent) {
+      return (
+        <button type="button" onClick={() => onNavigateToEvent(entry.target_id!)} className="min-w-0 text-left">
+          {inner}
+        </button>
+      );
+    }
+    return inner;
+  }
+
+  if (entry.target_name || entry.target_title) {
+    return (
+      <span className="min-w-0 break-words text-[13px]" style={{ color: 'var(--adm-fg)' }}>
+        {entry.target_name || entry.target_title}
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-[13px] italic" style={{ color: 'var(--adm-muted-fg)' }}>
+      —
+    </span>
+  );
 }
 
 export default function AdminAuditTab({
@@ -144,8 +342,8 @@ export default function AdminAuditTab({
   onErrorToast,
 }: AdminAuditTabProps) {
   const [entries, setEntries] = useState<AdminAuditEntry[]>([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [nextBefore, setNextBefore] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -153,17 +351,17 @@ export default function AdminAuditTab({
   onErrorToastRef.current = onErrorToast;
 
   const loadAudit = useCallback(
-    async (targetPage: number, append = false) => {
+    async (before: string | null, append = false) => {
       if (append) {
         setLoadingMore(true);
       } else {
         setLoading(true);
       }
       try {
-        const res = await fetchAdminAudit(targetPage, PAGE_SIZE);
+        const res = await fetchAdminAudit(1, PAGE_SIZE, before);
         setEntries((prev) => (append ? [...prev, ...res.items] : res.items));
-        setPage(res.page);
-        setTotalPages(res.total_pages);
+        setHasMore(res.has_more);
+        setNextBefore(res.next_before);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to load audit log';
         onErrorToastRef.current(msg);
@@ -176,23 +374,21 @@ export default function AdminAuditTab({
   );
 
   useEffect(() => {
-    void loadAudit(1);
+    void loadAudit(null);
   }, [loadAudit]);
 
   const handleLoadMore = () => {
-    if (page < totalPages && !loadingMore) {
-      void loadAudit(page + 1, true);
+    if (hasMore && nextBefore && !loadingMore) {
+      void loadAudit(nextBefore, true);
     }
   };
 
+  const headerCls = 'text-[11px] font-semibold uppercase tracking-wider';
+
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center justify-between px-1">
-        <p
-          className="text-xs font-semibold uppercase tracking-wider"
-          style={{ color: 'var(--adm-muted-fg)' }}
-        >
+        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--adm-muted-fg)' }}>
           Audit Log
         </p>
         <span className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
@@ -202,7 +398,7 @@ export default function AdminAuditTab({
 
       {loading ? (
         <div
-          className="flex flex-col items-center justify-center py-16 space-y-3 rounded-2xl border"
+          className="flex flex-col items-center justify-center space-y-3 rounded-2xl border py-16"
           style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
         >
           <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--adm-primary)' }} />
@@ -212,16 +408,10 @@ export default function AdminAuditTab({
         </div>
       ) : entries.length === 0 ? (
         <div
-          className="flex flex-col items-center justify-center py-14 text-center rounded-2xl border border-dashed p-6 space-y-2"
-          style={{
-            background: 'hsl(213 50% 15% / .5)',
-            borderColor: 'var(--adm-border)',
-          }}
+          className="flex flex-col items-center justify-center space-y-2 rounded-2xl border border-dashed p-6 py-14 text-center"
+          style={{ background: 'hsl(213 50% 15% / .5)', borderColor: 'var(--adm-border)' }}
         >
-          <ClipboardList
-            className="h-10 w-10 opacity-50"
-            style={{ color: 'var(--adm-muted-fg)' }}
-          />
+          <ClipboardList className="h-10 w-10 opacity-50" style={{ color: 'var(--adm-muted-fg)' }} />
           <p className="text-sm font-medium" style={{ color: 'var(--adm-fg)' }}>
             No audit entries
           </p>
@@ -231,145 +421,88 @@ export default function AdminAuditTab({
         </div>
       ) : (
         <div
-          className="rounded-[16px] border overflow-hidden"
-          style={{
-            background: 'var(--adm-grad-card)',
-            borderColor: 'var(--adm-border)',
-          }}
+          className="w-full overflow-hidden rounded-[16px] border"
+          style={{ background: 'var(--adm-grad-card)', borderColor: 'var(--adm-border)' }}
         >
-          {/* Table header */}
           <div
-            className="hidden sm:grid grid-cols-[1fr_auto_auto_1fr] gap-3 border-b px-4 py-2.5"
-            style={{
-              background: 'hsl(213 40% 18% / .6)',
-              borderBottomColor: 'var(--adm-border)',
-            }}
+            className={`hidden ${TABLE_COLS} border-b px-5 py-2.5 md:grid`}
+            style={{ background: 'hsl(213 40% 16% / .55)', borderBottomColor: 'var(--adm-border)' }}
           >
-            <p
-              className="text-[11px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--adm-muted-fg)' }}
-            >
-              Admin
-            </p>
-            <p
-              className="text-[11px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--adm-muted-fg)' }}
-            >
-              Action
-            </p>
-            <p
-              className="text-[11px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--adm-muted-fg)' }}
-            >
-              Target
-            </p>
-            <p
-              className="text-[11px] font-semibold uppercase tracking-wider text-right"
-              style={{ color: 'var(--adm-muted-fg)' }}
-            >
-              Date
-            </p>
+            <p className={headerCls} style={{ color: 'var(--adm-muted-fg)' }}>When</p>
+            <p className={headerCls} style={{ color: 'var(--adm-muted-fg)' }}>Administrator</p>
+            <p className={headerCls} style={{ color: 'var(--adm-muted-fg)' }}>Action</p>
+            <p className={headerCls} style={{ color: 'var(--adm-muted-fg)' }}>Target</p>
+            <p className={headerCls} style={{ color: 'var(--adm-muted-fg)' }}>Details</p>
           </div>
 
-          {/* Rows */}
-          <ul
-            className="divide-y"
-            style={{ borderColor: 'var(--adm-border)' }}
-          >
+          <ul className="divide-y" style={{ borderColor: 'var(--adm-border)' }}>
             {entries.map((entry) => {
-              const hasTarget = Boolean(entry.target_id);
-              const isUserTarget = entry.target_type === 'user';
-              const isEventTarget = entry.target_type === 'event';
-              const canNavigateUser = hasTarget && isUserTarget && onNavigateToUser;
-              const canNavigateEvent = hasTarget && isEventTarget && onNavigateToEvent;
-
+              const details = auditDetails(entry);
               return (
-                <li
-                  key={entry.id}
-                  className="px-4 py-3"
-                  style={{ borderColor: 'var(--adm-border)' }}
-                >
-                  {/* Mobile layout */}
-                  <div className="sm:hidden space-y-1.5">
+                <li key={entry.id} className="px-5 py-3.5" style={{ borderColor: 'var(--adm-border)' }}>
+                  <div className="space-y-2 md:hidden">
                     <div className="flex items-center justify-between gap-2">
-                      <span
-                        className="text-xs font-semibold truncate"
-                        style={{ color: 'var(--adm-fg)' }}
-                      >
-                        {entry.admin_name}
+                      <span className="text-[11px] tabular-nums" style={{ color: 'var(--adm-muted-fg)' }}>
+                        {formatWhen(entry.created_at)}
                       </span>
                       <ActionPill action={entry.action} />
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      {hasTarget ? (
-                        <TargetButton
-                          entry={entry}
-                          canNavigateUser={!!canNavigateUser}
-                          canNavigateEvent={!!canNavigateEvent}
-                          onNavigateToUser={onNavigateToUser}
-                          onNavigateToEvent={onNavigateToEvent}
-                        />
-                      ) : (
-                        <span className="text-xs italic" style={{ color: 'var(--adm-muted-fg)' }}>
-                          —
-                        </span>
-                      )}
-                      <span
-                        className="text-[11px] whitespace-nowrap"
+                    <AuditPersonCell
+                      id={entry.admin_id || entry.admin_name}
+                      name={entry.admin_name}
+                      username={entry.admin_username}
+                      avatarUrl={entry.admin_avatar_url}
+                      onClick={onNavigateToUser && entry.admin_id ? () => onNavigateToUser(entry.admin_id) : undefined}
+                    />
+                    <TargetCell
+                      entry={entry}
+                      onNavigateToUser={onNavigateToUser}
+                      onNavigateToEvent={onNavigateToEvent}
+                    />
+                    {details && (
+                      <p
+                        className="break-words [overflow-wrap:anywhere] text-[12px] leading-snug"
+                        data-testid="audit-reason"
                         style={{ color: 'var(--adm-muted-fg)' }}
                       >
-                        {formatDate(entry.created_at)}
-                      </span>
-                    </div>
-                    {auditNote(entry) && (
-                      <p
-                        className="text-[11px] truncate"
-                        data-testid="audit-reason"
-                        style={{ color: 'var(--adm-muted-fg)', opacity: 0.8 }}
-                      >
-                        {auditNote(entry)}
+                        {details}
                       </p>
                     )}
                   </div>
 
-                  {/* Desktop layout */}
-                  <div className="hidden sm:grid grid-cols-[1fr_auto_auto_1fr] items-center gap-3">
-                    <p
-                      className="text-xs font-semibold truncate"
-                      style={{ color: 'var(--adm-fg)' }}
-                    >
-                      {entry.admin_name}
+                  <div className={`hidden min-w-0 ${TABLE_COLS} items-start md:grid`}>
+                    <p className="min-w-0 pt-1 text-[12px] tabular-nums leading-snug" style={{ color: 'var(--adm-muted-fg)' }}>
+                      {formatWhen(entry.created_at)}
                     </p>
-                    <ActionPill action={entry.action} />
-                    {hasTarget ? (
-                      <TargetButton
-                        entry={entry}
-                        canNavigateUser={!!canNavigateUser}
-                        canNavigateEvent={!!canNavigateEvent}
-                        onNavigateToUser={onNavigateToUser}
-                        onNavigateToEvent={onNavigateToEvent}
-                      />
+                    <AuditPersonCell
+                      id={entry.admin_id || entry.admin_name}
+                      name={entry.admin_name}
+                      username={entry.admin_username}
+                      avatarUrl={entry.admin_avatar_url}
+                      onClick={onNavigateToUser && entry.admin_id ? () => onNavigateToUser(entry.admin_id) : undefined}
+                    />
+                    <div className="min-w-[10.5rem] pt-1">
+                      <ActionPill action={entry.action} />
+                    </div>
+                    <div className="min-w-0">
+                    <TargetCell
+                      entry={entry}
+                      onNavigateToUser={onNavigateToUser}
+                      onNavigateToEvent={onNavigateToEvent}
+                    />
+                    </div>
+                    {details ? (
+                      <p
+                        className="min-w-0 break-words [overflow-wrap:anywhere] pt-0.5 text-[12px] leading-snug"
+                        data-testid="audit-reason"
+                        style={{ color: 'hsl(210 16% 72%)' }}
+                      >
+                        {details}
+                      </p>
                     ) : (
-                      <span className="text-xs italic" style={{ color: 'var(--adm-muted-fg)' }}>
-                        —
-                      </span>
+                      <span />
                     )}
-                    <p
-                      className="text-[11px] text-right whitespace-nowrap"
-                      style={{ color: 'var(--adm-muted-fg)' }}
-                    >
-                      {formatDate(entry.created_at)}
-                    </p>
                   </div>
-                  {auditNote(entry) && (
-                    <p
-                      className="hidden sm:block mt-1.5 text-[11px]"
-                      data-testid="audit-reason"
-                      style={{ color: 'var(--adm-muted-fg)', opacity: 0.85 }}
-                    >
-                      {auditNote(entry)}
-                    </p>
-                  )}
                 </li>
               );
             })}
@@ -377,8 +510,7 @@ export default function AdminAuditTab({
         </div>
       )}
 
-      {/* Load More */}
-      {page < totalPages && !loading && (
+      {hasMore && !loading && (
         <div className="pt-2 text-center">
           <button
             type="button"
@@ -403,81 +535,5 @@ export default function AdminAuditTab({
         </div>
       )}
     </div>
-  );
-}
-
-function TargetButton({
-  entry,
-  canNavigateUser,
-  canNavigateEvent,
-  onNavigateToUser,
-  onNavigateToEvent,
-}: {
-  entry: AdminAuditEntry;
-  canNavigateUser: boolean;
-  canNavigateEvent: boolean;
-  onNavigateToUser?: (userId: string) => void;
-  onNavigateToEvent?: (eventId: string) => void;
-}) {
-  const targetLabel =
-    entry.details
-      ? entry.details.length > 28
-        ? `${entry.details.slice(0, 28)}…`
-        : entry.details
-      : entry.target_type === 'user'
-        ? 'User'
-        : entry.target_type === 'event'
-          ? 'Event'
-          : entry.target_id ?? '—';
-
-  if (canNavigateUser && onNavigateToUser && entry.target_id) {
-    return (
-      <button
-        type="button"
-        onClick={() => onNavigateToUser(entry.target_id!)}
-        aria-label="View target user"
-        className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors hover:opacity-80"
-        style={{
-          borderColor: 'var(--adm-border)',
-          background: 'hsl(213 40% 20% / .5)',
-          color: 'var(--adm-fg)',
-        }}
-      >
-        <span className="truncate max-w-[100px]">{targetLabel}</span>
-        <ChevronRight className="h-3 w-3 shrink-0" />
-      </button>
-    );
-  }
-
-  if (canNavigateEvent && onNavigateToEvent && entry.target_id) {
-    return (
-      <button
-        type="button"
-        onClick={() => onNavigateToEvent(entry.target_id!)}
-        aria-label="View target event"
-        className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors hover:opacity-80"
-        style={{
-          borderColor: 'var(--adm-border)',
-          background: 'hsl(213 40% 20% / .5)',
-          color: 'var(--adm-fg)',
-        }}
-      >
-        <span className="truncate max-w-[100px]">{targetLabel}</span>
-        <ChevronRight className="h-3 w-3 shrink-0" />
-      </button>
-    );
-  }
-
-  return (
-    <span
-      className="inline-flex items-center rounded-lg border px-2 py-1 text-[11px] font-medium"
-      style={{
-        borderColor: 'var(--adm-border)',
-        background: 'hsl(213 40% 20% / .3)',
-        color: 'var(--adm-muted-fg)',
-      }}
-    >
-      <span className="truncate max-w-[100px]">{targetLabel}</span>
-    </span>
   );
 }

@@ -34,6 +34,7 @@ import { toProfileVisibility, visibilityForApi, type ProfileVisibility } from '@
 import { resolveAvatarDisplayUrl, getGeneratedAvatarUrl } from '@/lib/avatars'; 
 import { CATEGORY_BANNERS } from '@/lib/categoryBanners'; 
 import InvitationsTab from '@/components/InvitationsTab';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import { useMyInvitations } from '@/hooks/useMyInvitations';
 import { 
   fetchFriends, 
@@ -724,7 +725,7 @@ export default function ProfilePage() {
 
   const openProfile = (userId: string) => navigate(userProfilePath(userId, user?.id ?? null));
 
-  if (profileLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" /></div>;
+  if (profileLoading) return <ProfileLoadingRunner />;
   if (!user) { navigate('/login'); return null; }
 
   const currentDisplayBanner = editing ? previewBannerUrl : bannerUrl;

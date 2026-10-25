@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { queryClient } from '@/lib/queryClient';
-import { invalidateEvents } from '@/lib/queries';
+import { invalidateEvents, prependCreatedEvent } from '@/lib/queries';
+import type { EventItem } from '@/lib/storage';
 import { getCached, setCacheEntry, TTL } from '@/lib/queryCache';
 import { EVENTS_CHANGED_EVENT } from '@/lib/realtimeEvents';
 
@@ -35,5 +36,16 @@ describe('invalidateEvents', () => {
     expect(getCached('/api/participants/e1/participants:tok')).toBeNull();
     expect(onChange).toHaveBeenCalled();
     window.removeEventListener(EVENTS_CHANGED_EVENT, onChange);
+  });
+
+  it('puts a newly created event at the front of cached home lists', () => {
+    queryClient.setQueryData(['events', {}], [{ id: 'old' }]);
+    const created = { id: 'new-evt', title: 'Fresh' } as EventItem;
+    prependCreatedEvent(created);
+    expect(queryClient.getQueryData(['events', {}])).toEqual([
+      created,
+      { id: 'old' },
+    ]);
+    queryClient.removeQueries({ queryKey: ['events'] });
   });
 });

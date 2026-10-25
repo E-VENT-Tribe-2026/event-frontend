@@ -29,6 +29,7 @@ import EventDetailsCheckin from '@/pages/eventDetails/EventDetailsCheckin';
 import EventDetailsHero from '@/pages/eventDetails/EventDetailsHero';
 import EventDetailsMap from '@/pages/eventDetails/EventDetailsMap';
 import EventDetailsRemoved from '@/pages/eventDetails/EventDetailsRemoved';
+import EventDetailsBalloonLoader from '@/pages/eventDetails/EventDetailsBalloonLoader';
 import EventDetailsStatus from '@/pages/eventDetails/EventDetailsStatus';
 import EventDetailsVenueModal from '@/pages/eventDetails/EventDetailsVenueModal';
 import {
@@ -49,6 +50,7 @@ export default function EventDetailsPage() {
   const [apiEventStatus, setApiEventStatus] = useState<string | null>(null);
   const [apiNotFound, setApiNotFound] = useState(false);
   const [loadingApi, setLoadingApi] = useState(true);
+  const [balloonFinished, setBalloonFinished] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [showVenuePaymentModal, setShowVenuePaymentModal] = useState(false);
   const [apiParticipants, setApiParticipants] = useState<ParticipantRow[]>([]);
@@ -444,6 +446,12 @@ export default function EventDetailsPage() {
   }, [event]);
 
   useEffect(() => {
+    setBalloonFinished(false);
+  }, [id]);
+
+  const finishBalloon = useCallback(() => setBalloonFinished(true), []);
+
+  useEffect(() => {
     if (loadingApi && !localEvent) return;
     const ev = apiEvent ?? localEvent ?? null;
     if (!ev?.title?.trim()) {
@@ -453,8 +461,8 @@ export default function EventDetailsPage() {
     document.title = formatPageTitle(ev.title);
   }, [loadingApi, localEvent, routeEvent, apiEvent]);
 
-  if (loadingApi && !localEvent) {
-    return <EventDetailsStatus message="Loadingâ€¦" />;
+  if (!localEvent && !balloonFinished) {
+    return <EventDetailsBalloonLoader ready={!loadingApi} onBurstDone={finishBalloon} />;
   }
   if (!event) {
     return <EventDetailsStatus message="Event not found" />;

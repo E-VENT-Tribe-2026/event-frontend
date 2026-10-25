@@ -13,6 +13,7 @@ import {
 import { motion } from 'framer-motion';
 import { UserAvatar } from '@/components/UserAvatar';
 import { fetchAdminUsers, isSuspendedAccount, type AdminUserSummary } from '@/lib/adminApi';
+import AdminInviteCard from '@/components/admin/AdminInviteCard';
 
 type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings';
 
@@ -25,6 +26,7 @@ type UserRow = AdminUserSummary & {
 interface AdminUsersTabProps {
   onOpenUser: (userId: string) => void;
   onErrorToast: (msg: string) => void;
+  onSuccessToast?: (msg: string) => void;
 }
 
 const PAGE_SIZE = 50;
@@ -54,7 +56,7 @@ const FILTER_PREDICATES: Record<FilterChip, (u: UserRow) => boolean> = {
   with_warnings: hasWarnings,
 };
 
-export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTabProps) {
+export default function AdminUsersTab({ onOpenUser, onErrorToast, onSuccessToast }: AdminUsersTabProps) {
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [allFetchedUsers, setAllFetchedUsers] = useState<UserRow[]>([]);
   const [page, setPage] = useState<number>(1);
@@ -195,6 +197,8 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
           </div>
         </div>
       </div>
+
+      <AdminInviteCard onErrorToast={onErrorToast} onSuccessToast={onSuccessToast} />
 
       {/* Filter chips */}
       <div className="flex flex-wrap items-center gap-2">

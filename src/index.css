@@ -221,6 +221,40 @@
     animation: shimmer 1.5s infinite;
   }
 
+  .profile-run-bob {
+    animation: profile-run-bob 0.42s ease-in-out infinite;
+  }
+  .profile-run-leg-a {
+    transform-origin: 40px 56px;
+    animation: profile-run-leg-a 0.42s ease-in-out infinite;
+  }
+  .profile-run-leg-b {
+    transform-origin: 40px 56px;
+    animation: profile-run-leg-b 0.42s ease-in-out infinite;
+  }
+  .profile-run-arm-a {
+    transform-origin: 40px 34px;
+    animation: profile-run-arm-a 0.42s ease-in-out infinite;
+  }
+  .profile-run-arm-b {
+    transform-origin: 40px 34px;
+    animation: profile-run-arm-b 0.42s ease-in-out infinite;
+  }
+  .profile-run-ground {
+    animation: profile-run-ground 0.42s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .profile-run-bob,
+    .profile-run-leg-a,
+    .profile-run-leg-b,
+    .profile-run-arm-a,
+    .profile-run-arm-b,
+    .profile-run-ground {
+      animation: none;
+    }
+  }
+
   /* Card hover lift */
   .card-lift {
     transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -269,6 +303,35 @@
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+@keyframes profile-run-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes profile-run-leg-a {
+  0% { transform: rotate(36deg); }
+  50% { transform: rotate(-40deg); }
+  100% { transform: rotate(36deg); }
+}
+@keyframes profile-run-leg-b {
+  0% { transform: rotate(-40deg); }
+  50% { transform: rotate(36deg); }
+  100% { transform: rotate(-40deg); }
+}
+@keyframes profile-run-arm-a {
+  0% { transform: rotate(-38deg); }
+  50% { transform: rotate(30deg); }
+  100% { transform: rotate(-38deg); }
+}
+@keyframes profile-run-arm-b {
+  0% { transform: rotate(30deg); }
+  50% { transform: rotate(-38deg); }
+  100% { transform: rotate(30deg); }
+}
+@keyframes profile-run-ground {
+  from { transform: translateX(0); }
+  to { transform: translateX(-20px); }
 }
 
 @keyframes bounce-marker {
