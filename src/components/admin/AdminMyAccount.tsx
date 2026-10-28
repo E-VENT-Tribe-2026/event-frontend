@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Shield, Flag, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Shield, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
 import { fetchAdminUserDetails, type AdminUserDetailsFull } from '@/lib/adminApi';
 
 interface AdminMyAccountProps {
@@ -210,7 +211,7 @@ export default function AdminMyAccount({ adminId, onClose }: AdminMyAccountProps
                   color: 'var(--adm-primary)',
                 }}
               >
-                <Flag className="h-5 w-5" />
+                <ReportFlag className="h-5 w-5" />
               </div>
               <div className="min-w-0">
                 <p className="text-base font-bold tracking-tight" style={{ color: 'var(--adm-fg)' }}>

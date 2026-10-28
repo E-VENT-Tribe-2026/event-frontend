@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Ban, Flag, LogOut, Pencil, UserPlus } from 'lucide-react';
+import { Ban, LogOut, Pencil, UserPlus } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
 import ReportContentDialog from '@/components/ReportContentDialog';
 
 type EventDetailsActionsProps = {
@@ -191,8 +192,8 @@ export default function EventDetailsActions({
           onClick={() => setReportOpen(true)}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 py-3 text-sm font-semibold text-destructive hover:bg-destructive/10"
         >
-          <Flag className="h-4 w-4" />
-          Report event
+          <ReportFlag className="h-4 w-4" />
+          Report
         </button>
       )}
 

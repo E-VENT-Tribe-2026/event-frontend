@@ -1,6 +1,7 @@
-import { type RefObject, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Flag, ListChecks, MapPinned, Send, Smile } from 'lucide-react';
+import { type RefObject, useEffect, useState } from 'react';
+import { AlertTriangle, ArrowLeft, ListChecks, MapPinned, Send, Smile } from 'lucide-react';
 import ReportContentDialog from '@/components/ReportContentDialog';
+import ReportFlag from '@/components/ReportFlag';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
@@ -73,7 +74,24 @@ export default function ChatThreadView({
 }: ChatThreadViewProps) {
   const isReadOnly = Boolean(chat.isPast || chat.isCancelled);
   const emojis = ['😀', '😂', '❤️', '👍', '🎉', '🔥', '🙌', '😊'];
-  const [report, setReport] = useState<{ type: 'event' | 'message'; id: string } | null>(null);
+  const [report, setReport] = useState<{
+    type: 'event' | 'message';
+    id: string;
+    quote?: { text: string; senderName?: string };
+  } | null>(null);
+  // The message whose report flag is showing after a tap (phones). On a computer the flag
+  // shows while the mouse is over the message.
+  const [flaggedMessageId, setFlaggedMessageId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!flaggedMessageId) return;
+    // Tapping anywhere else hides the flag.
+    const hideOutside = (e: PointerEvent) => {
+      const owner = (e.target as HTMLElement | null)?.closest?.('[data-message-id]');
+      if (owner?.getAttribute('data-message-id') !== flaggedMessageId) setFlaggedMessageId(null);
+    };
+    document.addEventListener('pointerdown', hideOutside);
+    return () => document.removeEventListener('pointerdown', hideOutside);
+  }, [flaggedMessageId]);
   const canReportEvent = Boolean(user.id) && user.id !== chat.organizerId;
 
   return (
@@ -111,11 +129,11 @@ export default function ChatThreadView({
             {canReportEvent && (
               <button
                 type="button"
-                aria-label="Report event"
                 onClick={() => setReport({ type: 'event', id: chat.id })}
-                className="rounded-full p-2 text-muted-foreground hover:bg-secondary/80 hover:text-destructive"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-500 hover:bg-red-500/10"
               >
-                <Flag className="h-4 w-4" />
+                <ReportFlag className="h-3.5 w-3.5" />
+                Report event
               </button>
             )}
           </div>
@@ -194,7 +212,13 @@ export default function ChatThreadView({
                         <UserAvatar src={m.senderAvatar} seed={m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
                       )
                     )}
-                    <div className={`max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}>
+                    <div
+                      data-message-id={m.id}
+                      onClick={() => {
+                        if (m.from === 'them') setFlaggedMessageId((current) => (current === m.id ? null : m.id));
+                      }}
+                      className={`group max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}
+                    >
                       {m.from === 'them' && (
                         <div className="flex items-center gap-1.5 px-1">
                           <span className="text-[11px] font-semibold text-foreground">
@@ -204,10 +228,19 @@ export default function ChatThreadView({
                             <button
                               type="button"
                               aria-label="Report message"
-                              onClick={() => setReport({ type: 'message', id: m.id })}
-                              className="rounded-full p-0.5 text-muted-foreground hover:bg-secondary/80 hover:text-destructive"
+                              title="Report message"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFlaggedMessageId(null);
+                                setReport({ type: 'message', id: m.id, quote: { text: m.text, senderName: m.senderName } });
+                              }}
+                              className={`rounded-full p-0.5 transition-opacity hover:bg-secondary/80 focus-visible:opacity-100 ${
+                                flaggedMessageId === m.id
+                                  ? 'opacity-100'
+                                  : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+                              }`}
                             >
-                              <Flag className="h-3 w-3" />
+                              <ReportFlag className="h-3 w-3" />
                             </button>
                           )}
                         </div>
@@ -386,6 +419,7 @@ export default function ChatThreadView({
           targetId={report.id}
           origin="event_chat"
           title={report.type === 'event' ? 'Report this event' : 'Report this message'}
+          quote={report.type === 'message' ? report.quote : undefined}
           onSuccess={(message) => {
             setReport(null);
             onToast?.(message, 'success');

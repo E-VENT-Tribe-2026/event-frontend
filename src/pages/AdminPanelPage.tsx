@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Shield, Users, Calendar, ClipboardList, Flag, LogOut, Eye } from 'lucide-react';
+import { Shield, Users, Calendar, ClipboardList, LogOut, Eye } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AppToast from '@/components/AppToast';
 import AdminUsersTab from '@/components/admin/AdminUsersTab';
@@ -148,7 +149,7 @@ export default function AdminPanelPage() {
     { id: 'users', label: 'Users', icon: <Users className="h-4 w-4" /> },
     { id: 'events', label: 'Events', icon: <Calendar className="h-4 w-4" /> },
     { id: 'audit', label: 'Audit Log', icon: <ClipboardList className="h-4 w-4" /> },
-    { id: 'reports', label: 'Reports', icon: <Flag className="h-4 w-4" /> },
+    { id: 'reports', label: 'Reports', icon: <ReportFlag className="h-4 w-4" /> },
   ];
 
   return (
