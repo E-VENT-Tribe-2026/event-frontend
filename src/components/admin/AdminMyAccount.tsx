@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Shield, Flag, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
-import { fetchAdminUserDetails, type AdminUserDetailsFull } from '@/lib/adminApi';
+import { fetchAdminAccount, fetchAdminUserDetails, type AdminUserDetailsFull } from '@/lib/adminApi';
 
 interface AdminMyAccountProps {
   adminId: string;
@@ -22,6 +22,22 @@ export default function AdminMyAccount({ adminId, onClose }: AdminMyAccountProps
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
   const [imgFailed, setImgFailed] = useState<boolean>(false);
+  // Reports this administrator closed (dismissed or acted on), from GET /api/admin/account.
+  const [reportsClosed, setReportsClosed] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAdminAccount()
+      .then((account) => {
+        if (!cancelled) setReportsClosed(account.reports_closed);
+      })
+      .catch(() => {
+        if (!cancelled) setReportsClosed(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!adminId) {
@@ -213,11 +229,15 @@ export default function AdminMyAccount({ adminId, onClose }: AdminMyAccountProps
                 <Flag className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <p className="text-base font-bold tracking-tight" style={{ color: 'var(--adm-fg)' }}>
-                  0
+                <p
+                  className="text-base font-bold tracking-tight"
+                  style={{ color: 'var(--adm-fg)' }}
+                  data-testid="reports-closed-count"
+                >
+                  {reportsClosed ?? '–'}
                 </p>
                 <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-                  Reports closed by you
+                  Reports closed by you (dismissed or acted on)
                 </p>
               </div>
             </div>
