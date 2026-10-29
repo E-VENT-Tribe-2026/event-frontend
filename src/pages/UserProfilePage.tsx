@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Ban, Calendar, Clock, Flag, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
 import ReportContentDialog from '@/components/ReportContentDialog';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
@@ -370,7 +371,7 @@ export default function UserProfilePage() {
             disabled={busy}
             className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
           >
-            <Flag className="h-3.5 w-3.5" /> Report
+            <ReportFlag className="h-3.5 w-3.5" /> Report
           </button>
         </div>
       );
@@ -392,7 +393,7 @@ export default function UserProfilePage() {
           disabled={busy}
           className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
         >
-          <Flag className="h-3.5 w-3.5" /> Report
+          <ReportFlag className="h-3.5 w-3.5" /> Report
         </button>
       </div>
     );

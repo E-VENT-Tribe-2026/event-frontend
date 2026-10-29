@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Flag, Loader2, ChevronRight } from 'lucide-react';
+import { Loader2, ChevronRight } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
 import {
   fetchAdminReports,
   formatReportTime,
@@ -135,7 +136,7 @@ function ReportSection({
           className="flex flex-col items-center justify-center py-8 text-center rounded-2xl border border-dashed p-6 space-y-2"
           style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
         >
-          <Flag className="h-7 w-7 opacity-50" style={{ color: 'var(--adm-muted-fg)' }} />
+          <ReportFlag className="h-8 w-8 opacity-70" />
           <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
             {emptyMessage}
           </p>

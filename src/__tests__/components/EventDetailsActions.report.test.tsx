@@ -35,14 +35,17 @@ const base = {
 };
 
 describe('EventDetailsActions report', () => {
-  it('lets a signed-in attendee open report event', () => {
+  it('shows a "Report" button with the red flag and opens the report window', () => {
     render(<EventDetailsActions {...base} />);
-    fireEvent.click(screen.getByRole('button', { name: /report event/i }));
+    const button = screen.getByRole('button', { name: /^report$/i });
+    expect(button).toHaveTextContent('Report');
+    expect(button.querySelector('[data-testid="report-flag"]')).toHaveClass('text-red-500');
+    fireEvent.click(button);
     expect(screen.getByText('Report this event')).toBeInTheDocument();
   });
 
   it('hides report for the event owner', () => {
     render(<EventDetailsActions {...base} isEventOwner />);
-    expect(screen.queryByRole('button', { name: /report event/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^report$/i })).not.toBeInTheDocument();
   });
 });

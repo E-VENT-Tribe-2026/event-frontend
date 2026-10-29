@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { ClipboardList, Loader2, Flag, Mail, MessageSquare, Calendar, Filter, X } from 'lucide-react';
+import { ClipboardList, Loader2, Mail, MessageSquare, Calendar, Filter, X } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
 import { UserAvatar } from '@/components/UserAvatar';
 import {
   auditActionFilterKey,
@@ -282,7 +283,7 @@ function TargetCell({
     return (
       <div className="flex min-w-0 items-start gap-2.5">
         <TargetIconBadge tone="flag">
-          <Flag className="h-3.5 w-3.5" />
+          <ReportFlag className="h-3.5 w-3.5" />
         </TargetIconBadge>
         <span className="min-w-0">
           <span className="block break-words text-[13px] font-medium" style={{ color: 'var(--adm-fg)' }}>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Flag, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,8 @@ type ReportContentDialogProps = {
   targetId: string;
   origin: ReportOrigin;
   title?: string;
+  /** For a message report: the reported message and who sent it, shown at the top. */
+  quote?: { text: string; senderName?: string };
   onSuccess?: (message: string) => void;
   onError?: (message: string) => void;
 };
@@ -35,6 +38,7 @@ export default function ReportContentDialog({
   targetId,
   origin,
   title,
+  quote,
   onSuccess,
   onError,
 }: ReportContentDialogProps) {
@@ -90,13 +94,23 @@ export default function ReportContentDialog({
         <form onSubmit={handleSubmit} className="space-y-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Flag className="h-4 w-4 text-destructive" />
+              <ReportFlag className="h-4 w-4" />
               {heading}
             </DialogTitle>
             <DialogDescription>
               Moderators will review this. False reports may lead to a warning.
             </DialogDescription>
           </DialogHeader>
+
+          {quote && (
+            <blockquote
+              data-testid="report-quote"
+              className="space-y-0.5 rounded-xl border-l-4 border-red-500/60 bg-secondary/60 px-3 py-2"
+            >
+              {quote.senderName && <p className="text-xs font-semibold text-foreground">{quote.senderName}</p>}
+              <p className="line-clamp-4 break-words text-sm text-muted-foreground">{quote.text}</p>
+            </blockquote>
+          )}
 
           <fieldset className="space-y-2">
             <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reason</legend>
@@ -152,7 +166,7 @@ export default function ReportContentDialog({
               disabled={submitting}
               className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground disabled:opacity-70"
             >
-              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Flag className="h-3.5 w-3.5" />}
+              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {submitting ? 'Sending…' : 'Submit report'}
             </button>
           </DialogFooter>

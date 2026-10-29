@@ -52,10 +52,11 @@ const REASON_LABELS: Record<ReportReason, string> = {
   other: 'Other',
 };
 
+/** "Misleading event" is only for an event; users and messages have the other five. */
 export const REPORT_REASONS_BY_TARGET: Record<ReportTargetType, ReportReason[]> = {
-  event: ['spam', 'inappropriate_content', 'scam_or_fraud', 'misleading_event', 'other'],
-  user: ['spam', 'harassment_or_hate', 'inappropriate_content', 'scam_or_fraud', 'other'],
-  message: ['spam', 'harassment_or_hate', 'inappropriate_content', 'other'],
+  event: ['spam', 'inappropriate_content', 'harassment_or_hate', 'scam_or_fraud', 'misleading_event', 'other'],
+  user: ['spam', 'inappropriate_content', 'harassment_or_hate', 'scam_or_fraud', 'other'],
+  message: ['spam', 'inappropriate_content', 'harassment_or_hate', 'scam_or_fraud', 'other'],
 };
 
 export function reportReasonLabel(reason: ReportReason): string {
