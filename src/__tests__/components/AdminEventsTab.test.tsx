@@ -99,6 +99,39 @@ describe('AdminEventsTab (ticket #249)', () => {
     expect(screen.queryByText(/^@$/)).not.toBeInTheDocument();
   });
 
+  it('marks removed events as removed, also those the public list leaves out (#328)', async () => {
+    const removedParty = {
+      id: 'e9',
+      title: 'Removed Party',
+      status: 'active',
+      is_cancelled: false,
+      start_datetime: '2026-12-01T20:00:00Z',
+      end_datetime: null,
+      organizer,
+      is_removed: true,
+      removed_at: '2026-10-27T15:00:00Z',
+    };
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname.startsWith('/api/admin/events')) {
+        return jsonResponse({
+          items: [{ ...summit, is_removed: true, removed_at: '2026-10-27T15:00:00Z' }, removedParty],
+          total: 2,
+          page: 1,
+          limit: 100,
+          total_pages: 1,
+        });
+      }
+      return jsonResponse({ data: [summit, hackathon] });
+    });
+    renderTab();
+
+    const summitRow = await screen.findByRole('button', { name: 'View event Community Tech Summit' });
+    await waitFor(() => expect(summitRow).toHaveTextContent('Removed'));
+    expect(await screen.findByRole('button', { name: 'View event Removed Party' })).toHaveTextContent('Removed');
+    expect(screen.getByRole('button', { name: 'View event Cancelled Hackathon' })).not.toHaveTextContent('Removed');
+  });
+
   it('marks a cancelled event with a "Cancelled" label and no other event', async () => {
     renderTab();
     const row = await screen.findByRole('button', { name: /View event Cancelled Hackathon/i });
