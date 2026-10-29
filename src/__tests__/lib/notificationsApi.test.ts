@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchNotifications } from '@/lib/notificationsApi';
+import { countBellUnreads, fetchNotifications, type ApiNotification } from '@/lib/notificationsApi';
 
 // Payload copied from the backend dev's example on ticket #243 (event-backend#146):
 // build against the posted example, then switch to the live endpoint.
@@ -71,5 +71,38 @@ describe('fetchNotifications — ticket #243 friend request types', () => {
     const eventRow = rows.find((n) => n.type === 'event_updated');
     expect(eventRow?.related_user_id).toBeNull();
     expect(eventRow?.related_event_id).toBe('c9f0f895-fb98-4b91-99f5-1fd0297e236d');
+  });
+});
+
+describe('countBellUnreads', () => {
+  const row = (over: Partial<ApiNotification> & Pick<ApiNotification, 'id' | 'type' | 'read'>): ApiNotification => ({
+    message: '',
+    ...over,
+  });
+
+  it('adds pending requests that are not already unread friend-request rows', () => {
+    expect(countBellUnreads([
+      row({ id: '1', type: 'event_updated', read: false }),
+      row({ id: '2', type: 'event_updated', read: true }),
+    ], 2)).toBe(3);
+  });
+
+  it('does not double-count an unread friend-request notification', () => {
+    expect(countBellUnreads([
+      row({ id: '1', type: 'friend_request_received', read: false }),
+      row({ id: '2', type: 'event_updated', read: false }),
+    ], 1)).toBe(2);
+  });
+
+  it('ignores muted kinds and pending friend requests', () => {
+    expect(countBellUnreads([
+      row({ id: '1', type: 'event_invitation', read: false }),
+      row({ id: '2', type: 'warning', read: false }),
+    ], 3, {
+      friend_requests: false,
+      invitations: false,
+      event_chat: true,
+      reminders: true,
+    })).toBe(1);
   });
 });

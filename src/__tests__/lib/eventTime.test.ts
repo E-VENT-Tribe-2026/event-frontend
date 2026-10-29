@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { EventItem } from '@/lib/storage';
-import { eventStartMs, isEventUpcoming } from '@/lib/eventTime';
+import { eventStartMs, isEventUpcoming, localDateTimeParts } from '@/lib/eventTime';
 
 const baseEvent = (over: Partial<EventItem>): EventItem =>
   ({
@@ -28,6 +28,19 @@ const baseEvent = (over: Partial<EventItem>): EventItem =>
     collaborators: [],
     ...over,
   }) as EventItem;
+
+describe('localDateTimeParts', () => {
+  it('uses the local calendar day instead of the UTC date', () => {
+    const value = new Date('2026-10-25T23:30:00.000Z');
+    const parts = localDateTimeParts(value);
+    expect(parts.date).toBe(
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`,
+    );
+    expect(parts.time).toBe(
+      `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`,
+    );
+  });
+});
 
 describe('eventStartMs', () => {
   it('parses date and time to epoch ms', () => {

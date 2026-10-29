@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
 import { type EventItem, getCurrentUser } from '@/lib/storage';
-import { MapPin, Clock, Users, UserCheck, Heart } from 'lucide-react';
+import { MapPin, Clock, Users, Heart } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { getCategoryBanner } from '@/lib/categoryBanners';
+import { fetchOrganizerProfile } from '@/lib/organizerProfile';
 import { useParticipantCount, invalidateFavorites } from '@/lib/queries';
+import FriendsAttendingCount from '@/components/FriendsAttendingCount';
 
 interface EventCardProps {
   event: EventItem;
   onJoin?: (id: string) => void;
+  /** @deprecated No longer used: the friends number comes from event.friendsAttendingCount. */
   showFriendBadge?: boolean;
   isFavorite?: boolean; 
 }
@@ -30,7 +33,7 @@ const formatEventDateTime = (startStr?: string, fallbackDate?: string, fallbackT
   }
 };
 
-export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: initialIsFavorite = false }: EventCardProps) {
+export default function EventCard({ event, onJoin, isFavorite: initialIsFavorite = false }: EventCardProps) {
   const navigate = useNavigate();
   const user = getCurrentUser();
   const isAlreadyJoined = Boolean(user && event.participants?.includes(user.id));
@@ -57,39 +60,21 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
     }
   }, [isAlreadyJoined, event.id]);
 
-  // Fetch organizer profile via created_by / organizerId GUID if name is generic
   useEffect(() => {
     const creatorId = event.organizerId || (event as any).created_by;
     if (!creatorId) return;
+    const alreadyKnown = Boolean(
+      event.organizerFullName || (event.organizer && event.organizer !== 'Organizer'),
+    );
+    if (alreadyKnown) return;
 
     let cancelled = false;
-    (async () => {
-      try {
-        const token = getAuthToken();
-        const headers: Record<string, string> = { Accept: 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-        const res = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
-        if (res.ok) {
-          const profData = await res.json().catch(() => null);
-          const prof = profData?.data || profData?.profile || profData;
-          if (prof && !cancelled) {
-            setOrganizerProfile({
-              full_name: prof.full_name || prof.name,
-              username: prof.username,
-              avatar_url: prof.avatar_url,
-            });
-          }
-        }
-      } catch {
-        // ignore profile lookup failure
-      }
-    })();
-
+    void fetchOrganizerProfile(String(creatorId)).then((prof) => {
+      if (prof && !cancelled) setOrganizerProfile(prof);
+    });
     return () => { cancelled = true; };
-  }, [event.organizerId, (event as any).created_by]);
+  }, [event.organizerId, event.organizer, event.organizerFullName, event.organizerAvatar, event.organizerUsername, (event as any).created_by]);
 
-  const friendJoined = user?.isPremium && user?.friends?.some(fId => event.participants?.includes(fId));
 
   const handleFavorite = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -161,10 +146,12 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
       className="block rounded-2xl overflow-hidden glass-card card-lift animate-fade-in relative"
     >
       <div className="relative h-40 overflow-hidden">
-        <img 
-          src={event.image || getCategoryBanner(event.category)} 
-          alt={event.title} 
-          className="h-full w-full object-cover transition-transform duration-500 hover:scale-110" 
+        <img
+          src={event.image || getCategoryBanner(event.category)}
+          alt={event.title}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover transition-transform duration-500 hover:scale-110"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
         <div className="absolute top-2 right-2 rounded-full bg-primary/90 px-3 py-1 text-xs font-semibold text-primary-foreground backdrop-blur-sm">
@@ -175,11 +162,7 @@ export default function EventCard({ event, onJoin, showFriendBadge, isFavorite: 
         ) : (
           <div className="absolute top-2 left-2 rounded-full bg-secondary/90 px-3 py-1 text-xs font-semibold text-secondary-foreground backdrop-blur-sm">€{event.budget}</div>
         )}
-        {(showFriendBadge || friendJoined) && (
-          <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-accent/90 px-2.5 py-1 text-[10px] font-semibold text-accent-foreground backdrop-blur-sm">
-            <UserCheck className="h-3 w-3" /> Friend joined
-          </div>
-        )}
+        <FriendsAttendingCount count={event.friendsAttendingCount} className="absolute bottom-2 left-2" />
       </div>
 
       <div className="p-4 space-y-2">

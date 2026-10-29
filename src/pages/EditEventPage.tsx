@@ -3,7 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Type, Calendar, MapPin, Users } from 'lucide-react';
 import { getCurrentUser, upsertEvent, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
-import { ALL_INTERESTS } from '@/lib/interests';
+import CategoryPills from '@/components/CategoryPills';
+import EventBannerField from '@/components/EventBannerField';
+import { getCategoryBanner } from '@/lib/categoryBanners';
+import { publicBannerUrl, uploadEventBanner } from '@/lib/eventBanner';
+import { setCacheEntry, TTL } from '@/lib/queryCache';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
@@ -16,7 +20,7 @@ import LocationPickerMap, { hasValidEventCoordinates } from '@/components/Locati
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
-import { invalidatePrefix } from '@/lib/queryCache';
+import { invalidateEvents } from '@/lib/queries';
 import { sanitizeText } from '@/lib/sanitize';
 
 type ApiEventRow = Record<string, unknown>;
@@ -57,6 +61,8 @@ export default function EditEventPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cachedItem, setCachedItem] = useState<EventItem | null>(null);
   const [currentParticipantCount, setCurrentParticipantCount] = useState(0);
+  const [customBanner, setCustomBanner] = useState<string | null>(null);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
 
   const update = (key: string, value: string | boolean) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -136,6 +142,8 @@ export default function EditEventPage() {
         if (cancelled) return;
 
         setCachedItem(item);
+        const categoryDefault = getCategoryBanner(item.category);
+        setCustomBanner(item.image && item.image !== categoryDefault ? item.image : null);
         setDurationMs(dMs);
         setCurrentParticipantCount(item.participants?.length ?? 0);
 
@@ -229,6 +237,13 @@ export default function EditEventPage() {
       const endObj = new Date(startObj.getTime() + durationMs);
       const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
+      const uploaded = bannerFile ? await uploadEventBanner(bannerFile) : null;
+      const bannerUrl = uploaded || publicBannerUrl(customBanner);
+      if (uploaded) {
+        setCustomBanner(uploaded);
+        setBannerFile(null);
+      }
+
       const payload = {
         title: sanitizeText(form.title),
         description: sanitizeText(form.description),
@@ -240,6 +255,7 @@ export default function EditEventPage() {
         location_name: locationName,
         latitude: pickedLat!,
         longitude: pickedLng!,
+        banner_url: bannerUrl,
       };
 
       const res = await fetch(getApiUrl(`${API_ENDPOINTS.EVENTS}/${id}`), {
@@ -286,7 +302,7 @@ export default function EditEventPage() {
         organizer: organizerName,
         organizerId,
         organizerAvatar,
-        image: base?.image ?? item.image,
+        image: publicBannerUrl(item.image) || bannerUrl || item.image,
         participants: base?.participants ?? item.participants,
         reviews: base?.reviews ?? [],
         reports: base?.reports ?? [],
@@ -294,9 +310,9 @@ export default function EditEventPage() {
       };
 
       upsertEvent(merged);
+      invalidateEvents();
+      setCacheEntry(`/api/events/${id}`, { ...updatedRow, banner_url: bannerUrl ?? updatedRow.banner_url }, TTL.MEDIUM);
       setToast({ show: true, message: 'Event updated!', type: 'success' });
-      invalidatePrefix('/api/events?');
-      invalidatePrefix(`/api/participants/${id}`);
       setTimeout(() => navigate(`/event/${id}`), 1200);
     } catch (err: unknown) {
       clearTimeout(timeoutId);
@@ -371,6 +387,14 @@ export default function EditEventPage() {
         onSubmit={handleSubmit}
         className="relative z-10 mx-auto max-w-lg space-y-5 px-4 pt-5"
       >
+        <EventBannerField
+          category={form.category}
+          customUrl={customBanner}
+          onCustomUrl={setCustomBanner}
+          onCustomFile={setBannerFile}
+          onError={(message) => setToast({ show: true, message, type: 'error' })}
+        />
+
         {/* ── Event Details ── */}
         <div>
           <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -387,11 +411,13 @@ export default function EditEventPage() {
               <textarea id="edit-description" placeholder="Description" rows={3} value={form.description} onChange={(e) => update('description', e.target.value)} className={`${inputCls('description')} resize-none`} />
               {errors.description && <span className="text-[10px] text-destructive px-1">{errors.description}</span>}
             </div>
-            <div className="space-y-1">
-              <label htmlFor="edit-category" className="block text-xs font-semibold text-foreground">Category</label>
-              <select id="edit-category" value={form.category} onChange={(e) => update('category', e.target.value)} className={inputCls('category')}>
-                {ALL_INTERESTS.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-foreground">Category</p>
+              <CategoryPills
+                value={form.category}
+                onChange={(id) => update('category', id)}
+                aria-label="Category"
+              />
             </div>
           </div>
         </div>

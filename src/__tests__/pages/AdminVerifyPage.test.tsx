@@ -10,7 +10,11 @@ vi.mock('react-router-dom', async (importOriginal) => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-vi.mock('@/lib/supabase', () => ({ supabase: null }));
+vi.mock('@/lib/supabase', () => ({
+  supabase: null,
+  syncSupabaseSession: vi.fn(() => Promise.resolve()),
+  clearSupabaseSession: vi.fn(),
+}));
 
 function renderPage() {
   render(
@@ -109,6 +113,33 @@ describe('AdminVerifyPage', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/admin', { replace: true });
     });
     expect(getPendingAdminVerification()).toBeNull();
+  });
+
+  it('goes to /admin after a correct code even when the profile has no username', async () => {
+    setPendingAdminVerification({ accessToken: 'aal1-token-2', hasMfaLinked: true, factorId: 'f1' });
+    fetchMock.mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+      if (url.includes('/api/auth/mfa/verify')) {
+        return new Response(JSON.stringify({ access_token: 'aal2-token', is_verified: true }), { status: 200 });
+      }
+      if (url.includes('/api/auth/me')) {
+        return new Response(JSON.stringify({ id: 'admin-1', email: 'admin@example.com' }), { status: 200 });
+      }
+      if (url.includes('/api/profile/me')) {
+        return new Response(JSON.stringify({ username: null, full_name: 'Admin One' }), { status: 200 });
+      }
+      return new Response('{}', { status: 500 });
+    });
+
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('6-digit code'), { target: { value: '654321' } });
+    fireEvent.click(screen.getByRole('button', { name: /verify and continue/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/admin', { replace: true });
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith('/choose-username', { replace: true });
+    expect(mockNavigate).not.toHaveBeenCalledWith('/reset-password', expect.anything());
   });
 
   it('"Back to Sign In" clears pending state and returns to /login', () => {

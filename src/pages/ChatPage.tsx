@@ -1,82 +1,58 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Send, Smile, AlertTriangle, Calendar, Clock, Ban } from 'lucide-react';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentUser } from '@/lib/storage';
-import BottomNav from '@/components/BottomNav';
-import { UserAvatar } from '@/components/UserAvatar';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
-import AppToast from '@/components/AppToast';
-import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import { mapApiEventToItem, parseEventsApiList, parseJoinedEventsApiList } from '@/lib/mapApiEvent';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { isEventUpcoming } from '@/lib/eventTime';
-import { formatUserIdentity } from '@/lib/userIdentity';
+import { cachedFetch, invalidate, peekCache, setCacheEntry, TTL } from '@/lib/queryCache';
+import { chatLiveHoldUntil, publishLiveChatMessage, useChatLiveChannels } from '@/lib/chatLive';
+import { CHAT_MESSAGES_CHANGED_EVENT, eventIdFromRealtimeRow } from '@/lib/realtimeEvents';
+import {
+  CHAT_UNREAD_CHANGED_EVENT,
+  isChatUnread,
+  markChatRead,
+  noteIncomingChatMessage,
+  noteNewerChatMessage,
+  rememberSeen,
+  setViewingChatId,
+} from '@/lib/chatUnread';
+import { addCheckin, isCheckedIn } from '@/lib/checkin';
+import {
+  chatMessagesPath,
+  encodeChatPayload,
+  parseChatPayload,
+} from '@/lib/chatPayload';
+import ChatListView, { type ChatTab } from '@/pages/chat/ChatListView';
+import ChatThreadView from '@/pages/chat/ChatThreadView';
+import {
+  CHAT_FETCH_TIMEOUT_MS,
+  CHAT_LIST_POLL_MS,
+  CHAT_OPEN_POLL_MS,
+  CHAT_PEEK_LIMIT,
+  ChatHttpError,
+  type ChatEvent,
+  type ChatMessage,
+  LOCAL_MESSAGE_PREFIX,
+  abortAfter,
+  chatMessagesCacheKey,
+  isAbortError,
+  latestMessageMeta,
+  mergeLiveMessages,
+  messageFieldsFromPostBody,
+  messageRowId,
+  normalizeMessageList,
+  sameLiveMessage,
+  sameVisibleMessages,
+} from '@/pages/chat/chatModel';
 
-type ChatEvent = {
-  id: string;
-  name: string;
-  avatar: string;
-  lastMsg: string;
-  time: string;
-  unread: number;
-  isPast: boolean;
-  isCancelled?: boolean;
-  eventDate: string;
-  organizerId: string;
-};
-
-type ChatMessage = {
-  id: string;
-  from: 'me' | 'them';
-  text: string;
-  time: string;
-  dateKey: string;
-  kind?: 'user' | 'system';
-  messageType?: 'text' | 'file' | 'voice' | 'notification';
-  fileName?: string;
-  mimeType?: string;
-  dataUrl?: string;
-  senderName?: string;
-  senderUsername?: string;
-  senderAvatar?: string;
-  senderId?: string;
-};
-
-function isExpiredOver48h(eventDate: string): boolean {
-  if (!eventDate) return false;
-  const normalized = /[Zz]|[+-]\d{2}:\d{2}$/.test(eventDate) ? eventDate : `${eventDate}T00:00:00Z`;
-  const ts = new Date(normalized).getTime();
-  if (Number.isNaN(ts)) return false;
-  return Date.now() - ts > 48 * 60 * 60 * 1000;
-}
-
-function formatDateSeparator(dateKey: string): string {
-  const today = new Date();
-  const todayKey = today.toISOString().slice(0, 10);
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  const yesterdayKey = yesterday.toISOString().slice(0, 10);
-
-  if (dateKey === todayKey) return 'Today';
-  if (dateKey === yesterdayKey) return 'Yesterday';
-
-  const d = new Date(dateKey);
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-type EncodedChatPayload = {
-  v: 1;
-  type: 'text' | 'file' | 'voice';
-  text?: string;
-  fileName?: string;
-  mimeType?: string;
-  dataUrl?: string;
-};
-
-function chatMessagesPath(eventId: string) {
-  return `/api/chats/${eventId}/messages`;
-}
+export {
+  CHAT_FETCH_TIMEOUT_MS,
+  CHAT_LIST_POLL_MS,
+  CHAT_LIVE_POLL_MS,
+  CHAT_OPEN_POLL_MS,
+} from '@/pages/chat/chatModel';
 
 export default function ChatPage() {
   const navigate = useNavigate();
@@ -97,8 +73,24 @@ export default function ChatPage() {
   const [selectedEventFromUrl] = useState(() => new URLSearchParams(location.search).get('eventId'));
   const [handledSelectedParam, setHandledSelectedParam] = useState(false);
   const [chatApiMissing, setChatApiMissing] = useState(false);
-  const [chatTab, setChatTab] = useState<'active' | 'past' | 'cancelled'>('active');
+  const [chatTab, setChatTab] = useState<ChatTab>('active');
+  const [search, setSearch] = useState('');
+  const [showPoll, setShowPoll] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const pinToBottomRef = useRef(true);
+  // Only the newest loadMessages call may update the screen, so a slow response
+  // for a chat you already left cannot overwrite the chat you are looking at.
+  const messagesRequestRef = useRef(0);
+  const messagesInFlightRef = useRef(false);
+  const peekInFlightRef = useRef(false);
+  const activeChatRef = useRef<string | null>(null);
+  const chatsRef = useRef<ChatEvent[]>([]);
+  const loadMessagesRef = useRef<(eventId: string, silent?: boolean) => Promise<void>>(async () => {});
+  const loadChatListRef = useRef<(silent?: boolean) => Promise<void>>(async () => {});
+  activeChatRef.current = activeChat;
 
   useEffect(() => {
     let cancelled = false;
@@ -112,42 +104,58 @@ export default function ChatPage() {
   }, [token, user?.id]);
 
   useEffect(() => {
-    if (activeChat && !chats.some((entry) => entry.id === activeChat)) setActiveChat(null);
-  }, [activeChat, chats]);
+    if (!activeChat || chatListLoading) return;
+    if (chats.some((entry) => entry.id === activeChat)) return;
+    setActiveChat(null);
+  }, [activeChat, chats, chatListLoading]);
 
   useEffect(() => {
+    pinToBottomRef.current = true;
+  }, [activeChat]);
+
+  useEffect(() => {
+    if (!pinToBottomRef.current || messagesLoading) return;
+    const scroller = scrollerRef.current;
+    if (scroller) {
+      scroller.scrollTop = scroller.scrollHeight;
+      return;
+    }
     const el = messagesEndRef.current;
-    if (!el || messagesLoading) return;
-    if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'auto', block: 'end' });
   }, [messages, messagesLoading, activeChat]);
 
-  if (!user) return <Navigate to="/login" replace />;
+  const liveEventIds = chats.map((c) => c.id);
+  if (activeChat && !liveEventIds.includes(activeChat)) liveEventIds.push(activeChat);
+  useChatLiveChannels(liveEventIds);
 
-  const resolveMeId = () => authUserId || user.id;
-
-  const parsePayload = (raw: string) => {
-    try {
-      const parsed = JSON.parse(raw) as EncodedChatPayload;
-      if (parsed && parsed.v === 1 && (parsed.type === 'text' || parsed.type === 'file' || parsed.type === 'voice')) return parsed;
-    } catch { /* plain text */ }
-    return null;
-  };
-
-  const encodePayload = (payload: EncodedChatPayload) => JSON.stringify(payload);
+  const signedInUserId = user?.id ?? '';
+  const resolveMeId = () => authUserId || signedInUserId;
 
   const mapMessageRow = useCallback(
     (row: Record<string, unknown>): ChatMessage | null => {
       const rawContent = String(row.content || row.message || row.text || '').trim();
-      const parsed = rawContent ? parsePayload(rawContent) : null;
+      const parsed = rawContent ? parseChatPayload(rawContent) : null;
       const text = parsed
-        ? String(parsed.text || (parsed.type === 'voice' ? 'Voice message' : parsed.fileName || 'Attachment'))
+        ? String(
+            parsed.text ||
+              parsed.question ||
+              (parsed.type === 'voice'
+                ? 'Voice message'
+                : parsed.type === 'poll_vote'
+                  ? `vote:${parsed.optionIndex ?? 0}`
+                  : parsed.type === 'checkin'
+                    ? 'is here'
+                    : parsed.fileName || 'Attachment'),
+          )
         : rawContent;
-      if (!text) return null;
+      if (!text && parsed?.type !== 'poll') return null;
       const senderId = String(row.sender_id || row.user_id || row.created_by || '');
       const sentAtRaw = row.created_at || row.sent_at || row.timestamp;
       const sentAt = sentAtRaw ? new Date(String(sentAtRaw)) : new Date();
       const rawType = String(row.type || row.message_type || row.kind || '').toLowerCase();
+      const isCheckin = parsed?.type === 'checkin';
       const isSystem =
+        isCheckin ||
         Boolean(row.is_system) ||
         rawType === 'system' || rawType === 'notification' ||
         rawType === 'join' || rawType === 'leave' ||
@@ -155,21 +163,19 @@ export default function ChatPage() {
         /\b(joined|left|was (added|removed|kicked)|has (joined|left)|added .+ to the chat|removed .+ from|is now (an admin|a member)|chat history|created (this|the) (group|chat)|changed the (subject|icon|description))\b/i.test(text);
       const meId = resolveMeId();
       const isMe = !isSystem && Boolean(senderId) &&
-        (sameAuthUserId(senderId, meId) || sameAuthUserId(senderId, user.id));
+        (sameAuthUserId(senderId, meId) || sameAuthUserId(senderId, signedInUserId));
 
       const profiles = row.profiles as Record<string, unknown> | undefined;
       const senderObj = row.sender as Record<string, unknown> | undefined;
       const senderName =
         String(profiles?.full_name || senderObj?.full_name || senderObj?.name || row.sender_name || '').trim() || undefined;
-      const senderUsername =
-        String(profiles?.username || senderObj?.username || row.sender_username || '').trim() || undefined;
       const senderAvatar =
         String(profiles?.avatar_url || senderObj?.avatar_url || senderObj?.avatar || row.sender_avatar || '').trim() || undefined;
 
       return {
-        id: String(row.id || crypto.randomUUID()),
+        id: messageRowId(row),
         from: isMe ? 'me' : 'them',
-        text,
+        text: isCheckin ? `${senderName || 'Someone'} is here` : text,
         time: sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         dateKey: sentAt.toISOString().slice(0, 10),
         kind: isSystem ? 'system' : 'user',
@@ -178,32 +184,67 @@ export default function ChatPage() {
         mimeType: parsed?.mimeType,
         dataUrl: parsed?.dataUrl,
         senderName,
-        senderUsername,
         senderAvatar,
         senderId: senderId || undefined,
+        pollId: parsed?.pollId,
+        question: parsed?.question,
+        options: parsed?.options,
+        optionIndex: parsed?.optionIndex,
       };
     },
-    [authUserId, user.id],
+    [authUserId, signedInUserId],
   );
 
   const mapMessageRowRef = useRef(mapMessageRow);
   useEffect(() => { mapMessageRowRef.current = mapMessageRow; }, [mapMessageRow]);
 
+  useEffect(() => {
+    if (!activeChat) return;
+    for (const m of messages) {
+      if (m.messageType === 'checkin' && m.senderId && !isCheckedIn(activeChat, m.senderId)) {
+        addCheckin(activeChat, { userId: m.senderId, name: m.senderName || 'Someone' });
+      }
+    }
+  }, [messages, activeChat]);
+
   const activeChatObj = chats.find((entry) => entry.id === activeChat) || null;
+  chatsRef.current = chats;
 
   const loadChatList = useCallback(async (silent = false) => {
-    if (!token) { if (!silent) setChatListLoading(false); return; }
-    if (!silent) setChatListLoading(true);
+    if (!token || !signedInUserId) { if (!silent) setChatListLoading(false); return; }
+    if (!silent && chatsRef.current.length === 0) setChatListLoading(true);
+    const listFetch = abortAfter(CHAT_FETCH_TIMEOUT_MS);
     try {
-      const [joinedRes, organizedRes] = await Promise.all([
-        fetch(getApiUrl('/api/participants/my/events'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(getApiUrl('/api/events/my-events'), { headers: { Authorization: `Bearer ${token}` } }),
+      // Cached for 30 s (TTL.SHORT): a joined or created event shows up quickly,
+      // and a failed request throws so it is never stored.
+      const [joinedBody, organizedBody] = await Promise.all([
+        cachedFetch(
+          `/api/participants/my/events:chat:${signedInUserId}`,
+          async () => {
+            const res = await fetch(getApiUrl('/api/participants/my/events'), {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: listFetch.signal,
+            });
+            if (!res.ok) throw new ChatHttpError(res.status);
+            return res.json(); // an unreadable body rejects, so it is not stored
+          },
+          TTL.SHORT,
+        ).catch(() => []),
+        cachedFetch(
+          `/api/events/my-events:chat:${signedInUserId}`,
+          async () => {
+            const res = await fetch(getApiUrl('/api/events/my-events'), {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: listFetch.signal,
+            });
+            if (!res.ok) throw new ChatHttpError(res.status);
+            return res.json(); // an unreadable body rejects, so it is not stored
+          },
+          TTL.SHORT,
+        ).catch(() => ({})),
       ]);
-      const joinedBody = joinedRes.ok ? await joinedRes.json().catch(() => []) : [];
-      const organizedBody = organizedRes.ok ? await organizedRes.json().catch(() => ({})) : {};
-      const joinedRows = Array.isArray(joinedBody) ? joinedBody : Array.isArray(joinedBody?.data) ? joinedBody.data : [];
-      const organizedRows = Array.isArray(organizedBody?.data) ? organizedBody.data : [];
-      const joinedEvents = joinedRows.map((row: Record<string, unknown>) => row?.events as Record<string, unknown>).filter(Boolean);
+      const joinedEvents = parseJoinedEventsApiList(joinedBody);
+      const organizedRows = parseEventsApiList(organizedBody);
       const allEvents = [...joinedEvents, ...organizedRows];
 
       const byId = new Map<string, ChatEvent>();
@@ -219,7 +260,7 @@ export default function ChatPage() {
             avatar: evt.image,
             lastMsg: 'Open conversation',
             time: evt.time || '',
-            unread: 0,
+            unread: isChatUnread(signedInUserId, evt.id) ? 1 : 0,
             isPast: !isEventUpcoming(evt),
             isCancelled,
             eventDate: evt.date || '',
@@ -230,7 +271,8 @@ export default function ChatPage() {
       const mapped = Array.from(byId.values());
       setChats(mapped);
 
-      if (activeChat && !mapped.some((entry) => entry.id === activeChat)) {
+      const openId = activeChatRef.current;
+      if (!silent && openId && mapped.length > 0 && !mapped.some((entry) => entry.id === openId)) {
         setActiveChat(null);
         setChatUnavailable(true);
         setMessages([]);
@@ -238,8 +280,11 @@ export default function ChatPage() {
       }
 
       if (selectedEventFromUrl && !handledSelectedParam) {
-        if (mapped.some((entry) => entry.id === selectedEventFromUrl)) {
-          setActiveChat(selectedEventFromUrl);
+        const fromUrl = mapped.find(
+          (entry) => entry.id.toLowerCase() === selectedEventFromUrl.toLowerCase(),
+        );
+        if (fromUrl) {
+          setActiveChat(fromUrl.id);
         } else {
           try {
             const singleRes = await fetch(getApiUrl(`/api/events/${selectedEventFromUrl}`), {
@@ -256,7 +301,7 @@ export default function ChatPage() {
                 avatar: singleItem.image,
                 lastMsg: 'Open conversation',
                 time: singleItem.time || '',
-                unread: 0,
+                unread: isChatUnread(signedInUserId, singleItem.id) ? 1 : 0,
                 isPast: !isEventUpcoming(singleItem),
                 isCancelled: isCanc,
                 eventDate: singleItem.date || '',
@@ -276,368 +321,368 @@ export default function ChatPage() {
         setHandledSelectedParam(true);
       }
     } catch {
-      setChats([]);
+      if (!silent && chatsRef.current.length === 0) setChats([]);
     } finally {
+      listFetch.cancel();
       if (!silent) setChatListLoading(false);
     }
-  }, [token, activeChat, selectedEventFromUrl, handledSelectedParam, navigate]);
+  }, [token, signedInUserId, selectedEventFromUrl, handledSelectedParam, navigate]);
 
+  loadChatListRef.current = loadChatList;
   useEffect(() => { void loadChatList(); }, [loadChatList]);
-
-  const normalizeMessageList = (body: unknown): Record<string, unknown>[] => {
-    if (!body || typeof body !== 'object') return [];
-    const b = body as Record<string, unknown>;
-    if (Array.isArray(b.data)) return b.data as Record<string, unknown>[];
-    if (Array.isArray(body)) return body as Record<string, unknown>[];
-    return [];
-  };
 
   const loadMessages = useCallback(
     async (eventId: string, silent = false) => {
       if (!token) return;
+      // A 1s poll / live refresh must not start another GET while one is already
+      // waiting â€” that used to increment the request id so the spinner never cleared.
+      if (silent && messagesInFlightRef.current) return;
+      const requestId = ++messagesRequestRef.current;
+      const stillOpen = () => activeChatRef.current === eventId;
+      const isCurrent = () => requestId === messagesRequestRef.current && stillOpen();
+      const cacheKey = chatMessagesCacheKey(eventId, signedInUserId);
+      const showRows = (rows: Record<string, unknown>[]) => {
+        const next = rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[];
+        if (next.length) rememberSeen(signedInUserId, eventId, next[next.length - 1].id);
+        setMessages((prev) => {
+          const merged = mergeLiveMessages(next, prev);
+          return sameVisibleMessages(prev, merged) ? prev : merged;
+        });
+      };
+
+      messagesInFlightRef.current = true;
+      // Show the saved copy at once (whatever its age), then always refresh from the server below.
+      const saved = peekCache<Record<string, unknown>[]>(cacheKey);
       if (!silent) {
-        setMessagesLoading(true);
-        setMessages([]); // Clears old messages immediately to prevent bleed-over
+        if (saved) {
+          showRows(saved);
+          setMessagesLoading(false);
+        } else {
+          setMessagesLoading(true);
+          setMessages([]); // Clears old messages immediately to prevent bleed-over
+        }
       }
+      const request = abortAfter(CHAT_FETCH_TIMEOUT_MS);
       try {
         const primaryUrl = `${getApiUrl(chatMessagesPath(eventId))}?limit=100&page=1`;
-        let res = await fetch(primaryUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-        let rows: Record<string, unknown>[] = [];
-        let anyEndpointSupported = false;
-        if (res.ok) {
-          const body = await res.json().catch(() => ({}));
-          rows = normalizeMessageList(body);
-          anyEndpointSupported = true;
-        } else if (res.status === 403) {
+        const res = await fetch(primaryUrl, {
+          cache: 'no-store',
+          signal: request.signal,
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        });
+        // Never keep messages from a chat you can no longer access, even if you have moved on.
+        if (res.status === 403) invalidate(cacheKey);
+        if (!isCurrent()) return;
+        if (res.status === 403) {
           setChatUnavailable(true);
           setMessages([]);
           setToast({ show: true, message: 'You can no longer access this chat.', type: 'error' });
           return;
         }
-        setMessages(rows.map(mapMessageRowRef.current).filter(Boolean) as ChatMessage[]);
+        // Failed or unreadable responses are never saved; keep the saved copy on screen if there is one.
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        if (!stillOpen()) return;
+        if (body === null) {
+          if (isCurrent()) {
+            if (!saved) setMessages([]);
+            setChatUnavailable(false);
+            setChatApiMissing(true);
+          }
+          return;
+        }
+        const rows = normalizeMessageList(body);
+        setCacheEntry(cacheKey, rows, TTL.SHORT);
+        if (silent && !isCurrent()) return;
+        showRows(rows);
         setChatUnavailable(false);
-        setChatApiMissing(!anyEndpointSupported);
-      } catch {
-        setMessages([]);
+        setChatApiMissing(false);
+      } catch (err) {
+        if (isAbortError(err) && !isCurrent()) return;
+        if (isCurrent() && !saved) setMessages([]); // network error
+        if (isCurrent() && isAbortError(err)) setChatApiMissing(true);
       } finally {
-        if (!silent) setMessagesLoading(false);
+        request.cancel();
+        if (requestId === messagesRequestRef.current) messagesInFlightRef.current = false;
+        // The open chat's own fetch must drop the spinner even if a later silent
+        // refresh took over the request id. Switching chats still leaves B loading.
+        if (stillOpen() && (!silent || requestId === messagesRequestRef.current)) {
+          setMessagesLoading(false);
+        }
       }
     },
-    [token],
+    [token, signedInUserId],
   );
+  loadMessagesRef.current = loadMessages;
 
   useEffect(() => {
     if (!activeChat) return;
-    void loadMessages(activeChat);
+    let cancelled = false;
+    let interval = 0;
+    const tick = () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void loadMessages(activeChat, true);
+    };
+    void loadMessages(activeChat).finally(() => {
+      if (cancelled || !getAuthToken()) return;
+      interval = window.setInterval(tick, CHAT_OPEN_POLL_MS);
+      window.addEventListener('focus', tick);
+      document.addEventListener('visibilitychange', tick);
+    });
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', tick);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [activeChat, loadMessages]);
+
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ eventId?: string | null; row?: Record<string, unknown> | null }>).detail;
+      const row = detail?.row ?? null;
+      const eventId =
+        detail?.eventId ??
+        (row ? eventIdFromRealtimeRow({ new: row }) : null);
+      const openId = activeChatRef.current;
+      const matchesOpen =
+        Boolean(openId && eventId && String(eventId).toLowerCase() === String(openId).toLowerCase());
+      if (openId && (matchesOpen || !eventId)) {
+        const mapped = row ? mapMessageRowRef.current(row) : null;
+        if (mapped) {
+          const live = { ...mapped, liveUntil: chatLiveHoldUntil() };
+          setMessages((prev) => (prev.some((m) => m.id === live.id || sameLiveMessage(m, live)) ? prev : [...prev, live]));
+          invalidate(chatMessagesCacheKey(openId, signedInUserId));
+        } else {
+          invalidate(chatMessagesCacheKey(openId, signedInUserId));
+          void loadMessagesRef.current(openId, true);
+        }
+      }
+      // List and other threads must still light up after the first chat was opened.
+      // Do not require `activeChat` â€” going back to the list used to drop every later tag.
+      if (eventId && !matchesOpen) {
+        const sender = row?.sender_id ?? row?.user_id;
+        noteIncomingChatMessage(signedInUserId, eventId, sender == null ? null : String(sender));
+      }
+      void loadChatListRef.current(true);
+    };
+    window.addEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, onChange);
+  }, [signedInUserId]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const peek = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (peekInFlightRef.current) return;
+      peekInFlightRef.current = true;
+      const openId = activeChatRef.current;
+      const others = chatsRef.current
+        .filter((chat) => chat.id !== openId)
+        .slice(0, CHAT_PEEK_LIMIT);
+      try {
+        await Promise.allSettled(
+          others.map(async (chat) => {
+            if (cancelled) return;
+            const request = abortAfter(CHAT_FETCH_TIMEOUT_MS);
+            try {
+              const res = await fetch(`${getApiUrl(chatMessagesPath(chat.id))}?limit=1&page=1`, {
+                cache: 'no-store',
+                signal: request.signal,
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+              });
+              if (!res.ok) return;
+              const body = await res.json().catch(() => null);
+              const latest = latestMessageMeta(normalizeMessageList(body));
+              if (latest) {
+                noteNewerChatMessage(signedInUserId, chat.id, latest.createdAt, latest.senderId, latest.messageId);
+              }
+            } catch {
+              /* ignore a single chat peek */
+            } finally {
+              request.cancel();
+            }
+          }),
+        );
+      } finally {
+        peekInFlightRef.current = false;
+      }
+    };
+    let interval = 0;
+    const timeout = window.setTimeout(() => {
+      void peek();
+      interval = window.setInterval(() => { void peek(); }, CHAT_LIST_POLL_MS);
+    }, CHAT_LIST_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [token, signedInUserId]);
+
+  const closeActiveChat = () => {
+    const openId = activeChatRef.current;
+    if (openId) {
+      const lastId = messages.length ? messages[messages.length - 1].id : null;
+      markChatRead(signedInUserId, openId, lastId);
+    }
+    setViewingChatId(null);
+    setActiveChat(null);
+  };
+
+  useEffect(() => {
+    setViewingChatId(activeChat);
+    if (!activeChat) return;
+    const lastId = messages.length ? messages[messages.length - 1].id : null;
+    markChatRead(signedInUserId, activeChat, lastId);
+    setChats((prev) => prev.map((c) => (c.id === activeChat ? { ...c, unread: 0 } : c)));
+  }, [activeChat, messages, signedInUserId]);
+
+  useEffect(() => {
+    return () => setViewingChatId(null);
+  }, []);
+
+  useEffect(() => {
+    const syncUnread = () => {
+      setChats((prev) =>
+        prev.map((c) => ({
+          ...c,
+          unread: activeChat === c.id ? 0 : isChatUnread(signedInUserId, c.id) ? 1 : 0,
+        })),
+      );
+    };
+    window.addEventListener(CHAT_UNREAD_CHANGED_EVENT, syncUnread);
+    return () => window.removeEventListener(CHAT_UNREAD_CHANGED_EVENT, syncUnread);
+  }, [activeChat, signedInUserId]);
 
   const sendMessage = async (explicitContent?: string) => {
     const chat = activeChatObj;
     if (chat?.isCancelled || chat?.isPast) return; // Prevent sending on cancelled/past chats
 
-    const content = explicitContent ?? encodePayload({ v: 1, type: 'text', text: input.trim() });
+    const content = explicitContent ?? encodeChatPayload({ v: 1, type: 'text', text: input.trim() });
     const plainInput = input.trim();
-    if (!content || !activeChat || !token || sending || chatUnavailable) return;
+    if (!content || !activeChat || !token || sending || chatUnavailable) {
+      return;
+    }
     if (!explicitContent && !plainInput) return;
-    
+
+    const eventId = activeChat;
+    const localId = `${LOCAL_MESSAGE_PREFIX}${
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    }`;
+    const optimisticRow: Record<string, unknown> = {
+      id: localId,
+      event_id: eventId,
+      sender_id: resolveMeId(),
+      content,
+      created_at: new Date().toISOString(),
+      message_type: 'user',
+    };
+    const optimistic = mapMessageRowRef.current(optimisticRow);
+    if (optimistic) {
+      setMessages((prev) => [...prev, { ...optimistic, liveUntil: chatLiveHoldUntil() }]);
+    }
+    if (!explicitContent) setInput('');
+    setShowEmoji(false);
+    setChatApiMissing(false);
+    pinToBottomRef.current = true;
+    publishLiveChatMessage(eventId, optimisticRow);
+
     setSending(true);
     try {
-      const primary = getApiUrl(chatMessagesPath(activeChat));
+      const primary = getApiUrl(chatMessagesPath(eventId));
       const res = await fetch(primary, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ content }),
       });
-      
+
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
+        setMessages((prev) => prev.filter((m) => m.id !== localId));
+        if (!explicitContent) setInput(plainInput);
         setToast({ show: true, message: errText ? `Could not send: ${errText.slice(0, 120)}` : 'Unable to send message right now.', type: 'error' });
         return;
       }
-      setInput(''); setShowEmoji(false); setChatApiMissing(false);
-      await loadMessages(activeChat, true);
+      try {
+        const body = await res.json().catch(() => null);
+        const serverRow = messageFieldsFromPostBody(body, optimisticRow);
+        const confirmed = mapMessageRowRef.current(serverRow);
+        if (confirmed && optimistic && sameLiveMessage(confirmed, optimistic)) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === localId ? { ...confirmed, id: localId, liveUntil: chatLiveHoldUntil() } : m)),
+          );
+          publishLiveChatMessage(eventId, serverRow);
+        }
+        invalidate(chatMessagesCacheKey(eventId, signedInUserId));
+      } catch {
+        /* keep the optimistic row; the next poll will reconcile */
+      }
     } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== localId));
+      if (!explicitContent) setInput(plainInput);
       setToast({ show: true, message: 'Unable to send message right now.', type: 'error' });
     } finally {
       setSending(false);
     }
   };
 
-  if (activeChat) {
-    const chat = activeChatObj;
-    if (!chat) return null;
-    const isReadOnly = Boolean(chat.isPast || chat.isCancelled);
+  if (!user) return <Navigate to="/login" replace />;
+
+  if (activeChat && activeChatObj) {
     return (
-      <div className="flex min-h-screen flex-col bg-background pb-20">
-        <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
-
-        <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              aria-label="Back to chats"
-              onClick={() => setActiveChat(null)}
-              className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90 shrink-0"
-            >
-              <ArrowLeft className="h-4 w-4 text-foreground" />
-            </button>
-
-            <div className="relative shrink-0">
-              <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="sm" className="ring-2 ring-primary/30" />
-              <div className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-background ${isReadOnly || chatUnavailable ? 'bg-muted-foreground' : 'bg-green-500'}`} />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-sm font-bold text-foreground">{chat.name}</h1>
-              <p className={`text-[10px] ${chatUnavailable ? 'text-destructive' : chat.isCancelled ? 'text-amber-500 font-medium' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
-                {chatUnavailable ? 'Chat unavailable' : chat.isCancelled ? 'Cancelled event · read-only' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
-              </p>
-            </div>
-          </div>
-        </header>
-
-        {chat.isCancelled && !chatUnavailable && (
-          <div className="mx-4 mt-3 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>This event was cancelled. The chat is read-only.</p>
-          </div>
-        )}
-
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 custom-scrollbar">
-            {messagesLoading && (
-              <div className="space-y-3 pt-4">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className={`flex items-end gap-2 ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                    {i % 2 === 0 && <div className="h-8 w-8 shrink-0 rounded-full shimmer" />}
-                    <div className={`h-10 rounded-2xl shimmer ${i % 2 === 0 ? 'w-48' : 'w-36'}`} />
-                  </div>
-                ))}
-              </div>
-            )}
-            {!messagesLoading && messages.length === 0 && !chatUnavailable && (
-              <div className="flex flex-col items-center justify-center py-16 gap-3">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-                  <Send className="h-6 w-6 text-primary" />
-                </div>
-                <p className="text-sm font-medium text-foreground">No messages yet</p>
-                <p className="text-xs text-muted-foreground">History is empty for this chat</p>
-              </div>
-            )}
-            {messages.map((m, i) => {
-              const showDateSep = i === 0 || messages[i - 1].dateKey !== m.dateKey;
-              return (
-                <div key={m.id}>
-                  {showDateSep && (
-                    <div className="flex items-center gap-3 py-3">
-                      <div className="flex-1 border-t border-border/40" />
-                      <span className="shrink-0 rounded-full bg-secondary/80 px-3 py-1 text-[10px] font-semibold text-muted-foreground">
-                        {formatDateSeparator(m.dateKey)}
-                      </span>
-                      <div className="flex-1 border-t border-border/40" />
-                    </div>
-                  )}
-                  {m.kind === 'system' ? (
-                    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-center py-1">
-                      <span className="rounded-full bg-secondary/60 px-3 py-1 text-[10px] text-muted-foreground">
-                        {m.text}
-                        <span className="ml-1.5 opacity-60">{m.time}</span>
-                      </span>
-                    </motion.div>
-                  ) : (
-                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex items-end gap-2 mb-1 ${m.from === 'me' ? 'justify-end' : 'justify-start'}`}>
-                      {m.from === 'them' && (
-                        <UserAvatar src={m.senderAvatar} seed={m.senderId || m.id} name={m.senderName || '?'} size="sm" className="shrink-0 mb-1" />
-                      )}
-                      <div className={`max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}>
-                        {m.from === 'them' && (
-                          <div className="flex items-center gap-1.5 px-1">
-                            <span className="text-[11px] font-semibold text-foreground">
-                              {formatUserIdentity({ username: m.senderUsername, fullName: m.senderName || 'Unknown' })}
-                            </span>
-                          </div>
-                        )}
-                        <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
-                          m.from === 'me'
-                            ? 'gradient-primary text-primary-foreground rounded-br-sm'
-                            : 'glass-card text-foreground rounded-bl-sm'
-                        }`}>
-                          <p className="whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
-                          <p className={`mt-1 text-[10px] ${m.from === 'me' ? 'text-primary-foreground/60 text-right' : 'text-muted-foreground'}`}>{m.time}</p>
-                        </div>
-                      </div>
-                      {m.from === 'me' && (
-                        <UserAvatar src={user.avatar} seed={user.id} name={user.name} size="sm" className="shrink-0 mb-1" />
-                      )}
-                    </motion.div>
-                  )}
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-
-        <div className="sticky bottom-16 border-t border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={chatUnavailable || isReadOnly}
-              onClick={() => setShowEmoji(!showEmoji)}
-              className={`shrink-0 rounded-full p-2 transition-all disabled:opacity-40 ${showEmoji ? 'gradient-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:bg-secondary/80 hover:text-foreground'}`}
-              aria-label="Emoji"
-            >
-              <Smile className="h-5 w-5" />
-            </button>
-            <input
-              value={input}
-              disabled={chatUnavailable || isReadOnly}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
-              placeholder={
-                chat.isCancelled 
-                  ? 'Cancelled event chat is read-only' 
-                  : chat.isPast 
-                  ? 'Past event chat is read-only' 
-                  : 'Type a message…'
-              }
-              className="flex-1 rounded-full border border-border/50 bg-secondary px-4 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            />
-            <button
-              type="button"
-              disabled={chatUnavailable || sending || !input.trim() || isReadOnly}
-              onClick={() => void sendMessage()}
-              className="shrink-0 rounded-full gradient-primary p-2.5 shadow-glow disabled:opacity-40 active:scale-90 transition-transform"
-              aria-label="Send message"
-            >
-              <Send className="h-4 w-4 text-primary-foreground" />
-            </button>
-          </div>
-        </div>
-
-        <BottomNav />
-      </div>
+      <ChatThreadView
+        chat={activeChatObj}
+        messages={messages}
+        messagesLoading={messagesLoading}
+        chatUnavailable={chatUnavailable}
+        chatApiMissing={chatApiMissing}
+        sending={sending}
+        input={input}
+        onInputChange={setInput}
+        showEmoji={showEmoji}
+        onToggleEmoji={() => setShowEmoji((v) => !v)}
+        showPoll={showPoll}
+        onTogglePoll={() => setShowPoll((v) => !v)}
+        pollQuestion={pollQuestion}
+        onPollQuestionChange={setPollQuestion}
+        pollOptions={pollOptions}
+        onPollOptionsChange={setPollOptions}
+        search={search}
+        onSearchChange={setSearch}
+        toast={toast}
+        onCloseToast={() => setToast((prev) => ({ ...prev, show: false }))}
+        onToast={(message, type) => setToast({ show: true, message, type })}
+        onBack={closeActiveChat}
+        onSend={(content) => void sendMessage(content)}
+        onOpenProfile={(path) => navigate(path)}
+        resolveMeId={resolveMeId}
+        user={user}
+        scrollerRef={scrollerRef}
+        messagesEndRef={messagesEndRef}
+        pinToBottomRef={pinToBottomRef}
+      />
     );
   }
 
-  const activeChats = chats.filter((c) => !c.isPast && !c.isCancelled);
-  const pastChats = chats.filter((c) => c.isPast && !c.isCancelled && !isExpiredOver48h(c.eventDate));
-  const cancelledChats = chats.filter((c) => c.isCancelled);
-
-  const currentTabChats =
-    chatTab === 'active'
-      ? activeChats
-      : chatTab === 'past'
-      ? pastChats
-      : cancelledChats;
-
   return (
-    <div className="min-h-screen bg-background pb-20">
-      <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((prev) => ({ ...prev, show: false }))} />
-
-      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gradient">Chats</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>
-          </div>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-lg px-4 pt-4 space-y-4">
-        {/* Chat Tabs with Circular Badge Counters */}
-        <div className="flex rounded-xl glass-card p-1 gap-1" role="tablist">
-          {[
-            { id: 'active' as const, label: 'Active', count: activeChats.length, icon: Calendar },
-            { id: 'past' as const, label: 'Past', count: pastChats.length, icon: Clock },
-            { id: 'cancelled' as const, label: 'Cancelled', count: cancelledChats.length, icon: Ban },
-          ].map((tab) => {
-            const isActive = chatTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setChatTab(tab.id)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${
-                  isActive
-                    ? tab.id === 'cancelled'
-                      ? 'bg-destructive text-destructive-foreground shadow-sm'
-                      : 'gradient-primary text-primary-foreground shadow-glow'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
-                }`}
-              >
-                <tab.icon className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{tab.label}</span>
-                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
-                  isActive 
-                    ? 'bg-background/25 text-inherit' 
-                    : 'bg-secondary text-muted-foreground'
-                }`}>
-                  {tab.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {chatListLoading && (
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3.5">
-                <div className="h-12 w-12 shrink-0 rounded-full shimmer" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3.5 w-2/5 rounded-full shimmer" />
-                  <div className="h-2.5 w-3/5 rounded-full shimmer" />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!chatListLoading && currentTabChats.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-              <Send className="h-7 w-7 text-primary" />
-            </div>
-            <p className="text-sm font-semibold text-foreground">No {chatTab} conversations</p>
-            <p className="text-xs text-muted-foreground max-w-xs">
-              {chatTab === 'active' ? "You don't have any active event chats right now." : `No ${chatTab} event chats found.`}
-            </p>
-          </div>
-        )}
-
-        {!chatListLoading && currentTabChats.length > 0 && (
-          <div className="space-y-2.5">
-            {currentTabChats.map((chat) => (
-              <motion.button
-                key={chat.id}
-                type="button"
-                onClick={() => {
-                  setMessages([]); // Clears immediately on click
-                  setActiveChat(chat.id);
-                }}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`flex w-full items-center gap-3 rounded-2xl glass-card px-4 py-3.5 text-left transition-all hover:border-primary/30 active:scale-[0.98] ${chat.isPast || chat.isCancelled ? 'opacity-65' : ''}`}
-              >
-                <div className="relative shrink-0">
-                  <UserAvatar src={chat.avatar} seed={chat.id} name={chat.name} size="lg" className="ring-2 ring-border" />
-                  <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-background ${chat.isCancelled ? 'bg-amber-500' : chat.isPast ? 'bg-muted-foreground' : 'bg-green-500'}`} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-foreground">{chat.name}</p>
-                  <p className="line-clamp-1 text-xs text-muted-foreground mt-0.5">
-                    {chat.isCancelled ? 'Cancelled · Read-only' : chat.isPast ? `Ended · ${chat.eventDate}` : chat.lastMsg}
-                  </p>
-                </div>
-              </motion.button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <BottomNav />
-    </div>
+    <ChatListView
+      chats={chats}
+      chatTab={chatTab}
+      onChatTabChange={setChatTab}
+      search={search}
+      onSearchChange={setSearch}
+      loading={chatListLoading}
+      userId={signedInUserId}
+      onOpenChat={(chatId) => {
+        setMessages([]);
+        setActiveChat(chatId);
+      }}
+      toast={toast}
+      onCloseToast={() => setToast((prev) => ({ ...prev, show: false }))}
+    />
   );
 }

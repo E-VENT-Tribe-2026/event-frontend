@@ -28,10 +28,10 @@ vi.mock('@/lib/storage', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/auth', () => ({
-  getAuthToken: () => 'test-token',
-  setAuthToken: () => {},
-}));
+vi.mock('@/lib/auth', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/auth')>();
+  return { ...mod, getAuthToken: () => 'test-token', setAuthToken: () => {} };
+});
 
 vi.mock('@/components/BottomNav', () => ({ default: () => null }));
 
@@ -113,6 +113,16 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     );
   });
 
+  it('falls back to the Requests tab when a received friend request has no person attached', async () => {
+    useNotificationsMock.mockReturnValue({
+      data: [{ ...EXAMPLE_ROWS[0], related_user_id: null }],
+      isLoading: false,
+    });
+    renderPage();
+    fireEvent.click(screen.getByText('john_42 sent you a friend request'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/friends?tab=incoming'));
+  });
+
   it('opens the other user\'s profile when an accepted friend request is selected', async () => {
     renderPage();
     fireEvent.click(screen.getByText('jane_doe accepted your friend request'));
@@ -121,11 +131,21 @@ describe('NotificationsPage — friend request notifications (#243)', () => {
     );
   });
 
-  it('counts both received and accepted friend requests on the Activity tab', () => {
+  it('counts received and accepted friend requests on the Friends tab', () => {
     renderPage();
-    // rows: 1 received + 1 accepted (Activity) and 1 event update (Updates)
-    expect(screen.getByText('Activity').closest('button')).toHaveTextContent('Activity2');
+    expect(screen.getByRole('textbox', { name: /search notifications/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^Profile$/i })).toBeInTheDocument();
+    expect(screen.getByText('Friends').closest('button')).toHaveTextContent('Friends2');
+    expect(screen.getByText('Activity').closest('button')).toHaveTextContent('Activity0');
     expect(screen.getByText('Updates').closest('button')).toHaveTextContent('Updates1');
+  });
+
+  it('shows only friend request notifications on the Friends tab', () => {
+    renderPage();
+    fireEvent.click(screen.getByText('Friends'));
+    expect(screen.getByText('john_42 sent you a friend request')).toBeInTheDocument();
+    expect(screen.getByText('jane_doe accepted your friend request')).toBeInTheDocument();
+    expect(screen.queryByText('Event: Summer Picnic')).not.toBeInTheDocument();
   });
 
   it('still opens the event page when an existing event notification is selected', async () => {

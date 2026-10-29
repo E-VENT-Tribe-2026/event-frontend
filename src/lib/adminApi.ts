@@ -2,6 +2,36 @@ import { getApiUrl } from './api';
 import { API_ENDPOINTS } from './apiUrls';
 import { getAuthToken } from './auth';
 import { getPendingAdminVerification } from './adminAuth';
+import { getCurrentUser } from './storage';
+
+export function isAdministratorRole(role: unknown): boolean {
+  if (typeof role !== 'string') return false;
+  const normalized = role.trim().toLowerCase();
+  return normalized === 'administrator' || normalized === 'admin';
+}
+
+/** Backend may send `is_suspended`, `status: "suspended"`, or an open `suspension` object. */
+export function isSuspendedAccount(user: {
+  is_suspended?: boolean | null;
+  status?: string | null;
+  account_status?: string | null;
+  suspension?: { lifted_at?: string | null } | null;
+}): boolean {
+  if (user.is_suspended === true) return true;
+  const status = String(user.status ?? user.account_status ?? '').trim().toLowerCase();
+  if (status === 'suspended') return true;
+  return Boolean(user.suspension && !user.suspension.lifted_at);
+}
+
+function eventBuckets(
+  value: AdminUserDetails['organized_events'] | undefined,
+): AdminUserDetails['organized_events'] {
+  return {
+    upcoming: Array.isArray(value?.upcoming) ? value.upcoming : [],
+    past: Array.isArray(value?.past) ? value.past : [],
+    cancelled: Array.isArray(value?.cancelled) ? value.cancelled : [],
+  };
+}
 
 export interface AdminCountsResponse {
   total_users: number;
@@ -23,6 +53,10 @@ export interface AdminUserSummary {
   icon_id?: string | null;
   role: string;
   created_at: string;
+  status?: string | null;
+  is_suspended?: boolean;
+  warnings_count?: number;
+  is_pro?: boolean;
 }
 
 export interface AdminUsersResponse {
@@ -147,6 +181,8 @@ export interface AdminUserSuspension {
 
 export interface AdminUserDetailsFull extends AdminUserDetails {
   email?: string | null;
+  status?: string | null;
+  account_status?: string | null;
   is_suspended: boolean;
   suspension?: AdminUserSuspension | null;
   warnings: AdminUserWarning[];
@@ -173,6 +209,13 @@ export interface AdminEventDetail {
   participants: AdminEventParticipant[];
   created_at: string;
   reports_count?: number;
+  /** #236: removed events stay visible to administrators, marked. */
+  is_removed?: boolean;
+  removed_at?: string | null;
+  removed_by?: unknown;
+  /** The event's chat (backend sends both names). */
+  chats?: unknown;
+  chat?: unknown;
 }
 
 export interface AdminEventSummaryFull {
@@ -206,9 +249,17 @@ export interface AdminAuditEntry {
   action: string;
   admin_id: string;
   admin_name: string;
+  admin_username?: string | null;
+  admin_avatar_url?: string | null;
   target_id?: string | null;
   target_type?: string | null;
+  target_name?: string | null;
+  target_username?: string | null;
+  target_avatar_url?: string | null;
+  target_email?: string | null;
+  target_title?: string | null;
   details?: string | null;
+  reason?: string | null;
   created_at: string;
 }
 
@@ -218,20 +269,99 @@ export interface AdminAuditResponse {
   page: number;
   limit: number;
   total_pages: number;
+  has_more: boolean;
+  next_before: string | null;
 }
 
-// ---- Reports ----
+export type AdminAuditFilters = {
+  admin?: string;
+  action?: string;
+  date?: string;
+};
+
+export function localDateFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function normalizeAuditAction(action: string): string {
+  return action.trim().toLowerCase().replace(/_/g, '-');
+}
+
+export function auditActionFilterKey(action: string): string {
+  const n = normalizeAuditAction(action);
+  if (n.includes('dismiss')) return 'dismiss-report';
+  if (n.includes('withdraw')) return 'withdraw-warning';
+  if (n.includes('grant')) return 'grant-admin';
+  if (n.includes('invite')) return 'invite-user';
+  if (n.includes('remove')) return 'remove';
+  if (n.includes('suspend') && !n.includes('lift')) return 'suspend';
+  if (n.includes('lift')) return 'lift-suspension';
+  if (n.includes('warn')) return 'warn';
+  return n;
+}
+
+export function matchesAuditFilters(entry: AdminAuditEntry, filters: AdminAuditFilters): boolean {
+  const adminQ = filters.admin?.trim().toLowerCase().replace(/^@/, '');
+  if (adminQ) {
+    const name = entry.admin_name.toLowerCase();
+    const username = (entry.admin_username ?? '').toLowerCase().replace(/^@/, '');
+    const id = entry.admin_id.toLowerCase();
+    if (!name.includes(adminQ) && !username.includes(adminQ) && id !== adminQ) return false;
+  }
+  if (filters.action) {
+    const wanted = auditActionFilterKey(filters.action);
+    if (auditActionFilterKey(entry.action) !== wanted) return false;
+  }
+  if (filters.date && localDateFromIso(entry.created_at) !== filters.date) return false;
+  return true;
+}
+
+// ---- Reports (#328) ----
+//
+// Backend contract (administrators only, never cached on the client):
+// - GET  /api/admin/reports?status=open&page&limit   newest first; `total` is the number of reports
+// - GET  /api/admin/reports/open-count               { count }
+// - GET  /api/admin/reports/{id}                     AdminReportDetail
+// - POST /api/admin/reports/{id}/dismiss             closes it as Dismissed, returns AdminReportDetail
+// - POST /api/admin/reports/{id}/action              { action: warn | remove | suspend, reason? },
+//                                                    closes it as Action taken, returns AdminReportDetail
+// - Live updates: Supabase Realtime on the `reports` table for administrators; the panel only uses
+//   the signal and fetches the count and the open list again.
+
+export type AdminReportStatus = 'open' | 'dismissed' | 'action_taken';
+export type AdminReportTargetType = 'event' | 'user' | 'message';
+export type AdminReportOrigin = 'event_details' | 'profile' | 'event_chat';
+export type AdminReportOutcome = 'dismissed' | 'warned' | 'content_removed' | 'suspended';
+export type AdminReportAction = 'warn' | 'remove' | 'suspend';
+
+export interface AdminReportEventRef {
+  id: string;
+  title: string;
+}
+
+export interface AdminReportMessageRef {
+  id: string;
+  content: string;
+  sender: AdminEventPerson | null;
+}
 
 export interface AdminReportSummary {
   id: string;
-  reporter_id: string;
-  reporter_name: string;
-  target_id: string;
-  target_type: 'event' | 'user';
-  target_name: string;
+  status: AdminReportStatus;
+  target_type: AdminReportTargetType;
   reason: string;
-  status: 'pending' | 'dismissed' | 'actioned';
+  origin: AdminReportOrigin;
   created_at: string;
+  reporter: AdminEventPerson | null;
+  /** The reported event, or the event whose chat the report was opened from. */
+  event: AdminReportEventRef | null;
+  reported_user: AdminEventPerson | null;
+  message: AdminReportMessageRef | null;
 }
 
 export interface AdminReportsResponse {
@@ -242,11 +372,240 @@ export interface AdminReportsResponse {
   total_pages: number;
 }
 
+export interface AdminReportChatMessage {
+  id: string;
+  sender_name: string;
+  content: string;
+  created_at: string;
+  reported: boolean;
+}
+
 export interface AdminReportDetail extends AdminReportSummary {
-  description?: string | null;
-  admin_note?: string | null;
-  resolved_at?: string | null;
-  resolved_by?: string | null;
+  description: string | null;
+  chat_context: AdminReportChatMessage[];
+  /** The reported event or message is already removed. */
+  content_removed: boolean;
+  /** Who warning and suspending apply to: the reported user, the message's sender or the event's organizer. */
+  target_user: AdminEventPerson | null;
+  /** That user is now an administrator. */
+  target_user_is_admin: boolean;
+  outcome: AdminReportOutcome | null;
+  closed_at: string | null;
+  closed_by: AdminEventPerson | null;
+}
+
+/** One report in a user's report history. */
+export interface AdminUserReportRef {
+  id: string;
+  status: AdminReportStatus;
+  reason: string;
+  target_type: AdminReportTargetType;
+  created_at: string;
+  /** Set when the report is about an event (or a message in its chat). */
+  event: AdminReportEventRef | null;
+}
+
+const REPORT_REASON_LABELS: Record<string, string> = {
+  spam: 'Spam',
+  inappropriate_content: 'Inappropriate content',
+  harassment_or_hate: 'Harassment or hate',
+  scam_or_fraud: 'Scam or fraud',
+  misleading_event: 'Misleading event',
+  other: 'Other',
+};
+
+export function reportReasonLabel(reason: string): string {
+  return REPORT_REASON_LABELS[reason] ?? reason;
+}
+
+export function reportStatusLabel(status: AdminReportStatus): string {
+  return status === 'open' ? 'Open' : status === 'dismissed' ? 'Dismissed' : 'Action taken';
+}
+
+export function reportOriginLabel(origin: AdminReportOrigin): string {
+  return origin === 'event_chat' ? 'Event chat' : origin === 'profile' ? 'User profile' : 'Event details';
+}
+
+export function reportOutcomeLabel(outcome: AdminReportOutcome | null): string {
+  switch (outcome) {
+    case 'dismissed':
+      return 'Dismissed';
+    case 'warned':
+      return 'The user was warned';
+    case 'content_removed':
+      return 'The reported content was removed';
+    case 'suspended':
+      return 'The user was suspended';
+    default:
+      return 'Closed';
+  }
+}
+
+export function formatReportTime(isoString: string): string {
+  const d = new Date(isoString);
+  if (!isoString || isNaN(d.getTime())) return isoString;
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** What was reported, in a few words: the event, the user, or a message and its event. */
+export function reportedItemLabel(report: AdminReportSummary): string {
+  if (report.target_type === 'user') {
+    return report.reported_user ? personDisplayName(report.reported_user) : 'Unknown user';
+  }
+  if (report.target_type === 'message') {
+    const sender = report.message?.sender ? personDisplayName(report.message.sender) : 'a user';
+    return report.event ? `Message by ${sender} in ${report.event.title}` : `Message by ${sender}`;
+  }
+  return report.event?.title ?? 'Unknown event';
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
+}
+
+function readEventRef(value: unknown): AdminReportEventRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const id = asText(row.id);
+  return id ? { id, title: asText(row.title) || 'Untitled event' } : null;
+}
+
+function readStatus(value: unknown): AdminReportStatus {
+  return value === 'dismissed' || value === 'action_taken' ? value : 'open';
+}
+
+function readTargetType(value: unknown): AdminReportTargetType {
+  return value === 'user' || value === 'message' ? value : 'event';
+}
+
+function readOrigin(value: unknown): AdminReportOrigin {
+  return value === 'profile' || value === 'event_chat' ? value : 'event_details';
+}
+
+function readReportSummary(value: unknown): AdminReportSummary {
+  const row = (value ?? {}) as Record<string, unknown>;
+  const msg = row.message && typeof row.message === 'object' ? (row.message as Record<string, unknown>) : null;
+  return {
+    id: asText(row.id),
+    status: readStatus(row.status),
+    target_type: readTargetType(row.target_type),
+    reason: asText(row.reason),
+    origin: readOrigin(row.origin),
+    created_at: asText(row.created_at),
+    reporter: readPerson(row.reporter),
+    event: readEventRef(row.event),
+    reported_user: readPerson(row.reported_user),
+    message: msg ? { id: asText(msg.id), content: asText(msg.content), sender: readPerson(msg.sender) } : null,
+  };
+}
+
+function readReportDetail(value: unknown): AdminReportDetail {
+  const row = (value ?? {}) as Record<string, unknown>;
+  const outcome = row.outcome;
+  const context = Array.isArray(row.chat_context) ? row.chat_context : [];
+  return {
+    ...readReportSummary(row),
+    description: asText(row.description) || null,
+    chat_context: context.map((m) => {
+      const c = (m ?? {}) as Record<string, unknown>;
+      return {
+        id: asText(c.id),
+        sender_name: asText(c.sender_name) || 'Unknown',
+        content: asText(c.content),
+        created_at: asText(c.created_at),
+        reported: c.reported === true,
+      };
+    }),
+    content_removed: row.content_removed === true,
+    target_user: readPerson(row.target_user),
+    target_user_is_admin: row.target_user_is_admin === true,
+    outcome:
+      outcome === 'dismissed' || outcome === 'warned' || outcome === 'content_removed' || outcome === 'suspended'
+        ? outcome
+        : null,
+    closed_at: asText(row.closed_at) || null,
+    closed_by: readPerson(row.closed_by),
+  };
+}
+
+export function readUserReportRefs(value: unknown): AdminUserReportRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => {
+    const row = (v ?? {}) as Record<string, unknown>;
+    return {
+      id: asText(row.id),
+      status: readStatus(row.status),
+      reason: asText(row.reason),
+      target_type: readTargetType(row.target_type),
+      created_at: asText(row.created_at),
+      event: readEventRef(row.event),
+    };
+  });
+}
+
+// ---- Content removal (#236 backend) ----
+
+/** Who removed an event or a message, and when. */
+export interface AdminRemovedState {
+  is_removed: boolean;
+  removed_at: string | null;
+  removed_by: AdminEventPerson | null;
+}
+
+export interface AdminRemoveContentResponse {
+  removed_at: string;
+  removed_by: AdminEventPerson | null;
+}
+
+/** One message of an event chat as the panel shows it (removed messages stay, marked). */
+export interface AdminChatMessage extends AdminRemovedState {
+  id: string;
+  sender: AdminEventPerson | null;
+  content: string;
+  created_at: string;
+  is_system_message: boolean;
+}
+
+export function readChatMessages(value: unknown): AdminChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => {
+    const row = (v ?? {}) as Record<string, unknown>;
+    const sender =
+      readPerson(row.sender) ??
+      readPerson({
+        id: row.sender_id,
+        username: row.username,
+        full_name: row.full_name,
+        avatar_url: row.avatar_url,
+        avatar_kind: row.avatar_kind,
+        icon_id: row.icon_id,
+      });
+    return {
+      id: asText(row.id),
+      sender,
+      content: asText(row.content) || asText(row.text),
+      created_at: asText(row.created_at) || asText(row.time),
+      is_system_message: row.is_system_message === true || row.type === 'notification',
+      is_removed: row.is_removed === true,
+      removed_at: asText(row.removed_at) || null,
+      removed_by: readPerson(row.removed_by),
+    };
+  });
+}
+
+export function readRemovedState(value: unknown): AdminRemovedState {
+  const row = (value ?? {}) as Record<string, unknown>;
+  return {
+    is_removed: row.is_removed === true || Boolean(row.removed_at),
+    removed_at: asText(row.removed_at) || null,
+    removed_by: readPerson(row.removed_by),
+  };
 }
 
 // ---- Simple message responses ----
@@ -281,8 +640,19 @@ async function handleAdminResponse<T>(res: Response): Promise<T> {
   const body = isJson ? await res.json().catch(() => ({})) : await res.text().catch(() => '');
 
   if (!res.ok) {
+    // FastAPI sends `detail` as text, as { code, message }, or as a list of field errors.
+    const detail = typeof body === 'object' && body ? (body as Record<string, unknown>).detail : undefined;
+    const fromDetail =
+      typeof detail === 'string'
+        ? detail
+        : detail && typeof detail === 'object' && !Array.isArray(detail)
+          ? asText((detail as Record<string, unknown>).message)
+          : Array.isArray(detail)
+            ? asText((detail[0] as Record<string, unknown> | undefined)?.msg)
+            : '';
     const errorMsg =
-      (typeof body === 'object' && body && (body.detail || body.message || body.error)) ||
+      fromDetail ||
+      (typeof body === 'object' && body && asText((body as Record<string, unknown>).message || (body as Record<string, unknown>).error)) ||
       (typeof body === 'string' && body) ||
       `Request failed with status ${res.status}`;
     throw new Error(String(errorMsg));
@@ -303,6 +673,12 @@ export async function checkAdminVerified(): Promise<{ isVerifiedAdmin: boolean; 
   const token = getAuthToken();
   if (!token) {
     console.debug('[AdminAuth] Admin status check skipped: no session token');
+    return { isVerifiedAdmin: false };
+  }
+
+  const current = getCurrentUser();
+  if (current && !isAdministratorRole(current.role)) {
+    console.debug('[AdminAuth] Admin verify skipped: user role is not administrator');
     return { isVerifiedAdmin: false };
   }
 
@@ -383,7 +759,14 @@ export async function fetchAdminUsers(
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminUsersResponse>(res);
+  const body = await handleAdminResponse<AdminUsersResponse>(res);
+  return {
+    ...body,
+    items: (body.items ?? []).map((item) => ({
+      ...item,
+      is_suspended: isSuspendedAccount(item),
+    })),
+  };
 }
 
 /**
@@ -397,7 +780,14 @@ export async function fetchAdminUserDetails(userId: string): Promise<AdminUserDe
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminUserDetailsFull>(res);
+  const data = await handleAdminResponse<AdminUserDetailsFull>(res);
+  return {
+    ...data,
+    is_suspended: isSuspendedAccount(data),
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    organized_events: eventBuckets(data.organized_events),
+    joined_events: eventBuckets(data.joined_events),
+  };
 }
 
 /**
@@ -417,8 +807,30 @@ export async function grantAdminRole(userId: string): Promise<GrantAdminResponse
   return handleAdminResponse<GrantAdminResponse>(res);
 }
 
+function warningRowsFromBody(body: unknown): AdminUserWarning[] {
+  if (Array.isArray(body)) return body as AdminUserWarning[];
+  if (!body || typeof body !== 'object') return [];
+  const row = body as Record<string, unknown>;
+  const nested = row.warnings ?? row.items ?? row.data;
+  return Array.isArray(nested) ? (nested as AdminUserWarning[]) : [];
+}
+
 /**
- * Issues a warning to a user.
+ * GET /api/admin/users/{user_id}/warnings
+ */
+export async function fetchUserWarnings(userId: string): Promise<AdminUserWarning[]> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WARNINGS(userId));
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<unknown>(res);
+  return warningRowsFromBody(body);
+}
+
+/**
+ * POST /api/admin/users/{user_id}/warnings
  */
 export async function warnUser(userId: string, reason: string): Promise<AdminWarnResponse> {
   const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WARN(userId));
@@ -435,17 +847,13 @@ export async function warnUser(userId: string, reason: string): Promise<AdminWar
 }
 
 /**
- * Withdraws (removes) a previously issued warning from a user.
+ * POST /api/admin/warnings/{warning_id}/withdraw
  */
-export async function withdrawWarning(userId: string, warningId: string): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_WITHDRAW_WARNING(userId));
+export async function withdrawWarning(_userId: string, warningId: string): Promise<AdminActionResponse> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_WARNING_WITHDRAW(warningId));
   const res = await fetch(url, {
-    method: 'DELETE',
-    headers: {
-      ...getAdminHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ warning_id: warningId }),
+    method: 'POST',
+    headers: getAdminHeaders(),
     cache: 'no-store',
   });
   return handleAdminResponse<AdminActionResponse>(res);
@@ -469,9 +877,13 @@ export async function suspendUser(userId: string, reason: string): Promise<Admin
 }
 
 /**
- * Lifts a suspension from a user account.
+ * Lifts a suspension from a user account. A reason is required for the audit log.
  */
-export async function liftSuspension(userId: string): Promise<AdminActionResponse> {
+export async function liftSuspension(userId: string, reason: string): Promise<AdminActionResponse> {
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    throw new Error('A reason is required to lift a suspension.');
+  }
   const url = getApiUrl(API_ENDPOINTS.ADMIN_USER_LIFT(userId));
   const res = await fetch(url, {
     method: 'POST',
@@ -479,6 +891,7 @@ export async function liftSuspension(userId: string): Promise<AdminActionRespons
       ...getAdminHeaders(),
       'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ reason: trimmed }),
     cache: 'no-store',
   });
   return handleAdminResponse<AdminActionResponse>(res);
@@ -486,20 +899,23 @@ export async function liftSuspension(userId: string): Promise<AdminActionRespons
 
 /**
  * Fetches paginated events for the admin panel.
+ * GET /api/admin/events?status_filter=&page=&limit=&search=
  */
 export async function fetchAdminEvents(
+  statusFilter: AdminEventStatusFilter = 'all',
   page = 1,
   limit = 20,
   search?: string,
   catParam?: string,
 ): Promise<AdminEventsResponse> {
   const params = new URLSearchParams();
+  params.set('status_filter', statusFilter);
   params.set('page', String(page));
   params.set('limit', String(limit));
-  if (search?.trim()) {
+  if (typeof search === 'string' && search.trim()) {
     params.set('search', search.trim());
   }
-  if (catParam?.trim()) {
+  if (typeof catParam === 'string' && catParam.trim()) {
     params.set('category', catParam.trim());
   }
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_EVENTS)}?${params.toString()}`;
@@ -540,108 +956,330 @@ export async function fetchAdminEventDetails(eventId: string): Promise<AdminEven
   return handleAdminResponse<AdminEventDetails>(res);
 }
 
-/**
- * Removes (hard-deletes) an event.
- */
-export async function removeEvent(eventId: string): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_EVENT_REMOVE(eventId));
+async function postRemoval(url: string): Promise<AdminRemoveContentResponse> {
   const res = await fetch(url, {
-    method: 'DELETE',
+    method: 'POST',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminActionResponse>(res);
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  return { removed_at: asText(body.removed_at), removed_by: readPerson(body.removed_by) };
 }
 
 /**
- * Fetches the paginated admin audit log.
+ * Marks an event as removed. It is never deleted: administrators still see it, marked.
+ * POST /api/admin/events/{id}/remove
+ */
+export function removeEvent(eventId: string): Promise<AdminRemoveContentResponse> {
+  return postRemoval(getApiUrl(API_ENDPOINTS.ADMIN_EVENT_REMOVE(eventId)));
+}
+
+/**
+ * Marks a chat message as removed. Administrators still see its text, marked as removed.
+ * POST /api/admin/events/{eventId}/messages/{messageId}/remove
+ */
+export function removeChatMessage(eventId: string, messageId: string): Promise<AdminRemoveContentResponse> {
+  return postRemoval(getApiUrl(API_ENDPOINTS.ADMIN_MESSAGE_REMOVE(eventId, messageId)));
+}
+
+/** GET /api/admin/account: the signed-in administrator, with the number of reports they closed. */
+export async function fetchAdminAccount(): Promise<{ reports_closed: number | null }> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_ACCOUNT), {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  return { reports_closed: typeof body.reports_closed === 'number' ? body.reports_closed : null };
+}
+
+function readPerson(value: unknown): AdminEventPerson | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === 'string' ? row.id : '';
+  const username = typeof row.username === 'string' ? row.username : null;
+  const full_name = typeof row.full_name === 'string' ? row.full_name : '';
+  const display_name = typeof row.display_name === 'string' ? row.display_name : undefined;
+  if (!id && !full_name && !username && !display_name) return null;
+  return {
+    id,
+    username,
+    full_name,
+    display_name,
+    avatar_url: typeof row.avatar_url === 'string' ? row.avatar_url : null,
+    avatar_kind: typeof row.avatar_kind === 'string' ? row.avatar_kind : undefined,
+    icon_id: typeof row.icon_id === 'string' ? row.icon_id : null,
+  };
+}
+
+export function personDisplayName(
+  person: { full_name?: string | null; display_name?: string | null; username?: string | null } | null | undefined,
+): string {
+  if (!person) return '';
+  const full = person.full_name?.trim();
+  if (full) return full;
+  const display = person.display_name?.trim();
+  if (display) return display;
+  const username = person.username?.trim().replace(/^@/, '');
+  return username || '';
+}
+
+function asId(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function readTitle(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value && typeof value === 'object') {
+    const row = value as Record<string, unknown>;
+    return readTitle(row.title) || readTitle(row.name);
+  }
+  return null;
+}
+
+function firstEmail(...chunks: unknown[]): string | null {
+  const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+  for (const chunk of chunks) {
+    if (typeof chunk === 'string') {
+      const prefixed = chunk.match(/email\s*[:=]\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+      if (prefixed?.[1]) return prefixed[1];
+      const match = chunk.match(EMAIL);
+      if (match) return match[0];
+      continue;
+    }
+    if (Array.isArray(chunk)) {
+      const nested = firstEmail(...chunk);
+      if (nested) return nested;
+      continue;
+    }
+    if (chunk && typeof chunk === 'object') {
+      const row = chunk as Record<string, unknown>;
+      if (typeof row.email === 'string' && row.email.includes('@')) return row.email.trim();
+    }
+  }
+  return null;
+}
+
+function mapAuditEntry(raw: unknown, index: number): AdminAuditEntry {
+  const row = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const admin = readPerson(row.administrator ?? row.admin);
+  const targetObj = row.target && typeof row.target === 'object' ? (row.target as Record<string, unknown>) : null;
+  const targetUser = readPerson(targetObj?.user);
+
+  const admin_id =
+    admin?.id || (typeof row.admin_id === 'string' ? row.admin_id : '');
+  const admin_name =
+    personDisplayName(admin) ||
+    (typeof row.admin_name === 'string' ? row.admin_name.trim() : '') ||
+    'Unknown administrator';
+  const admin_username =
+    admin?.username?.trim() ||
+    (typeof row.admin_username === 'string' ? row.admin_username : null) ||
+    null;
+
+  const target_id = asId(targetObj?.id) || asId(row.target_id);
+  const target_type =
+    (typeof targetObj?.type === 'string' ? targetObj.type : null) ||
+    (typeof row.target_type === 'string' ? row.target_type : null);
+  const target_name =
+    personDisplayName(targetUser) ||
+    (typeof row.target_name === 'string' ? row.target_name.trim() : '') ||
+    null;
+  const target_title =
+    readTitle(targetObj?.event) ||
+    readTitle(targetObj?.title) ||
+    readTitle(targetObj?.chat) ||
+    readTitle(row.target_title) ||
+    null;
+
+  const description = typeof row.description === 'string' ? row.description.trim() : '';
+  const reasonFlat = typeof row.reason === 'string' ? row.reason.trim() : '';
+  const detailsList = Array.isArray(row.details)
+    ? row.details.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : typeof row.details === 'string' && row.details.trim()
+      ? [row.details.trim()]
+      : [];
+  const detailsJoined = detailsList.join(' · ');
+  const target_email =
+    firstEmail(
+      targetObj,
+      targetUser,
+      row.target_email,
+      row.email,
+      description,
+      reasonFlat,
+      ...detailsList,
+    ) || null;
+
+  return {
+    id: typeof row.id === 'string' && row.id ? row.id : `audit-${index}`,
+    action: typeof row.action === 'string' ? row.action : '',
+    admin_id,
+    admin_name,
+    admin_username,
+    admin_avatar_url: admin?.avatar_url ?? null,
+    target_id,
+    target_type,
+    target_name,
+    target_username: targetUser?.username ?? null,
+    target_avatar_url: targetUser?.avatar_url ?? null,
+    target_email,
+    target_title,
+    reason: reasonFlat || description || null,
+    details: detailsJoined || null,
+    created_at: typeof row.created_at === 'string' ? row.created_at : '',
+  };
+}
+
+/**
+ * GET /api/admin/audit-log — cursor-paginated (`before` / `next_before`).
  */
 export async function fetchAdminAudit(
   page = 1,
   limit = 20,
+  before?: string | null,
 ): Promise<AdminAuditResponse> {
   const params = new URLSearchParams();
-  params.set('page', String(page));
   params.set('limit', String(limit));
+  if (before) params.set('before', before);
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_AUDIT)}?${params.toString()}`;
   const res = await fetch(url, {
     method: 'GET',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminAuditResponse>(res);
+  const body = await handleAdminResponse<
+    AdminAuditResponse & { entries?: unknown[]; data?: unknown[]; items?: unknown[] }
+  >(res);
+  const rawItems = Array.isArray(body.items)
+    ? body.items
+    : Array.isArray(body.entries)
+      ? body.entries
+      : Array.isArray(body.data)
+        ? body.data
+        : [];
+  const items = rawItems.map((entry, index) => mapAuditEntry(entry, index));
+  const hasMore = body.has_more === true;
+  const nextBefore = typeof body.next_before === 'string' ? body.next_before : null;
+  return {
+    items,
+    total: Number(body.total ?? items.length),
+    page: Number(body.page ?? page),
+    limit: Number(body.limit ?? limit),
+    total_pages: Number(body.total_pages ?? (hasMore ? page + 1 : Math.max(page, 1))),
+    has_more: hasMore,
+    next_before: nextBefore,
+  };
 }
 
 /**
- * Fetches paginated reports for the admin panel.
+ * One page of reports, newest first. `status: 'open'` lists the open reports only;
+ * the response's `total` is then the number of open reports.
+ * GET /api/admin/reports?status=&page=&limit=
  */
 export async function fetchAdminReports(
   page = 1,
   limit = 20,
-  status?: string,
+  status?: 'open',
 ): Promise<AdminReportsResponse> {
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(limit));
-  if (status) {
-    params.set('status', status);
-  }
+  if (status) params.set('status', status);
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_REPORTS)}?${params.toString()}`;
   const res = await fetch(url, {
     method: 'GET',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminReportsResponse>(res);
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  const items = Array.isArray(body.items) ? body.items.map(readReportSummary) : [];
+  const total = typeof body.total === 'number' ? body.total : items.length;
+  const pageNo = typeof body.page === 'number' ? body.page : page;
+  return {
+    items,
+    total,
+    page: pageNo,
+    limit: typeof body.limit === 'number' ? body.limit : limit,
+    total_pages: typeof body.total_pages === 'number' ? body.total_pages : pageNo,
+  };
 }
 
-/**
- * Fetches the full details for a single report.
- */
-export async function fetchAdminReportDetail(reportId: string): Promise<AdminReportDetail> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DETAIL(reportId));
-  const res = await fetch(url, {
+/** The number of open reports. GET /api/admin/reports/open-count */
+export async function fetchOpenReportCount(): Promise<number> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORTS_OPEN_COUNT), {
     method: 'GET',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminReportDetail>(res);
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  return typeof body.count === 'number' ? body.count : 0;
 }
 
-/**
- * Dismisses a report without taking further action.
- */
-export async function dismissReport(reportId: string, note?: string): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(reportId));
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      ...getAdminHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ note: note ?? null }),
+/** A report's details. GET /api/admin/reports/{id} */
+export async function fetchAdminReportDetail(reportId: string): Promise<AdminReportDetail> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DETAIL(reportId)), {
+    method: 'GET',
+    headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminActionResponse>(res);
+  return readReportDetail(await handleAdminResponse<unknown>(res));
+}
+
+/** Closes an open report as Dismissed. POST /api/admin/reports/{id}/dismiss */
+export async function dismissReport(reportId: string): Promise<AdminReportDetail> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(reportId)), {
+    method: 'POST',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  return readReportDetail(await handleAdminResponse<unknown>(res));
 }
 
 /**
- * Takes an action on a report (e.g. warn/suspend the target).
+ * Acts on an open report and closes it as Action taken: warn or suspend the user it applies to,
+ * or remove the reported content. Warning and suspending need a reason.
+ * POST /api/admin/reports/{id}/action  { action, reason }
  */
-export async function actionReport(
+export async function actOnReport(
   reportId: string,
-  action: string,
-  note?: string,
-): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_REPORT_ACTION(reportId));
-  const res = await fetch(url, {
+  action: AdminReportAction,
+  reason?: string,
+): Promise<AdminReportDetail> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_ACTION(reportId)), {
     method: 'POST',
-    headers: {
-      ...getAdminHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ action, note: note ?? null }),
+    headers: { ...getAdminHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(reason ? { action, reason } : { action }),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminActionResponse>(res);
+  return readReportDetail(await handleAdminResponse<unknown>(res));
+}
+
+export interface SignupInviteSendResult {
+  email: string;
+  code?: string | null;
+  message?: string;
+  expires_at?: string | null;
+}
+
+/** POST /api/admin/invite_user/{email} — email a registration code (admin MFA session). */
+export async function sendSignupInvite(email: string): Promise<SignupInviteSendResult> {
+  const url = getApiUrl(API_ENDPOINTS.ADMIN_INVITE_USER(email));
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  const nested =
+    body.data && typeof body.data === 'object' ? (body.data as Record<string, unknown>) : body;
+  const codeRaw = nested.code ?? nested.invite_code;
+  return {
+    email: typeof nested.email === 'string' ? nested.email : email,
+    code: typeof codeRaw === 'string' ? codeRaw : null,
+    message: typeof nested.message === 'string' ? nested.message : undefined,
+    expires_at: typeof nested.expires_at === 'string' ? nested.expires_at : null,
+  };
 }

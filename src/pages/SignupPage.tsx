@@ -1,14 +1,13 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AtSign, Eye, EyeOff, Mail, Lock, User, ChevronDown } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { AtSign, Eye, EyeOff, Mail, Lock, User, ChevronDown, Ticket } from 'lucide-react';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
-import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
-import { supabase } from '@/lib/supabase';
+import { syncSupabaseSession } from '@/lib/supabase';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { sanitizeEmail } from '@/lib/sanitize';
 import {
@@ -20,15 +19,26 @@ import {
   normalizeUsername,
 } from '@/lib/username';
 import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
+import {
+  isInviteCodeFormat,
+  normalizeInviteCode,
+  verifySignupInvite,
+  type VerifiedSignupInvite,
+} from '@/lib/signupInvite';
 
 const MIN_AGE = 18;
 const EMAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60;
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [verifiedInvite, setVerifiedInvite] = useState<VerifiedSignupInvite | null>(null);
+  const [inviteCode, setInviteCode] = useState(() => normalizeInviteCode(searchParams.get('code') || ''));
+  const [inviteChecking, setInviteChecking] = useState(false);
+  const [inviteError, setInviteError] = useState('');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => sanitizeEmail(searchParams.get('email') || ''));
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -65,8 +75,7 @@ export default function SignupPage() {
     if (usernameIssue) e.username = usernameIssue;
     const nameIssue = getFullNameValidationError(name);
     if (nameIssue) e.name = nameIssue;
-    if (!email.trim()) e.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Invalid email';
+    if (!verifiedInvite?.email) e.email = 'Email is required';
     if (!password) e.password = 'Password is required';
     else if (password.length < 8) e.password = 'Minimum 8 characters';
     else if (!/[A-Z]/.test(password)) e.password = 'Must contain at least one uppercase letter';
@@ -110,9 +119,46 @@ export default function SignupPage() {
     }, 1000);
   };
 
+  const handleUnlockInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inviteChecking) return;
+    const cleanedEmail = sanitizeEmail(email);
+    const code = normalizeInviteCode(inviteCode);
+    if (!cleanedEmail || !/\S+@\S+\.\S+/.test(cleanedEmail)) {
+      setInviteError('Enter the email the invitation was sent to.');
+      return;
+    }
+    if (!isInviteCodeFormat(code)) {
+      setInviteError('Enter the invitation code from your email (for example ABCD-2345).');
+      return;
+    }
+    setInviteChecking(true);
+    setInviteError('');
+    try {
+      const invite = await verifySignupInvite(cleanedEmail, code);
+      setVerifiedInvite(invite);
+      setEmail(invite.email);
+      setInviteCode(invite.code);
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'This invitation is not valid or has expired.');
+    } finally {
+      setInviteChecking(false);
+    }
+  };
+
+  const handleChangeInvite = () => {
+    setVerifiedInvite(null);
+    setInviteError('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate() || isSubmitting || retryInSeconds > 0) return;
+    if (!verifiedInvite?.code || !verifiedInvite.email) {
+      setVerifiedInvite(null);
+      setInviteError('Enter the email and invitation code from your email.');
+      return;
+    }
     setIsSubmitting(true);
 
     const controller = new AbortController();
@@ -126,7 +172,7 @@ export default function SignupPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: sanitizeEmail(email),
+          email: verifiedInvite.email,
           password,
           username: normalizedUsername,
           full_name: cleanedName,
@@ -134,6 +180,7 @@ export default function SignupPage() {
           dob,
           gender,
           interests,
+          invite_code: verifiedInvite.code,
         }),
         signal: controller.signal,
       });
@@ -182,12 +229,7 @@ export default function SignupPage() {
       }
 
       setAuthToken(accessToken);
-      if (supabase && refreshToken) {
-        await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-      }
+      await syncSupabaseSession(accessToken, refreshToken);
 
       const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {
@@ -206,7 +248,7 @@ export default function SignupPage() {
 
       setCurrentUserFromOAuth({
         id: me.id,
-        email: me.email || email,
+        email: me.email || verifiedInvite.email,
         name: cleanedName,
         avatar: avatarUrl,
         interests,
@@ -219,20 +261,6 @@ export default function SignupPage() {
     } finally {
       window.clearTimeout(timeout);
       setIsSubmitting(false);
-    }
-  };
-
-  const handleGoogleSignup = async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: getOAuthCallbackUrl('/home'),
-        queryParams: { prompt: 'select_account' },
-      },
-    });
-    if (error) {
-      setToast({ show: true, message: 'Google sign-up failed', type: 'error' });
     }
   };
 
@@ -271,10 +299,84 @@ return (
             />
             <div className="h-14 w-14 rounded-2xl gradient-primary flex items-center justify-center text-white text-2xl font-bold shadow-glow">E</div>
           </div>
-          <h1 className="text-3xl font-bold text-gradient">Create Account</h1>
-          <p className="text-sm text-muted-foreground">Join E-VENT and discover events</p>
+          <h1 className="text-3xl font-bold text-gradient">
+            {verifiedInvite ? 'Create Account' : 'Invitation required'}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {verifiedInvite
+              ? 'Join E-VENT and discover events'
+              : 'Enter the invited email and the code from your invitation (for example ABCD-2345). Codes expire in 7 days.'}
+          </p>
         </div>
 
+        {!verifiedInvite ? (
+          <form onSubmit={handleUnlockInvite} className="space-y-3">
+            <div className="space-y-1">
+              <label htmlFor="signup-invite-email" className="sr-only">
+                Email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  id="signup-invite-email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (inviteError) setInviteError('');
+                  }}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="signup-invite-code" className="sr-only">
+                Invitation code
+              </label>
+              <div className="relative">
+                <Ticket className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  id="signup-invite-code"
+                  type="text"
+                  inputMode="text"
+                  autoComplete="one-time-code"
+                  autoCapitalize="characters"
+                  placeholder="Invitation code"
+                  value={inviteCode}
+                  onChange={(e) => {
+                    setInviteCode(normalizeInviteCode(e.target.value));
+                    if (inviteError) setInviteError('');
+                  }}
+                  className={inputCls}
+                  aria-invalid={Boolean(inviteError)}
+                />
+              </div>
+              {inviteError && <p className="text-xs text-destructive px-1">{inviteError}</p>}
+            </div>
+            <button
+              type="submit"
+              disabled={inviteChecking}
+              className="w-full gradient-primary rounded-xl py-3 text-sm font-bold text-primary-foreground shadow-glow transition-all active:scale-[0.98] disabled:opacity-70"
+            >
+              {inviteChecking ? 'Checking…' : 'Continue'}
+            </button>
+            <p className="text-center text-sm text-muted-foreground">
+              Already have an account?{' '}
+              <Link to="/login" className="text-primary font-medium hover:underline">
+                Sign In
+              </Link>
+            </p>
+          </form>
+        ) : (
+        <>
+        <p className="text-center text-[11px] text-muted-foreground -mt-2">
+          Invitation accepted.{' '}
+          <button type="button" onClick={handleChangeInvite} className="text-primary font-medium hover:underline">
+            Use a different code
+          </button>
+        </p>
         <form onSubmit={handleSubmit} className="space-y-3">
           {/* Username (required) */}
           <div className="space-y-1">
@@ -329,10 +431,17 @@ return (
             )}
           </div>
 
-          {/* Email */}
+          {/* Email is locked to the invitation after verify-invite succeeds */}
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} />
+            <input
+              type="email"
+              placeholder="Email"
+              value={verifiedInvite.email}
+              readOnly
+              aria-readonly="true"
+              className={`${inputCls} cursor-not-allowed opacity-80`}
+            />
           </div>
           {errors.email && <p className="text-xs text-destructive px-1">{errors.email}</p>}
 
@@ -452,24 +561,11 @@ return (
           </button>
         </form>
 
-        <div className="relative py-2">
-          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border"></div></div>
-          <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">or join with</span></div>
-        </div>
-        
-        <button onClick={handleGoogleSignup} className="w-full flex items-center justify-center gap-3 rounded-xl glass-card py-3 hover:shadow-glow transition-all active:scale-[0.98]">
-          <svg width="18" height="18" viewBox="0 0 24 24">
-            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-          </svg>
-          <span className="text-sm font-medium">Google</span>
-        </button>
-
         <p className="text-center text-sm text-muted-foreground">
           Already have an account? <Link to="/login" className="text-primary font-medium hover:underline">Sign In</Link>
         </p>
+        </>
+        )}
         </div>
       </motion.div>
     </div>

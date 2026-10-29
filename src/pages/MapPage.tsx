@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
+import { HOME_LOCATION_EVENT, mapStartView, readHomeLocation } from '@/lib/accountSettings';
+import { getCurrentUser, getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
+import { hasSignedInSession } from '@/lib/signedIn';
 import BottomNav from '@/components/BottomNav';
-import { ArrowLeft, LocateFixed, RefreshCw, Loader2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import TopBar from '@/components/TopBar';
+import { LocateFixed, RefreshCw } from 'lucide-react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
-import { getApiUrl } from '@/lib/api';
-import { getAuthToken } from '@/lib/auth';
-import { mapApiEventToItem, parseEventsApiList } from '@/lib/mapApiEvent';
+import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
+import { friendsAttendingHtml } from '@/lib/friendsAttendingPopup';
+import { fetchMapEvents, peekMapEvents } from '@/lib/mapEventsApi';
+import { fetchOrganizerProfile } from '@/lib/organizerProfile';
+import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
+
+const leafletReady = import('leaflet');
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -71,7 +78,9 @@ export default function MapPage() {
 
   const [category, setCategory] = useState('All');
   const [filterDate, setFilterDate] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
+  const [selectedCity, setSelectedCity] = useState(
+    () => readHomeLocation(getCurrentUser()?.id)?.city ?? '',
+  );
   const [titleSearch, setTitleSearch] = useState('');
   const [debouncedTitle, setDebouncedTitle] = useState('');
   const [debouncedFilterDate, setDebouncedFilterDate] = useState('');
@@ -81,10 +90,8 @@ export default function MapPage() {
   const [geoStatus, setGeoStatus] = useState<'idle' | 'pending' | 'granted' | 'denied' | 'unavailable'>('idle');
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as const });
   const [mapReady, setMapReady] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // Use `loading` flag to block and disable interactions across the map page when fetching data
-  const isAnyDataLoading = loading;
+  const fittedEventIdsRef = useRef('');
+  const loadEventsAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedTitle(titleSearch.trim()), 350);
@@ -96,57 +103,53 @@ export default function MapPage() {
     return () => window.clearTimeout(t);
   }, [filterDate]);
 
+  const rawEventsRef = useRef<EventItem[]>([]);
+  rawEventsRef.current = rawEvents;
+
   const loadEvents = useCallback(async (currentCategory: string, currentTitle: string, currentDate: string) => {
+    loadEventsAbortRef.current?.abort();
     const controller = new AbortController();
+    loadEventsAbortRef.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), 12000);
-    setLoading(true);
+    if (rawEventsRef.current.length === 0) setLoading(true);
     try {
       const params = new URLSearchParams({ page: '1', limit: '50' });
       if (currentCategory !== 'All') params.set('category', currentCategory);
       if (currentTitle) params.set('search', currentTitle);
       if (currentDate) params.set('date', currentDate);
-      
-      const token = getAuthToken();
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(getApiUrl(`/api/events?${params}`), { headers, signal: controller.signal });
-      if (!res.ok) throw new Error('fetch failed');
-      const body = await res.json();
-      const rows = parseEventsApiList(body);
+      // Through the client-side cache (events list), cleared with the other events lists.
+      const rows = await fetchMapEvents(params, controller.signal);
+      if (controller.signal.aborted) return;
       const list = rows.map(mapApiEventToItem);
       const local = getLocalEvents().filter((e) => !e.isDraft);
       const byId = new Map<string, EventItem>();
       [...list, ...local].forEach((e) => byId.set(e.id, e));
       const combinedEvents = Array.from(byId.values());
       setRawEvents(combinedEvents);
+      setLoading(false);
+
+      const missingIds = [...new Set(
+        combinedEvents
+          .filter((e) => !e.organizerFullName && (!e.organizer || e.organizer === 'Organizer'))
+          .map((e) => String(e.organizerId || '').trim())
+          .filter(Boolean),
+      )];
+      if (missingIds.length === 0) return;
 
       const profileMap: Record<string, { full_name?: string; username?: string; avatar_url?: string }> = {};
       await Promise.all(
-        rows.map(async (row: any) => {
-          const creatorId = row.created_by || row.organizer_id;
-          if (creatorId && !profileMap[creatorId]) {
-            try {
-              const profRes = await fetch(getApiUrl(`/api/profile/${creatorId}`), { headers });
-              if (profRes.ok) {
-                const profData = await profRes.json().catch(() => null);
-                const prof = profData?.data || profData?.profile || profData;
-                if (prof) {
-                  profileMap[creatorId] = {
-                    full_name: prof.full_name || prof.name,
-                    username: prof.username,
-                    avatar_url: prof.avatar_url,
-                  };
-                }
-              }
-            } catch {
-              // ignore
-            }
-          }
-        })
+        missingIds.map(async (creatorId) => {
+          const prof = await fetchOrganizerProfile(creatorId);
+          if (prof) profileMap[creatorId] = prof;
+        }),
       );
-      setOrganizerProfiles((prev) => ({ ...prev, ...profileMap }));
+      if (controller.signal.aborted) return;
+      if (Object.keys(profileMap).length > 0) {
+        setOrganizerProfiles((prev) => ({ ...prev, ...profileMap }));
+      }
     } catch {
+      if (loadEventsAbortRef.current !== controller) return;
       const local = getLocalEvents().filter((e) => !e.isDraft);
       setRawEvents(local);
       setToast({
@@ -156,15 +159,29 @@ export default function MapPage() {
       });
     } finally {
       window.clearTimeout(timeout);
-      setLoading(false);
+      if (loadEventsAbortRef.current === controller) {
+        setLoading(false);
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ page: '1', limit: '50' });
+    const cached = peekMapEvents(params);
+    if (!cached?.length) return;
+    const list = cached.map(mapApiEventToItem);
+    const local = getLocalEvents().filter((e) => !e.isDraft);
+    const byId = new Map<string, EventItem>();
+    [...list, ...local].forEach((e) => byId.set(e.id, e));
+    setRawEvents(Array.from(byId.values()));
+    setLoading(false);
   }, []);
 
   const availableCities = useMemo(() => getEventCities(rawEvents), [rawEvents]);
 
   useEffect(() => {
     loadEvents(category, debouncedTitle, debouncedFilterDate);
-  }, [category, debouncedTitle, debouncedFilterDate, refreshKey, loadEvents]);
+  }, [category, debouncedTitle, debouncedFilterDate, loadEvents]);
 
   const filteredEvents = useMemo(() => {
     return rawEvents.filter((e) => {
@@ -183,17 +200,11 @@ export default function MapPage() {
     let cancelled = false;
 
     const initMap = async () => {
-      const L = await import('leaflet');
+      const L = await leafletReady;
       if (cancelled || !mapRef.current || mapInstance.current) return;
       leafletRef.current = L;
 
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-      });
-
+      const start = mapStartView(getCurrentUser()?.id);
       const map = L.map(mapRef.current, {
         zoomControl: true,
         bounceAtZoomLimits: false,
@@ -201,13 +212,13 @@ export default function MapPage() {
         maxBounds: WORLD_BOUNDS,
         maxBoundsViscosity: 1,
         minZoom: 3,
-      }).setView([40.7128, -74.006], 3);
+        preferCanvas: true,
+      }).setView(start.center, start.zoom);
       mapInstance.current = map;
       map.setMaxBounds(WORLD_BOUNDS);
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        noWrap: true,
+      L.tileLayer(LEAFLET_TILE_URL, {
+        ...LEAFLET_TILE_OPTIONS,
         bounds: WORLD_BOUNDS,
       }).addTo(map);
 
@@ -236,6 +247,19 @@ export default function MapPage() {
   }, []);
 
   useEffect(() => {
+    const applyHome = () => {
+      const userId = getCurrentUser()?.id;
+      setSelectedCity(readHomeLocation(userId)?.city ?? '');
+      const map = mapInstance.current;
+      if (!map) return;
+      const start = mapStartView(userId);
+      map.setView(start.center, start.zoom);
+    };
+    window.addEventListener(HOME_LOCATION_EVENT, applyHome);
+    return () => window.removeEventListener(HOME_LOCATION_EVENT, applyHome);
+  }, []);
+
+  useEffect(() => {
     const map = mapInstance.current;
     const L = leafletRef.current;
     const layer = markersLayerRef.current;
@@ -245,7 +269,14 @@ export default function MapPage() {
     const spread = spreadOverlapping(filteredEvents);
 
     spread.forEach(({ item: event, lat, lng }) => {
-      const marker = L.marker(clampToWorld(lat, lng)).addTo(layer);
+      const marker = L.marker(clampToWorld(lat, lng), {
+        icon: L.divIcon({
+          className: 'event-map-pin',
+          html: '<span style="display:block;width:16px;height:16px;border-radius:999px;background:#7c3aed;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>',
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
+        }),
+      }).addTo(layer);
 
       const creatorId = event.organizerId || (event as any).created_by;
       const prof = creatorId ? organizerProfiles[creatorId] : null;
@@ -270,6 +301,7 @@ export default function MapPage() {
           <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;line-height:1.3;color:#0f172a">${escapeHtml(event.title)}</h3>
           <p style="margin:0 0 2px;font-size:11px;color:#64748b">${escapeHtml(event.date)} · ${escapeHtml(event.time)}</p>
           <p style="margin:0 0 10px;font-size:11px;color:#64748b">${escapeHtml(event.location || '—')}</p>
+          ${friendsAttendingHtml(event.friendsAttendingCount)}
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f8fafc;border-radius:8px">
             ${avatarHtml}
             <div style="min-width:0;line-height:1.2">
@@ -286,7 +318,9 @@ export default function MapPage() {
       marker.bindPopup(preview, { maxWidth: 280 });
     });
 
-    if (spread.length > 0) {
+    const eventIds = spread.map((s) => s.item.id).sort().join(',');
+    if (spread.length > 0 && eventIds !== fittedEventIdsRef.current) {
+      fittedEventIdsRef.current = eventIds;
       const bounds = L.latLngBounds(spread.map((s) => clampToWorld(s.lat, s.lng)));
       map.fitBounds(bounds.pad(0.15), { padding: [36, 36], maxZoom: 14 });
       map.panInsideBounds(WORLD_BOUNDS, { animate: false });
@@ -321,7 +355,6 @@ export default function MapPage() {
   }, [navigate, mapReady, filteredEvents]);
 
   const locateUser = () => {
-    if (isAnyDataLoading) return;
     const map = mapInstance.current;
     const L = leafletRef.current;
     if (!map || !L) return;
@@ -363,51 +396,25 @@ export default function MapPage() {
     );
   };
 
-  const manualRefresh = () => setRefreshKey((k) => k + 1);
+  if (!hasSignedInSession()) return <Navigate to="/login" replace />;
 
   return (
-    <div className={`min-h-screen bg-background pb-20 relative ${isAnyDataLoading ? 'pointer-events-none select-none' : ''}`}>
-      {/* Loading Overlay State */}
-      {isAnyDataLoading && (
-        <div className="absolute inset-0 z-50 bg-background/60 backdrop-blur-xs flex items-center justify-center">
-          <div className="flex flex-col items-center gap-2 p-6 rounded-2xl glass-card shadow-lg">
-            <Loader2 className="h-6 w-6 text-primary animate-spin" />
-            <p className="text-xs font-semibold text-foreground">Loading</p>
-          </div>
-        </div>
-      )}
-
+    <div className="min-h-screen bg-background pb-20 relative">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
 
-      {/* Header */}
-      <header className="sticky top-0 z-[1000] flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            aria-label="Back"
-            className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90"
-          >
-            <ArrowLeft className="h-4 w-4 text-foreground" />
-          </button>
+      <div className="sticky top-0 z-[1000] bg-background/95 backdrop-blur-md">
+        <TopBar
+          search={titleSearch}
+          onSearchChange={setTitleSearch}
+          searchPlaceholder="Search events..."
+        />
+        <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
           <div>
             <h1 className="text-base font-bold text-foreground leading-none">Explore Map</h1>
             <p className="text-[10px] text-muted-foreground mt-0.5">
               {loading && rawEvents.length === 0 ? 'Loading…' : `${filteredEvents.length} event${filteredEvents.length !== 1 ? 's' : ''} nearby`}
             </p>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={manualRefresh}
-            disabled={loading}
-            aria-label="Refresh events"
-            className="rounded-full glass-card p-2 hover:bg-secondary/80 transition-colors active:scale-90 disabled:opacity-50"
-            title="Refresh events"
-          >
-            <RefreshCw className={`h-4 w-4 text-foreground ${loading ? 'animate-spin' : ''}`} />
-          </button>
           <button
             type="button"
             onClick={locateUser}
@@ -420,7 +427,7 @@ export default function MapPage() {
             <LocateFixed className="h-4 w-4 text-primary-foreground" />
           </button>
         </div>
-      </header>
+      </div>
 
       {/* Filters */}
       <div className="border-b border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3 space-y-3">
@@ -450,33 +457,20 @@ export default function MapPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="map-city-filter" className="text-[10px] font-semibold uppercase text-muted-foreground">Location</label>
-            <select
-              id="map-city-filter"
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
-              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              aria-label="Filter events by location"
-            >
-              <option value="">All locations</option>
-              {availableCities.map((city) => (
-                <option key={city} value={city}>{city}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-semibold uppercase text-muted-foreground">Search</label>
-            <input
-              type="search"
-              value={titleSearch}
-              onChange={(e) => setTitleSearch(e.target.value)}
-              placeholder="Event title…"
-              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              aria-label="Search events by title"
-            />
-          </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="map-city-filter" className="text-[10px] font-semibold uppercase text-muted-foreground">Location</label>
+          <select
+            id="map-city-filter"
+            value={selectedCity}
+            onChange={(e) => setSelectedCity(e.target.value)}
+            className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+            aria-label="Filter events by location"
+          >
+            <option value="">All locations</option>
+            {availableCities.map((city) => (
+              <option key={city} value={city}>{city}</option>
+            ))}
+          </select>
         </div>
 
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">

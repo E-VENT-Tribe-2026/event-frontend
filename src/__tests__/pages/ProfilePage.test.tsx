@@ -71,6 +71,7 @@ describe('ProfilePage identity', () => {
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     expect(screen.queryByText('a@b.com')).not.toBeInTheDocument();
+    expect(screen.queryByText(/change password/i)).not.toBeInTheDocument();
   });
 
   it('shows an uploaded photo and the chosen banner', async () => {
@@ -125,14 +126,96 @@ describe('ProfilePage identity', () => {
       (call) => (call[1] as RequestInit | undefined)?.method === 'PUT',
     );
     expect(puts).toHaveLength(1);
-    expect(JSON.parse(String((puts[0][1] as RequestInit).body)).full_name).toBe('Jane Doe');
+    expect(JSON.parse(String((puts[0][1] as RequestInit).body))).toEqual({
+      full_name: 'Jane Doe',
+      bio: '',
+      interests: [],
+    });
+  });
+
+  it('retries a smaller payload when the API rejects extra fields', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/profile/me') && init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        if ('interests' in body || 'avatar_kind' in body) {
+          return new Response(
+            JSON.stringify({
+              detail: [{ loc: ['body', 'interests'], msg: 'Extra inputs are not permitted', type: 'extra_forbidden' }],
+            }),
+            { status: 422, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        return json({ ...baseProfile, full_name: body.full_name });
+      }
+      if (url.includes('/api/profile/me')) return json(baseProfile);
+      return json([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit profile/i }));
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Jane Doe' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(await screen.findByTestId('profile-full-name')).toHaveTextContent('Jane Doe');
+    expect(await screen.findByText('Profile updated successfully!')).toBeInTheDocument();
+
+    const putBodies = fetchMock.mock.calls
+      .filter((call) => (call[1] as RequestInit | undefined)?.method === 'PUT')
+      .map((call) => JSON.parse(String((call[1] as RequestInit).body)));
+    expect(putBodies.at(-1)).toEqual({ full_name: 'Jane Doe', bio: '' });
+  });
+
+  it('shows the API error when save is rejected', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/profile/me') && init?.method === 'PUT') {
+        return new Response(
+          JSON.stringify({
+            detail: [{ loc: ['body', 'full_name'], msg: 'Full name is too short', type: 'value_error' }],
+          }),
+          { status: 422, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/api/profile/me')) return json(baseProfile);
+      return json([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit profile/i }));
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Jane Doe' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect((await screen.findAllByText('Full name is too short')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeInTheDocument();
+  });
+
+  it('lets the user change the color scheme from Appearance', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/profile/me')) return json(baseProfile);
+        return json([]);
+      }),
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'Light' }));
+    expect(document.documentElement.dataset.colorScheme).toBe('light');
+    expect(screen.getByText('Appearance')).toBeInTheDocument();
   });
 
   it('saves the profile visibility with the profile update and keeps the choice', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/profile/me') && init?.method === 'PUT') {
-        return json({ ...baseProfile, visibility: 'friends_only' });
+        return json({ ...baseProfile, visibility: 'private' });
       }
       if (url.includes('/api/profile/me')) return json({ ...baseProfile, visibility: 'public' });
       return json([]);
@@ -141,17 +224,17 @@ describe('ProfilePage identity', () => {
 
     renderPage();
 
-    expect(await screen.findByTestId('profile-visibility')).toHaveTextContent('Public');
-    fireEvent.click(await screen.findByRole('button', { name: /edit profile/i }));
-    fireEvent.click(screen.getByRole('radio', { name: 'Friends only' }));
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
-
-    expect(await screen.findByTestId('profile-visibility')).toHaveTextContent('Friends only');
+    const toggle = await screen.findByRole('switch', { name: 'Private profile' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Private profile' })).toHaveAttribute('aria-checked', 'true');
+    });
     const puts = fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.method === 'PUT',
     );
     expect(puts).toHaveLength(1);
-    expect(JSON.parse(String((puts[0][1] as RequestInit).body)).visibility).toBe('friends_only');
+    expect(JSON.parse(String((puts[0][1] as RequestInit).body)).visibility).toBe('private');
   });
 
   it('refuses an empty full name and does not save a stand-in', async () => {

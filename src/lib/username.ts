@@ -39,6 +39,22 @@ export function hasChosenUsername(username?: string | null): boolean {
   return Boolean(username?.trim());
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * GET /api/profile/me may return the profile at the root or nested under
+ * `data` / `user` / `profile`. Login already unwraps this; the username gate must too.
+ */
+export function profileFromMeResponse(body: unknown): Record<string, unknown> {
+  const root = asRecord(body);
+  if (!root) return {};
+  return asRecord(root.data) || asRecord(root.user) || asRecord(root.profile) || root;
+}
+
 export const FULL_NAME_RULES_HINT =
   '3–50 characters · letters, spaces and common punctuation · shown as username (Full Name)';
 
@@ -60,13 +76,19 @@ export function getFullNameValidationError(raw: string): string | null {
   return null;
 }
 
+function isAdministratorRole(role?: string | null): boolean {
+  const normalized = String(role || '').trim().toLowerCase();
+  return normalized === 'administrator' || normalized === 'admin';
+}
+
 /** Accounts without a username must pick one, and a full name, before the app.
- *  Administrator accounts with a username go directly to the admin panel. */
+ *  Administrator accounts go to the admin panel — they must not be sent to
+ *  choose-username or a password-setup screen after verification. */
 export function destinationAfterSignIn(
   username?: string | null,
   role?: string | null,
 ): '/admin' | '/home' | '/choose-username' {
+  if (isAdministratorRole(role)) return '/admin';
   if (!hasChosenUsername(username)) return '/choose-username';
-  if (role === 'administrator') return '/admin';
   return '/home';
 }

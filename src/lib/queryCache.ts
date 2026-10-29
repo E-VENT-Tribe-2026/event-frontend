@@ -73,35 +73,28 @@ function removeFromSession(key: string): void {
  * @param ttl       How long the cached value is considered fresh (ms)
  * @param persist   Whether to also persist to sessionStorage
  */
-export async function cachedFetch<T>(
-  key: string,
-  fetcher: () => Promise<T>,
-  ttl: number = TTL.MEDIUM,
-  persist = false,
-): Promise<T> {
-  // 1. Check memory cache
+function readEntry<T>(key: string, persist: boolean): CacheEntry<T> | null {
   const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
-  if (memEntry && !isStale(memEntry)) {
-    return memEntry.data;
-  }
-
-  // 2. Check sessionStorage (for persistent keys)
+  if (memEntry) return memEntry;
   if (persist || PERSISTENT_KEYS.has(key)) {
     const sessEntry = readFromSession<T>(key);
-    if (sessEntry && !isStale(sessEntry)) {
-      // Warm memory cache from session
+    if (sessEntry) {
       memoryCache.set(key, sessEntry);
-      return sessEntry.data;
+      return sessEntry;
     }
   }
+  return null;
+}
 
-  // 3. Deduplicate in-flight requests
+function runFetch<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttl: number,
+  persist: boolean,
+): Promise<T> {
   const existing = inFlight.get(key);
-  if (existing) {
-    return existing.promise as Promise<T>;
-  }
+  if (existing) return existing.promise as Promise<T>;
 
-  // 4. Fire the request
   const promise = fetcher().then((data) => {
     const entry: CacheEntry<T> = { data, fetchedAt: Date.now(), ttl };
     memoryCache.set(key, entry);
@@ -117,6 +110,26 @@ export async function cachedFetch<T>(
 
   inFlight.set(key, { promise });
   return promise;
+}
+
+export async function cachedFetch<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttl: number = TTL.MEDIUM,
+  persist = false,
+): Promise<T> {
+  const cached = readEntry<T>(key, persist);
+  if (cached && !isStale(cached)) {
+    return cached.data;
+  }
+
+  // Stale-while-revalidate: navigating back should not wait on the network.
+  if (cached) {
+    void runFetch(key, fetcher, ttl, persist).catch(() => { /* keep stale copy */ });
+    return cached.data;
+  }
+
+  return runFetch(key, fetcher, ttl, persist);
 }
 
 /**
@@ -135,11 +148,14 @@ export function staleWhileRevalidate<T>(
   const sessEntry = (persist || PERSISTENT_KEYS.has(key)) ? readFromSession<T>(key) : null;
   const cached = memEntry ?? sessEntry ?? null;
 
-  // Revalidate in background if stale or missing
-  if (!cached || isStale(cached)) {
-    cachedFetch(key, fetcher, ttl, persist)
+  if (!cached) {
+    void runFetch(key, fetcher, ttl, persist)
       .then(onUpdate)
       .catch(() => { /* silent background refresh failure */ });
+  } else if (isStale(cached)) {
+    void runFetch(key, fetcher, ttl, persist)
+      .then(onUpdate)
+      .catch(() => { /* keep stale copy */ });
   }
 
   return cached?.data ?? null;
@@ -159,6 +175,16 @@ export function setCacheEntry<T>(
   if (persist || PERSISTENT_KEYS.has(key)) {
     writeToSession(key, entry);
   }
+}
+
+/**
+ * Read a cached value without fetching, even if it is stale. Returns null when nothing is cached.
+ */
+export function peekCache<T>(key: string): T | null {
+  const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
+  if (memEntry) return memEntry.data;
+  const sessEntry = readFromSession<T>(key);
+  return sessEntry?.data ?? null;
 }
 
 /**
