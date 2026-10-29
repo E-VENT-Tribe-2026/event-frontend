@@ -209,6 +209,13 @@ export interface AdminEventDetail {
   participants: AdminEventParticipant[];
   created_at: string;
   reports_count?: number;
+  /** #236: removed events stay visible to administrators, marked. */
+  is_removed?: boolean;
+  removed_at?: string | null;
+  removed_by?: unknown;
+  /** The event's chat (backend sends both names). */
+  chats?: unknown;
+  chat?: unknown;
 }
 
 export interface AdminEventSummaryFull {
@@ -314,18 +321,47 @@ export function matchesAuditFilters(entry: AdminAuditEntry, filters: AdminAuditF
   return true;
 }
 
-// ---- Reports ----
+// ---- Reports (#328) ----
+//
+// Backend contract (administrators only, never cached on the client):
+// - GET  /api/admin/reports?status=open&page&limit   newest first; `total` is the number of reports
+// - GET  /api/admin/reports/open-count               { count }
+// - GET  /api/admin/reports/{id}                     AdminReportDetail
+// - POST /api/admin/reports/{id}/dismiss             closes it as Dismissed, returns AdminReportDetail
+// - POST /api/admin/reports/{id}/action              { action: warn | remove | suspend, reason? },
+//                                                    closes it as Action taken, returns AdminReportDetail
+// - Live updates: Supabase Realtime on the `reports` table for administrators; the panel only uses
+//   the signal and fetches the count and the open list again.
+
+export type AdminReportStatus = 'open' | 'dismissed' | 'action_taken';
+export type AdminReportTargetType = 'event' | 'user' | 'message';
+export type AdminReportOrigin = 'event_details' | 'profile' | 'event_chat';
+export type AdminReportOutcome = 'dismissed' | 'warned' | 'content_removed' | 'suspended';
+export type AdminReportAction = 'warn' | 'remove' | 'suspend';
+
+export interface AdminReportEventRef {
+  id: string;
+  title: string;
+}
+
+export interface AdminReportMessageRef {
+  id: string;
+  content: string;
+  sender: AdminEventPerson | null;
+}
 
 export interface AdminReportSummary {
   id: string;
-  reporter_id: string;
-  reporter_name: string;
-  target_id: string;
-  target_type: 'event' | 'user';
-  target_name: string;
+  status: AdminReportStatus;
+  target_type: AdminReportTargetType;
   reason: string;
-  status: 'pending' | 'dismissed' | 'actioned';
+  origin: AdminReportOrigin;
   created_at: string;
+  reporter: AdminEventPerson | null;
+  /** The reported event, or the event whose chat the report was opened from. */
+  event: AdminReportEventRef | null;
+  reported_user: AdminEventPerson | null;
+  message: AdminReportMessageRef | null;
 }
 
 export interface AdminReportsResponse {
@@ -336,11 +372,240 @@ export interface AdminReportsResponse {
   total_pages: number;
 }
 
+export interface AdminReportChatMessage {
+  id: string;
+  sender_name: string;
+  content: string;
+  created_at: string;
+  reported: boolean;
+}
+
 export interface AdminReportDetail extends AdminReportSummary {
-  description?: string | null;
-  admin_note?: string | null;
-  resolved_at?: string | null;
-  resolved_by?: string | null;
+  description: string | null;
+  chat_context: AdminReportChatMessage[];
+  /** The reported event or message is already removed. */
+  content_removed: boolean;
+  /** Who warning and suspending apply to: the reported user, the message's sender or the event's organizer. */
+  target_user: AdminEventPerson | null;
+  /** That user is now an administrator. */
+  target_user_is_admin: boolean;
+  outcome: AdminReportOutcome | null;
+  closed_at: string | null;
+  closed_by: AdminEventPerson | null;
+}
+
+/** One report in a user's report history. */
+export interface AdminUserReportRef {
+  id: string;
+  status: AdminReportStatus;
+  reason: string;
+  target_type: AdminReportTargetType;
+  created_at: string;
+  /** Set when the report is about an event (or a message in its chat). */
+  event: AdminReportEventRef | null;
+}
+
+const REPORT_REASON_LABELS: Record<string, string> = {
+  spam: 'Spam',
+  inappropriate_content: 'Inappropriate content',
+  harassment_or_hate: 'Harassment or hate',
+  scam_or_fraud: 'Scam or fraud',
+  misleading_event: 'Misleading event',
+  other: 'Other',
+};
+
+export function reportReasonLabel(reason: string): string {
+  return REPORT_REASON_LABELS[reason] ?? reason;
+}
+
+export function reportStatusLabel(status: AdminReportStatus): string {
+  return status === 'open' ? 'Open' : status === 'dismissed' ? 'Dismissed' : 'Action taken';
+}
+
+export function reportOriginLabel(origin: AdminReportOrigin): string {
+  return origin === 'event_chat' ? 'Event chat' : origin === 'profile' ? 'User profile' : 'Event details';
+}
+
+export function reportOutcomeLabel(outcome: AdminReportOutcome | null): string {
+  switch (outcome) {
+    case 'dismissed':
+      return 'Dismissed';
+    case 'warned':
+      return 'The user was warned';
+    case 'content_removed':
+      return 'The reported content was removed';
+    case 'suspended':
+      return 'The user was suspended';
+    default:
+      return 'Closed';
+  }
+}
+
+export function formatReportTime(isoString: string): string {
+  const d = new Date(isoString);
+  if (!isoString || isNaN(d.getTime())) return isoString;
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** What was reported, in a few words: the event, the user, or a message and its event. */
+export function reportedItemLabel(report: AdminReportSummary): string {
+  if (report.target_type === 'user') {
+    return report.reported_user ? personDisplayName(report.reported_user) : 'Unknown user';
+  }
+  if (report.target_type === 'message') {
+    const sender = report.message?.sender ? personDisplayName(report.message.sender) : 'a user';
+    return report.event ? `Message by ${sender} in ${report.event.title}` : `Message by ${sender}`;
+  }
+  return report.event?.title ?? 'Unknown event';
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
+}
+
+function readEventRef(value: unknown): AdminReportEventRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const id = asText(row.id);
+  return id ? { id, title: asText(row.title) || 'Untitled event' } : null;
+}
+
+function readStatus(value: unknown): AdminReportStatus {
+  return value === 'dismissed' || value === 'action_taken' ? value : 'open';
+}
+
+function readTargetType(value: unknown): AdminReportTargetType {
+  return value === 'user' || value === 'message' ? value : 'event';
+}
+
+function readOrigin(value: unknown): AdminReportOrigin {
+  return value === 'profile' || value === 'event_chat' ? value : 'event_details';
+}
+
+function readReportSummary(value: unknown): AdminReportSummary {
+  const row = (value ?? {}) as Record<string, unknown>;
+  const msg = row.message && typeof row.message === 'object' ? (row.message as Record<string, unknown>) : null;
+  return {
+    id: asText(row.id),
+    status: readStatus(row.status),
+    target_type: readTargetType(row.target_type),
+    reason: asText(row.reason),
+    origin: readOrigin(row.origin),
+    created_at: asText(row.created_at),
+    reporter: readPerson(row.reporter),
+    event: readEventRef(row.event),
+    reported_user: readPerson(row.reported_user),
+    message: msg ? { id: asText(msg.id), content: asText(msg.content), sender: readPerson(msg.sender) } : null,
+  };
+}
+
+function readReportDetail(value: unknown): AdminReportDetail {
+  const row = (value ?? {}) as Record<string, unknown>;
+  const outcome = row.outcome;
+  const context = Array.isArray(row.chat_context) ? row.chat_context : [];
+  return {
+    ...readReportSummary(row),
+    description: asText(row.description) || null,
+    chat_context: context.map((m) => {
+      const c = (m ?? {}) as Record<string, unknown>;
+      return {
+        id: asText(c.id),
+        sender_name: asText(c.sender_name) || 'Unknown',
+        content: asText(c.content),
+        created_at: asText(c.created_at),
+        reported: c.reported === true,
+      };
+    }),
+    content_removed: row.content_removed === true,
+    target_user: readPerson(row.target_user),
+    target_user_is_admin: row.target_user_is_admin === true,
+    outcome:
+      outcome === 'dismissed' || outcome === 'warned' || outcome === 'content_removed' || outcome === 'suspended'
+        ? outcome
+        : null,
+    closed_at: asText(row.closed_at) || null,
+    closed_by: readPerson(row.closed_by),
+  };
+}
+
+export function readUserReportRefs(value: unknown): AdminUserReportRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => {
+    const row = (v ?? {}) as Record<string, unknown>;
+    return {
+      id: asText(row.id),
+      status: readStatus(row.status),
+      reason: asText(row.reason),
+      target_type: readTargetType(row.target_type),
+      created_at: asText(row.created_at),
+      event: readEventRef(row.event),
+    };
+  });
+}
+
+// ---- Content removal (#236 backend) ----
+
+/** Who removed an event or a message, and when. */
+export interface AdminRemovedState {
+  is_removed: boolean;
+  removed_at: string | null;
+  removed_by: AdminEventPerson | null;
+}
+
+export interface AdminRemoveContentResponse {
+  removed_at: string;
+  removed_by: AdminEventPerson | null;
+}
+
+/** One message of an event chat as the panel shows it (removed messages stay, marked). */
+export interface AdminChatMessage extends AdminRemovedState {
+  id: string;
+  sender: AdminEventPerson | null;
+  content: string;
+  created_at: string;
+  is_system_message: boolean;
+}
+
+export function readChatMessages(value: unknown): AdminChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => {
+    const row = (v ?? {}) as Record<string, unknown>;
+    const sender =
+      readPerson(row.sender) ??
+      readPerson({
+        id: row.sender_id,
+        username: row.username,
+        full_name: row.full_name,
+        avatar_url: row.avatar_url,
+        avatar_kind: row.avatar_kind,
+        icon_id: row.icon_id,
+      });
+    return {
+      id: asText(row.id),
+      sender,
+      content: asText(row.content) || asText(row.text),
+      created_at: asText(row.created_at) || asText(row.time),
+      is_system_message: row.is_system_message === true || row.type === 'notification',
+      is_removed: row.is_removed === true,
+      removed_at: asText(row.removed_at) || null,
+      removed_by: readPerson(row.removed_by),
+    };
+  });
+}
+
+export function readRemovedState(value: unknown): AdminRemovedState {
+  const row = (value ?? {}) as Record<string, unknown>;
+  return {
+    is_removed: row.is_removed === true || Boolean(row.removed_at),
+    removed_at: asText(row.removed_at) || null,
+    removed_by: readPerson(row.removed_by),
+  };
 }
 
 // ---- Simple message responses ----
@@ -375,8 +640,19 @@ async function handleAdminResponse<T>(res: Response): Promise<T> {
   const body = isJson ? await res.json().catch(() => ({})) : await res.text().catch(() => '');
 
   if (!res.ok) {
+    // FastAPI sends `detail` as text, as { code, message }, or as a list of field errors.
+    const detail = typeof body === 'object' && body ? (body as Record<string, unknown>).detail : undefined;
+    const fromDetail =
+      typeof detail === 'string'
+        ? detail
+        : detail && typeof detail === 'object' && !Array.isArray(detail)
+          ? asText((detail as Record<string, unknown>).message)
+          : Array.isArray(detail)
+            ? asText((detail[0] as Record<string, unknown> | undefined)?.msg)
+            : '';
     const errorMsg =
-      (typeof body === 'object' && body && (body.detail || body.message || body.error)) ||
+      fromDetail ||
+      (typeof body === 'object' && body && asText((body as Record<string, unknown>).message || (body as Record<string, unknown>).error)) ||
       (typeof body === 'string' && body) ||
       `Request failed with status ${res.status}`;
     throw new Error(String(errorMsg));
@@ -680,17 +956,41 @@ export async function fetchAdminEventDetails(eventId: string): Promise<AdminEven
   return handleAdminResponse<AdminEventDetails>(res);
 }
 
-/**
- * Removes (hard-deletes) an event.
- */
-export async function removeEvent(eventId: string): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_EVENT_REMOVE(eventId));
+async function postRemoval(url: string): Promise<AdminRemoveContentResponse> {
   const res = await fetch(url, {
-    method: 'DELETE',
+    method: 'POST',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminActionResponse>(res);
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  return { removed_at: asText(body.removed_at), removed_by: readPerson(body.removed_by) };
+}
+
+/**
+ * Marks an event as removed. It is never deleted: administrators still see it, marked.
+ * POST /api/admin/events/{id}/remove
+ */
+export function removeEvent(eventId: string): Promise<AdminRemoveContentResponse> {
+  return postRemoval(getApiUrl(API_ENDPOINTS.ADMIN_EVENT_REMOVE(eventId)));
+}
+
+/**
+ * Marks a chat message as removed. Administrators still see its text, marked as removed.
+ * POST /api/admin/events/{eventId}/messages/{messageId}/remove
+ */
+export function removeChatMessage(eventId: string, messageId: string): Promise<AdminRemoveContentResponse> {
+  return postRemoval(getApiUrl(API_ENDPOINTS.ADMIN_MESSAGE_REMOVE(eventId, messageId)));
+}
+
+/** GET /api/admin/account: the signed-in administrator, with the number of reports they closed. */
+export async function fetchAdminAccount(): Promise<{ reports_closed: number | null }> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_ACCOUNT), {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  return { reports_closed: typeof body.reports_closed === 'number' ? body.reports_closed : null };
 }
 
 function readPerson(value: unknown): AdminEventPerson | null {
@@ -875,77 +1175,86 @@ export async function fetchAdminAudit(
 }
 
 /**
- * Fetches paginated reports for the admin panel.
+ * One page of reports, newest first. `status: 'open'` lists the open reports only;
+ * the response's `total` is then the number of open reports.
+ * GET /api/admin/reports?status=&page=&limit=
  */
 export async function fetchAdminReports(
   page = 1,
   limit = 20,
-  status?: string,
+  status?: 'open',
 ): Promise<AdminReportsResponse> {
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(limit));
-  if (status) {
-    params.set('status', status);
-  }
+  if (status) params.set('status', status);
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_REPORTS)}?${params.toString()}`;
   const res = await fetch(url, {
     method: 'GET',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminReportsResponse>(res);
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  const items = Array.isArray(body.items) ? body.items.map(readReportSummary) : [];
+  const total = typeof body.total === 'number' ? body.total : items.length;
+  const pageNo = typeof body.page === 'number' ? body.page : page;
+  return {
+    items,
+    total,
+    page: pageNo,
+    limit: typeof body.limit === 'number' ? body.limit : limit,
+    total_pages: typeof body.total_pages === 'number' ? body.total_pages : pageNo,
+  };
 }
 
-/**
- * Fetches the full details for a single report.
- */
-export async function fetchAdminReportDetail(reportId: string): Promise<AdminReportDetail> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DETAIL(reportId));
-  const res = await fetch(url, {
+/** The number of open reports. GET /api/admin/reports/open-count */
+export async function fetchOpenReportCount(): Promise<number> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORTS_OPEN_COUNT), {
     method: 'GET',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminReportDetail>(res);
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  return typeof body.count === 'number' ? body.count : 0;
 }
 
-/**
- * Dismisses a report without taking further action.
- */
-export async function dismissReport(reportId: string, note?: string): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(reportId));
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      ...getAdminHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ note: note ?? null }),
+/** A report's details. GET /api/admin/reports/{id} */
+export async function fetchAdminReportDetail(reportId: string): Promise<AdminReportDetail> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DETAIL(reportId)), {
+    method: 'GET',
+    headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminActionResponse>(res);
+  return readReportDetail(await handleAdminResponse<unknown>(res));
+}
+
+/** Closes an open report as Dismissed. POST /api/admin/reports/{id}/dismiss */
+export async function dismissReport(reportId: string): Promise<AdminReportDetail> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(reportId)), {
+    method: 'POST',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  return readReportDetail(await handleAdminResponse<unknown>(res));
 }
 
 /**
- * Takes an action on a report (e.g. warn/suspend the target).
+ * Acts on an open report and closes it as Action taken: warn or suspend the user it applies to,
+ * or remove the reported content. Warning and suspending need a reason.
+ * POST /api/admin/reports/{id}/action  { action, reason }
  */
-export async function actionReport(
+export async function actOnReport(
   reportId: string,
-  action: string,
-  note?: string,
-): Promise<AdminActionResponse> {
-  const url = getApiUrl(API_ENDPOINTS.ADMIN_REPORT_ACTION(reportId));
-  const res = await fetch(url, {
+  action: AdminReportAction,
+  reason?: string,
+): Promise<AdminReportDetail> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_ACTION(reportId)), {
     method: 'POST',
-    headers: {
-      ...getAdminHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ action, note: note ?? null }),
+    headers: { ...getAdminHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(reason ? { action, reason } : { action }),
     cache: 'no-store',
   });
-  return handleAdminResponse<AdminActionResponse>(res);
+  return readReportDetail(await handleAdminResponse<unknown>(res));
 }
 
 export interface SignupInviteSendResult {

@@ -23,8 +23,9 @@ import {
   Network,
   Leaf,
   Users,
+  Trash2,
 } from 'lucide-react';
-import { fetchAdminCounts } from '@/lib/adminApi';
+import { fetchAdminCounts, fetchAdminEvents } from '@/lib/adminApi';
 
 /* -------------------------------------------------------------------------- */
 /* Types & config                                                             */
@@ -50,6 +51,8 @@ interface ApiEvent {
   start_datetime: string;
   end_datetime: string | null;
   organizer: Organizer | null;
+  /** Marked as removed by an administrator (#236). Only the admin list knows it. */
+  is_removed?: boolean;
 }
 
 interface AdminEventsTabProps {
@@ -173,7 +176,42 @@ async function fetchEvents(tab: SubTab, signal: AbortSignal): Promise<ApiEvent[]
     }
     if (items.length < PAGE_SIZE) break;
   }
-  return collected;
+  return markRemoved(tab, collected);
+}
+
+/**
+ * The public list leaves removed events out, so the admin list tells which events are removed:
+ * those are marked, and added to the list when the public list does not have them.
+ */
+async function markRemoved(tab: SubTab, events: ApiEvent[]): Promise<ApiEvent[]> {
+  const removed: ApiEvent[] = [];
+  try {
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const res = await fetchAdminEvents(tab, page, PAGE_SIZE);
+      for (const raw of res.items as unknown as Array<Record<string, unknown>>) {
+        if (raw.is_removed !== true && !raw.removed_at) continue;
+        removed.push({
+          id: String(raw.id),
+          title: String(raw.title ?? ''),
+          category: typeof raw.category === 'string' ? raw.category : null,
+          status: String(raw.status ?? ''),
+          is_cancelled: raw.is_cancelled === true,
+          start_datetime: String(raw.start_datetime ?? raw.date ?? ''),
+          end_datetime: typeof raw.end_datetime === 'string' ? raw.end_datetime : null,
+          organizer: (raw.organizer as Organizer | null) ?? null,
+          is_removed: true,
+        });
+      }
+      if (page >= (res.total_pages ?? 1)) break;
+    }
+  } catch {
+    // Without the admin list the events are still shown, just not marked.
+    return events;
+  }
+  const removedIds = new Set(removed.map((e) => e.id));
+  const marked = events.map((e) => (removedIds.has(e.id) ? { ...e, is_removed: true } : e));
+  const known = new Set(events.map((e) => e.id));
+  return [...marked, ...removed.filter((e) => !known.has(e.id))];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -496,6 +534,14 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
                         <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize hidden sm:inline-block"
                           style={{ background: 'hsl(271 76% 53% / .18)', color: 'var(--adm-primary-text)', border: '1px solid hsl(271 76% 53% / .4)' }}>
                           {event.category}
+                        </span>
+                      )}
+                      {event.is_removed && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                          style={{ background: 'hsl(0 84% 60% / .15)', color: 'var(--adm-danger-text)', borderColor: 'hsl(0 84% 60% / .35)' }}
+                        >
+                          <Trash2 className="h-3 w-3" />Removed
                         </span>
                       )}
                       <StatusPill status={status} />

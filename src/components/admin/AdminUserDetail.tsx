@@ -4,6 +4,7 @@ import {
   ShieldPlus,
   ShieldOff,
   Calendar,
+  CalendarDays,
   Loader2,
   AlertCircle,
   ArrowLeft,
@@ -42,16 +43,21 @@ import {
   suspendUser,
   liftSuspension,
   isSuspendedAccount,
+  readUserReportRefs,
+  reportReasonLabel,
+  type AdminUserReportRef,
   type AdminUserDetailsFull,
   type AdminEventSummary,
   type AdminUserWarning,
 } from '@/lib/adminApi';
+import { ReportStatusPill } from '@/components/admin/AdminReportsTab';
 
 interface AdminUserDetailProps {
   userId: string;
   onBack: () => void;
   onOpenEvent?: (eventId: string) => void;
   onOpenUser?: (userId: string) => void;
+  onOpenReport?: (reportId: string) => void;
   onErrorToast: (message: string) => void;
   onSuccessToast: (message: string) => void;
 }
@@ -72,20 +78,12 @@ type PersonRef = {
   avatar_url?: string;
 };
 
-type ReportRef = {
-  id: string;
-  title?: string;
-  reason?: string;
-  status?: string;
-  created_at?: string;
-};
-
 type UserExtra = {
   friends?: PersonRef[];
   blocked_by_user?: PersonRef[];
   blocked_this_user?: PersonRef[];
-  reports_about?: ReportRef[];
-  reports_made?: ReportRef[];
+  reports_about?: unknown;
+  reports_made?: unknown;
 };
 
 /* ---------- Helpers ---------- */
@@ -367,45 +365,48 @@ function ReportList({
   title,
   reports,
   emptyMessage,
+  onOpenReport,
 }: {
   icon: LucideIcon;
   title: string;
-  reports?: ReportRef[];
+  reports: AdminUserReportRef[];
   emptyMessage: string;
+  onOpenReport?: (reportId: string) => void;
 }) {
-  const list = reports ?? [];
   return (
-    <div className="space-y-2">
-      <SectionTitle icon={icon} title={title} count={list.length} size="sm" />
-      {list.length === 0 ? (
+    <div className="space-y-2" aria-label={title}>
+      <SectionTitle icon={icon} title={title} count={reports.length} size="sm" />
+      {reports.length === 0 ? (
         <EmptyBox>{emptyMessage}</EmptyBox>
       ) : (
         <div className="space-y-2">
-          {list.map((r) => (
-            <div
+          {reports.map((r) => (
+            <button
               key={r.id}
-              className="flex items-center justify-between gap-3 rounded-xl p-2.5"
+              type="button"
+              onClick={onOpenReport ? () => onOpenReport(r.id) : undefined}
+              aria-label={`Open report: ${reportReasonLabel(r.reason)}${r.event ? `, event ${r.event.title}` : ''}`}
+              className="flex w-full items-center justify-between gap-3 rounded-xl p-2.5 text-left transition-colors hover:bg-[hsl(213_45%_22%/.7)]"
               style={{ background: 'hsl(213 40% 18% / .55)' }}
             >
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-semibold" style={{ color: 'var(--adm-fg)' }}>
-                  {r.title || r.reason || 'Report'}
+                  {reportReasonLabel(r.reason)}
                 </p>
+                {r.event && (
+                  <p className="flex items-center gap-1 truncate text-[11px]" style={{ color: 'var(--adm-primary-text)' }}>
+                    <CalendarDays className="h-3 w-3 shrink-0" />
+                    Event: {r.event.title}
+                  </p>
+                )}
                 {r.created_at && (
                   <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
                     {formatYmd(r.created_at)}
                   </p>
                 )}
               </div>
-              {r.status && (
-                <span
-                  className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize"
-                  style={{ background: 'var(--adm-secondary)', color: 'var(--adm-muted-fg)' }}
-                >
-                  {r.status}
-                </span>
-              )}
-            </div>
+              <ReportStatusPill status={r.status} />
+            </button>
           ))}
         </div>
       )}
@@ -422,6 +423,7 @@ export default function AdminUserDetail({
   onBack,
   onOpenEvent,
   onOpenUser,
+  onOpenReport,
   onErrorToast,
   onSuccessToast,
 }: AdminUserDetailProps) {
@@ -555,6 +557,8 @@ export default function AdminUserDetail({
   const needsReason = dialogKind === 'warn' || dialogKind === 'suspend' || dialogKind === 'lift';
 
   const extra = (user ?? {}) as UserExtra;
+  const reportsAbout = readUserReportRefs(extra.reports_about);
+  const reportsMade = readUserReportRefs(extra.reports_made);
   const warnings = (user?.warnings ?? []) as WarningExtra[];
   const warningCount = warnings.length;
   const sortedWarnings = [...warnings].sort(
@@ -1045,33 +1049,37 @@ export default function AdminUserDetail({
               )}
             </div>
 
-            {/* ===== Report history ===== */}
-            <div className="rounded-[16px] border p-5 space-y-4" style={CARD_STYLE}>
-              <SectionTitle
-                icon={Flag}
-                title="Report history"
-                count={(extra.reports_about?.length ?? 0) + (extra.reports_made?.length ?? 0)}
-              />
-              <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-                Newest first. Reports about events this user organizes count as reports about them.
-              </p>
+            {/* ===== Report history (not for an administrator) ===== */}
+            {!isAdmin && (
+              <div className="rounded-[16px] border p-5 space-y-4" style={CARD_STYLE}>
+                <SectionTitle
+                  icon={Flag}
+                  title="Report history"
+                  count={reportsAbout.length + reportsMade.length}
+                />
+                <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                  Newest first. Reports about events this user organizes count as reports about them.
+                </p>
 
-              <ReportList
-                icon={AlertTriangle}
-                title="Reports about this user"
-                reports={extra.reports_about}
-                emptyMessage="No reports about this user."
-              />
+                <ReportList
+                  icon={AlertTriangle}
+                  title="Reports about this user"
+                  reports={reportsAbout}
+                  emptyMessage="No reports about this user."
+                  onOpenReport={onOpenReport}
+                />
 
-              <div className="border-t" style={{ borderColor: 'var(--adm-border)' }} />
+                <div className="border-t" style={{ borderColor: 'var(--adm-border)' }} />
 
-              <ReportList
-                icon={MessageSquare}
-                title="Reports made by this user"
-                reports={extra.reports_made}
-                emptyMessage="This user has not reported anything."
-              />
-            </div>
+                <ReportList
+                  icon={MessageSquare}
+                  title="Reports made by this user"
+                  reports={reportsMade}
+                  emptyMessage="This user has not reported anything."
+                  onOpenReport={onOpenReport}
+                />
+              </div>
+            )}
           </>
         ) : null}
       </div>
