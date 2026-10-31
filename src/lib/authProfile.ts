@@ -1,9 +1,19 @@
 import { getApiUrl } from '@/lib/api';
 
+type AuthUser = { id: string; email?: string };
+
+let authUserCache: { token: string; user: AuthUser } | null = null;
+
+export function clearAuthUserCache() {
+  authUserCache = null;
+}
+
 /** Resolve the real Supabase user id from the API (login/register responses do not include `user`). */
 export async function fetchAuthUserFromToken(
   accessToken: string,
-): Promise<{ id: string; email?: string } | null> {
+): Promise<AuthUser | null> {
+  const token = accessToken.trim();
+  if (authUserCache && authUserCache.token === token) return authUserCache.user;
   try {
     const res = await fetch(getApiUrl('/api/auth/me'), {
       headers: {
@@ -14,10 +24,12 @@ export async function fetchAuthUserFromToken(
     if (!res.ok) return null;
     const me = (await res.json().catch(() => null)) as { id?: unknown; email?: unknown } | null;
     if (!me || typeof me.id !== 'string' || !me.id.trim()) return null;
-    return {
+    const user: AuthUser = {
       id: me.id.trim(),
       email: typeof me.email === 'string' ? me.email : undefined,
     };
+    authUserCache = { token, user };
+    return user;
   } catch {
     return null;
   }

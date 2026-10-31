@@ -2,16 +2,18 @@
  * TanStack Query hooks for frequently accessed data.
  *
  * These replace the manual fetch + useState patterns in pages.
- * Data is automatically cached in localStorage via the persisted QueryClient.
+ * Data is automatically cached in sessionStorage via the persisted QueryClient.
  * On successful mutations (join, leave, create, delete) call the relevant
  * queryClient.invalidateQueries() to trigger a background refresh.
  */
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient } from './queryClient';
+import { keepPreviousData, useQuery, useMutation } from '@tanstack/react-query';
+import { queryClient, SESSION_STALE_TIME } from './queryClient';
 import { getApiUrl } from './api';
 import { getAuthToken, notifyAuthExpired } from './auth';
-import { mapApiEventToItem, parseEventsApiList } from './mapApiEvent';
-import { fetchNotifications, type ApiNotification } from './notificationsApi';
+import { mapApiEventToItem, parseEventsApiList, parseJoinedEventsApiList } from './mapApiEvent';
+import { fetchNotifications, notifyNotificationsChanged, type ApiNotification } from './notificationsApi';
+import { invalidatePrefix } from './queryCache';
+import { notifyEventsChanged } from './realtimeEvents';
 import { fetchUserProfile } from './userProfileApi';
 import type { EventItem } from './storage';
 
@@ -53,7 +55,7 @@ export function useProfile(userId: string | undefined) {
     queryKey: QK.profile(userId ?? ''),
     queryFn: () => apiFetch<Record<string, unknown>>(getApiUrl('/api/profile/me')),
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 5 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -64,10 +66,47 @@ export function useUserProfile(viewerId: string | undefined, userId: string | un
     queryKey: QK.userProfile(viewerId ?? '', userId ?? ''),
     queryFn: () => fetchUserProfile(userId as string),
     enabled: Boolean(viewerId && userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 15 * 60 * 1000,
     // A refused profile (private/missing) is not worth retrying.
     retry: false,
   });
+}
+
+const EVENTS_PAGE_SIZE = 100;
+const EVENTS_MAX_PAGES = 40;
+
+function eventsListHasMore(body: unknown, pageSize: number, rowCount: number): boolean {
+  if (body && typeof body === 'object') {
+    const b = body as Record<string, unknown>;
+    if (b.has_more === true) return true;
+    if (b.has_more === false) return false;
+  }
+  return rowCount >= pageSize;
+}
+
+/** Every page of GET /api/events for the home All events list. */
+export async function fetchAllPublicEvents(filters: Record<string, string> = {}): Promise<EventItem[]> {
+  const collected: EventItem[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 1; page <= EVENTS_MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      ...filters,
+      limit: String(EVENTS_PAGE_SIZE),
+      page: String(page),
+    });
+    const data = await apiFetch<unknown>(`/api/events?${params.toString()}`);
+    const rows = parseEventsApiList(data);
+    for (const row of rows) {
+      const item = mapApiEventToItem(row);
+      if (!item.id || seen.has(item.id)) continue;
+      seen.add(item.id);
+      collected.push(item);
+    }
+    if (!eventsListHasMore(data, EVENTS_PAGE_SIZE, rows.length)) break;
+  }
+
+  return collected;
 }
 
 // ── Events list ───────────────────────────────────────────────────────────────
@@ -75,26 +114,17 @@ export function useEvents(params: {
   category?: string;
   search?: string;
   event_date?: string;
-  limit?: number;
-  page?: number;
 }) {
-  const p: Record<string, string> = {
-    limit: String(params.limit ?? 50),
-    page: String(params.page ?? 1),
-  };
+  const p: Record<string, string> = {};
   if (params.category && params.category !== 'All') p.category = params.category;
   if (params.search) p.search = params.search;
   if (params.event_date) p.event_date = params.event_date;
 
-  const qs = new URLSearchParams(p).toString();
-
   return useQuery({
     queryKey: QK.events(p),
-    queryFn: async () => {
-      const data = await apiFetch<unknown>(`/api/events?${qs}`);
-      return parseEventsApiList(data).map(mapApiEventToItem) as EventItem[];
-    },
-    staleTime: 2 * 60 * 1000,
+    queryFn: () => fetchAllPublicEvents(p),
+    staleTime: SESSION_STALE_TIME,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -104,7 +134,7 @@ export function useEventDetail(id: string | undefined) {
     queryKey: QK.eventDetail(id ?? ''),
     queryFn: () => apiFetch<Record<string, unknown>>(`/api/events/${id}`),
     enabled: Boolean(id),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -113,7 +143,7 @@ export function useMaxPrice() {
   return useQuery({
     queryKey: QK.maxPrice(),
     queryFn: () => apiFetch<{ max_price: number }>('/api/events/max-price'),
-    staleTime: 5 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -123,7 +153,7 @@ export function useFavorites(userId: string | undefined) {
     queryKey: QK.favorites(userId ?? ''),
     queryFn: () => apiFetch<Array<{ id?: string; event_id?: string }>>('/api/favorites/all'),
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
     select: (data) => new Set(data.map((f) => f.id || f.event_id || '')),
   });
 }
@@ -139,7 +169,7 @@ export function useRecommendations(userId: string | undefined, hasInterests: boo
       ) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken() && hasInterests),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -168,7 +198,7 @@ export function useMyEvents(userId: string | undefined) {
       ) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -177,14 +207,11 @@ export function useJoinedEvents(userId: string | undefined) {
   return useQuery({
     queryKey: QK.joinedEvents(userId ?? ''),
     queryFn: async () => {
-      const rows = await apiFetch<Array<{ events?: unknown }>>('/api/participants/my/events');
-      return rows
-        .map((row) => row?.events as Record<string, unknown>)
-        .filter(Boolean)
-        .map(mapApiEventToItem) as EventItem[];
+      const rows = await apiFetch<unknown>('/api/participants/my/events');
+      return parseJoinedEventsApiList(rows).map(mapApiEventToItem) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -194,13 +221,76 @@ export function useParticipantCount(eventId: string | undefined) {
     queryKey: QK.participants(eventId ?? ''),
     queryFn: () => apiFetch<{ count: number }>(`/api/participants/${eventId}/participants/count`),
     enabled: Boolean(eventId),
-    staleTime: 30 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
+/** Warm home/profile queries as soon as a session exists so the first screen is cached. */
+export function prefetchSignedInQueries(userId?: string) {
+  const tasks: Array<Promise<unknown>> = [
+    queryClient.prefetchQuery({
+      queryKey: QK.maxPrice(),
+      queryFn: () => apiFetch<{ max_price: number }>('/api/events/max-price'),
+    }),
+    queryClient.prefetchQuery({
+      queryKey: QK.events({}),
+      queryFn: () => fetchAllPublicEvents({}),
+    }),
+  ];
+  if (userId && getAuthToken()) {
+    tasks.push(
+      queryClient.prefetchQuery({
+        queryKey: QK.favorites(userId),
+        queryFn: () => apiFetch<Array<{ id?: string; event_id?: string }>>('/api/favorites/all'),
+      }),
+      queryClient.prefetchQuery({
+        queryKey: QK.myEvents(userId),
+        queryFn: async () => {
+          const data = await apiFetch<{ data?: unknown[] }>('/api/events/my-events');
+          return (Array.isArray(data.data) ? data.data : []).map((row) =>
+            mapApiEventToItem(row as Record<string, unknown>),
+          );
+        },
+      }),
+      queryClient.prefetchQuery({
+        queryKey: QK.joinedEvents(userId),
+        queryFn: async () => {
+          const rows = await apiFetch<unknown>('/api/participants/my/events');
+          return parseJoinedEventsApiList(rows).map(mapApiEventToItem);
+        },
+      }),
+    );
+  }
+  return Promise.allSettled(tasks);
+}
+
 // ── Invalidation helpers ──────────────────────────────────────────────────────
+/** Put a just-created event at the front of cached home lists so All events updates immediately. */
+export function prependCreatedEvent(event: EventItem) {
+  const insert = (old: EventItem[] | undefined) => {
+    if (!old) return [event];
+    if (old.some((row) => row.id === event.id)) {
+      return old.map((row) => (row.id === event.id ? { ...row, ...event } : row));
+    }
+    return [event, ...old];
+  };
+  queryClient.setQueriesData<EventItem[]>({ queryKey: ['events'] }, insert);
+  queryClient.setQueriesData<EventItem[]>({ queryKey: ['myEvents'] }, insert);
+  notifyEventsChanged();
+}
+
 export function invalidateEvents() {
-  queryClient.invalidateQueries({ queryKey: ['events'] });
+  queryClient.invalidateQueries({ queryKey: ['events'], refetchType: 'all' });
+  queryClient.invalidateQueries({ queryKey: ['event'] });
+  queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+  queryClient.invalidateQueries({ queryKey: ['myEvents'], refetchType: 'all' });
+  queryClient.invalidateQueries({ queryKey: ['joinedEvents'] });
+  queryClient.invalidateQueries({ queryKey: ['participants'] });
+  queryClient.invalidateQueries({ queryKey: ['maxPrice'] });
+  invalidatePrefix('/api/events');
+  invalidatePrefix('/api/participants');
+  invalidatePrefix('/api/recommendations');
+  notifyEventsChanged();
 }
 
 export function invalidateEventDetail(id: string) {
@@ -214,6 +304,7 @@ export function invalidateFavorites(userId: string) {
 
 export function invalidateNotifications() {
   queryClient.invalidateQueries({ queryKey: QK.notifications() });
+  notifyNotificationsChanged();
 }
 
 export function invalidateProfile(userId: string) {

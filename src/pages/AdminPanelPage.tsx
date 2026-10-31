@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Shield, Users, Calendar, ClipboardList, Flag, LogOut, Eye } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Shield, Users, Calendar, ClipboardList, LogOut, Eye } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AppToast from '@/components/AppToast';
 import AdminUsersTab from '@/components/admin/AdminUsersTab';
 import AdminUserDetail from '@/components/admin/AdminUserDetail';
@@ -16,9 +17,17 @@ import { logout } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken } from '@/lib/auth';
-import { fetchAdminCounts } from '@/lib/adminApi';
+import { fetchOpenReportCount } from '@/lib/adminApi';
+import { useRealtimeTable } from '@/hooks/useRealtimeTable';
 
 type AdminTab = 'users' | 'events' | 'audit' | 'reports';
+
+const ADMIN_TABS: AdminTab[] = ['users', 'events', 'audit', 'reports'];
+
+function tabFromSearch(params: URLSearchParams): AdminTab {
+  const tab = params.get('tab');
+  return ADMIN_TABS.includes(tab as AdminTab) ? (tab as AdminTab) : 'users';
+}
 
 type StackEntry =
   | { type: 'user-detail'; userId: string }
@@ -27,13 +36,16 @@ type StackEntry =
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => tabFromSearch(searchParams));
   const [stack, setStack] = useState<StackEntry[]>([]);
   const [adminName, setAdminName] = useState<string>('');
   const [adminAvatar, setAdminAvatar] = useState<string | null>(null);
   const [avatarFailed, setAvatarFailed] = useState<boolean>(false);
   const [openReportCount, setOpenReportCount] = useState<number | null>(null);
+  // Bumped on every live update of the reports, so the Reports tab fetches its open list again.
+  const [reportsLiveVersion, setReportsLiveVersion] = useState(0);
 
   const [showAccount, setShowAccount] = useState(false);
   const [adminId, setAdminId] = useState<string>('');
@@ -53,9 +65,9 @@ export default function AdminPanelPage() {
     type: 'success' | 'error' | 'info';
   }>({ show: false, message: '', type: 'success' });
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'error') => {
     setToast({ show: true, message, type });
-  };
+  }, []);
 
   // Fetch the admin's name and avatar from the profile endpoint
   useEffect(() => {
@@ -87,17 +99,28 @@ export default function AdminPanelPage() {
     };
   }, []);
 
-  // Fetch open report count for badge
-  useEffect(() => {
-    fetchAdminCounts()
-      .then((data) => {
-        const counts = data as typeof data & { open_reports?: number };
-        if (typeof counts.open_reports === 'number') {
-          setOpenReportCount(counts.open_reports);
-        }
-      })
+  // The number of open reports next to the Reports tab. Fetched from the backend (never cached)
+  // when the panel opens and again on every live update of the reports (4.1).
+  const refreshOpenReportCount = useCallback(() => {
+    fetchOpenReportCount()
+      .then(setOpenReportCount)
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refreshOpenReportCount();
+  }, [refreshOpenReportCount]);
+
+  const onReportsChanged = useCallback(() => {
+    refreshOpenReportCount();
+    setReportsLiveVersion((v) => v + 1);
+  }, [refreshOpenReportCount]);
+
+  useRealtimeTable({
+    table: 'reports',
+    enabled: Boolean(getAuthToken()),
+    onData: onReportsChanged,
+  });
 
   const handleSignOut = () => {
     logout();
@@ -140,7 +163,7 @@ export default function AdminPanelPage() {
     { id: 'users', label: 'Users', icon: <Users className="h-4 w-4" /> },
     { id: 'events', label: 'Events', icon: <Calendar className="h-4 w-4" /> },
     { id: 'audit', label: 'Audit Log', icon: <ClipboardList className="h-4 w-4" /> },
-    { id: 'reports', label: 'Reports', icon: <Flag className="h-4 w-4" /> },
+    { id: 'reports', label: 'Reports', icon: <ReportFlag className="h-4 w-4" /> },
   ];
 
   return (
@@ -375,10 +398,12 @@ export default function AdminPanelPage() {
                 >
                   {tab.icon}
                   <span className="inline">{tab.label}</span>
-                  {/* Reports red badge */}
+                  {/* Number of open reports, in the mockup's red */}
                   {tab.id === 'reports' && openReportCount !== null && openReportCount > 0 && (
                     <span
-                      className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white leading-none"
+                      data-testid="open-reports-badge"
+                      aria-label={`${openReportCount} open reports`}
+                      className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white leading-none"
                       style={{ background: 'var(--adm-danger)' }}
                     >
                       {openReportCount > 99 ? '99+' : openReportCount}
@@ -392,7 +417,13 @@ export default function AdminPanelPage() {
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+      <main
+        className={`mx-auto px-4 py-6 sm:px-6 ${
+          activeTab === 'audit' && !showAccount && !userView.active && stack.length === 0
+            ? 'max-w-7xl'
+            : 'max-w-5xl'
+        }`}
+      >
         {/* Priority 1: My Account view */}
         {showAccount ? (
           <AdminMyAccount adminId={adminId} onClose={() => setShowAccount(false)} />
@@ -429,6 +460,8 @@ export default function AdminPanelPage() {
             userId={topOfStack.userId}
             onBack={popStack}
             onOpenEvent={pushEventDetail}
+            onOpenUser={pushUserDetail}
+            onOpenReport={pushReportDetail}
             onErrorToast={(msg) => showToast(msg, 'error')}
             onSuccessToast={(msg) => showToast(msg, 'success')}
           />
@@ -444,6 +477,9 @@ export default function AdminPanelPage() {
           <AdminReportDetail
             reportId={topOfStack.reportId}
             onBack={popStack}
+            onOpenEvent={pushEventDetail}
+            onOpenUser={pushUserDetail}
+            onReportClosed={onReportsChanged}
             onErrorToast={(msg) => showToast(msg, 'error')}
             onSuccessToast={(msg) => showToast(msg, 'success')}
           />
@@ -454,6 +490,7 @@ export default function AdminPanelPage() {
               <AdminUsersTab
                 onOpenUser={pushUserDetail}
                 onErrorToast={(msg) => showToast(msg, 'error')}
+                onSuccessToast={(msg) => showToast(msg, 'success')}
               />
             )}
 
@@ -476,6 +513,7 @@ export default function AdminPanelPage() {
             {activeTab === 'reports' && (
               <AdminReportsTab
                 onOpenReport={pushReportDetail}
+                liveVersion={reportsLiveVersion}
                 onErrorToast={(msg) => showToast(msg, 'error')}
               />
             )}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import UserProfilePage from '@/pages/UserProfilePage';
@@ -16,11 +16,14 @@ const event = (id: string, title: string, start: string) => ({
 });
 
 function friend(id: string, username: string, fullName: string) {
-  return {
-    friend_since: '2026-01-01T00:00:00Z',
-    user: { id, username, full_name: fullName, display_name: username, avatar_kind: 'icon', icon_id: 'sun', avatar_url: null },
-  };
+  return { id, username, full_name: fullName, display_name: username, avatar_kind: 'icon', icon_id: 'sun', avatar_url: null };
 }
+
+// The profile carries the first 10 friends as a plain list of UserSummary.
+const FIRST_FRIENDS = [
+  friend('f-1', 'amira', 'Amira Ben Ali'),
+  ...Array.from({ length: 9 }, (_, i) => friend(`f-x${i}`, `friend_${i}`, `Friend ${i}`)),
+];
 
 const baseProfile = {
   id: OTHER_ID,
@@ -42,12 +45,7 @@ const baseProfile = {
       past: [event('j-past', 'Joined Past', '2020-02-01T10:00:00Z')],
     },
   },
-  friends: {
-    page: 1,
-    limit: 20,
-    has_more: true,
-    data: [friend('f-1', 'amira', 'Amira Ben Ali')],
-  },
+  friends: FIRST_FRIENDS,
   friendship: { status: 'none', request_id: null },
 };
 
@@ -56,10 +54,10 @@ type Friendship = { status: string; request_id: number | null };
 /** Fake backend: GET profile returns the current friendship; friend calls mutate it. */
 function mockBackend(
   initial: Friendship,
-  overrides: { failWith?: { status: number; detail: unknown }; profile?: Record<string, unknown> } = {},
+  overrides: { failWith?: { status: number; detail: unknown }; profile?: Record<string, unknown>; holdPost?: Promise<void> } = {},
 ) {
   let friendship = { ...initial };
-  let blocked = Boolean(overrides.profile?.is_blocked);
+  let blocked = Boolean(overrides.profile?.blocked_by_me);
   const calls: Array<{ method: string; url: string; body?: string }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -68,17 +66,40 @@ function mockBackend(
     const json = (status: number, body: unknown) =>
       ({ ok: status < 400, status, json: async () => body }) as Response;
 
+    if (method === 'GET' && url.includes('/api/friends/requests/sent')) {
+      const id = friendship.request_id;
+      return json(200, {
+        page: 1,
+        limit: 50,
+        has_more: false,
+        data: id
+          ? [{ request_id: id, created_at: '2026-01-01T00:00:00Z', user: { id: OTHER_ID, username: 'jane_doe', full_name: 'Jane Doe', display_name: 'Jane Doe', avatar_kind: 'icon', icon_id: 'sun', avatar_url: null } }]
+          : [],
+      });
+    }
     if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}/friends`)) {
-      return json(200, { page: 2, limit: 20, has_more: false, data: [friend('f-2', 'sami', 'Sami Trabelsi')] });
+      return json(200, { page: 2, limit: 10, has_more: false, data: [friend('f-2', 'sami', 'Sami Trabelsi')] });
     }
     if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
       const profile = { ...baseProfile, ...overrides.profile, friendship };
       if (blocked) {
         // The backend leaves out events and the friends list for a user the viewer blocked.
         const { events: _events, friends: _friends, ...top } = profile;
-        return json(200, { ...top, is_blocked: true });
+        return json(200, { ...top, blocked_by_me: true });
       }
-      return json(200, { ...profile, is_blocked: false });
+      return json(200, { ...profile, blocked_by_me: false });
+    }
+    if (method === 'POST' && url.endsWith('/api/reports')) {
+      return json(201, {
+        id: 3,
+        status: 'open',
+        target_type: 'user',
+        target_id: OTHER_ID,
+        reason: 'spam',
+        origin: 'profile',
+        created_at: '2026-10-25T00:00:00Z',
+        message: 'Thanks. We received your report.',
+      });
     }
     if (method === 'POST' && url.endsWith('/api/blocks')) {
       blocked = true;
@@ -91,6 +112,7 @@ function mockBackend(
     }
     if (overrides.failWith) return json(overrides.failWith.status, { detail: overrides.failWith.detail });
     if (method === 'POST' && url.endsWith('/api/friends/requests')) {
+      if (overrides.holdPost) await overrides.holdPost;
       friendship = { status: 'request_sent', request_id: 7 };
       return json(201, { request_id: 7 });
     }
@@ -153,6 +175,8 @@ describe('UserProfilePage', () => {
     expect(screen.getByTestId('profile-banner')).toBeInTheDocument();
     expect(screen.getByText('Organized Upcoming')).toBeInTheDocument();
     expect(screen.getByText('Joined Upcoming')).toBeInTheDocument();
+    expect(screen.queryByTestId('profile-private-tag')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('profile-private-stats')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('user-tab-past'));
     expect(screen.getByText('Organized Past')).toBeInTheDocument();
@@ -181,12 +205,59 @@ describe('UserProfilePage', () => {
     expect(screen.queryByRole('button', { name: /send friend request/i })).not.toBeInTheDocument();
   });
 
+  it('covers the screen with loading while a friend request is sending', async () => {
+    let release!: () => void;
+    const holdPost = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockBackend({ status: 'none', request_id: null }, { holdPost });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+    expect(await screen.findByText('Loading…')).toBeInTheDocument();
+    await act(async () => {
+      release();
+    });
+    expect(await screen.findByRole('button', { name: /cancel friend request/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Loading…')).not.toBeInTheDocument());
+  });
+
   it('cancels a request the viewer sent, then offers "Send Friend Request" again', async () => {
     const calls = mockBackend({ status: 'request_sent', request_id: 7 });
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /cancel friend request/i }));
 
+    expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/api/friends/requests/7'))).toBe(true);
+  });
+
+  it('still cancels when the profile omitted request_id', async () => {
+    let friendship = { status: 'request_sent', request_id: null as number | null };
+    const calls: Array<{ method: string; url: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+      const json = (status: number, body: unknown) =>
+        ({ ok: status < 400, status, json: async () => body }) as Response;
+      if (method === 'GET' && url.includes('/api/friends/requests/sent')) {
+        return json(200, {
+          page: 1, limit: 50, has_more: false,
+          data: [{ request_id: 7, created_at: '2026-01-01T00:00:00Z', user: { id: OTHER_ID, username: 'jane_doe', full_name: 'Jane Doe', display_name: 'Jane', avatar_kind: 'icon', icon_id: 'sun', avatar_url: null } }],
+        });
+      }
+      if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
+        return json(200, { ...baseProfile, friendship });
+      }
+      if (method === 'DELETE' && url.includes('/api/friends/requests/7')) {
+        friendship = { status: 'none', request_id: null };
+        return json(200, { message: 'ok' });
+      }
+      return json(404, { detail: 'not found' });
+    }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /cancel friend request/i }));
     expect(await screen.findByRole('button', { name: /send friend request/i })).toBeInTheDocument();
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/api/friends/requests/7'))).toBe(true);
   });
@@ -242,6 +313,56 @@ describe('UserProfilePage', () => {
     expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
   });
 
+  it('lets an administrator see a suspended profile that the public API hides', async () => {
+    setCurrentUserFromOAuth({
+      id: 'viewer-1',
+      email: 'v@test.com',
+      name: 'Viewer',
+      username: 'viewer',
+      role: 'administrator',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(`/api/profile/${OTHER_ID}`)) {
+          return {
+            ok: false,
+            status: 404,
+            json: async () => ({ detail: { code: 'profile_unavailable' } }),
+          } as Response;
+        }
+        if (url.includes(`/api/admin/users/${OTHER_ID}`)) {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              id: OTHER_ID,
+              username: 'jane_doe',
+              full_name: 'Jane Doe',
+              is_admin: false,
+              role: 'user',
+              created_at: '2026-01-01T00:00:00Z',
+              status: 'suspended',
+              suspension: { reason: 'Spam', suspended_at: '2026-01-01T00:00:00Z', suspended_by: 'ada' },
+              organized_events: { upcoming: [], past: [], cancelled: [] },
+              joined_events: { upcoming: [], past: [], cancelled: [] },
+              warnings: [],
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
+    expect(screen.getByTestId('account-status-badge')).toHaveTextContent('Suspended');
+    expect(screen.getByText(/Reason: Spam/)).toBeInTheDocument();
+    expect(screen.queryByText('This profile is unavailable')).not.toBeInTheDocument();
+  });
+
   it('shows only the parts the backend returns, with no empty sections', async () => {
     // Friends-only profile seen by someone who is not a friend: only the top of the profile.
     mockBackend(
@@ -258,6 +379,37 @@ describe('UserProfilePage', () => {
     expect(screen.queryByText(/no events/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/no friends/i)).not.toBeInTheDocument();
     // Friendship actions still work on a friends-only profile.
+    expect(screen.getByRole('button', { name: /send friend request/i })).toBeInTheDocument();
+  });
+
+  it('shows a Private tag and counts instead of lists on a private profile', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      {
+        profile: {
+          visibility: 'private',
+          bio: 'hidden bio',
+          interests: ['Music'],
+          events: undefined,
+          friends: undefined,
+          joined_events_count: 4,
+          friends_count: 7,
+          organized_events_count: 2,
+        },
+      },
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('profile-private-tag')).toHaveTextContent('Private');
+    expect(screen.getByTestId('profile-stat-joined')).toHaveTextContent('4');
+    expect(screen.getByTestId('profile-stat-friends')).toHaveTextContent('7');
+    expect(screen.getByTestId('profile-stat-organized')).toHaveTextContent('2');
+    expect(screen.getByText('Joined events')).toBeInTheDocument();
+    expect(screen.getByText('Friends')).toBeInTheDocument();
+    expect(screen.getByText('Organized events')).toBeInTheDocument();
+    expect(screen.queryByText('hidden bio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByText('Organized Upcoming')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send friend request/i })).toBeInTheDocument();
   });
 
@@ -292,7 +444,7 @@ describe('UserProfilePage', () => {
     expect(await screen.findByText('Sami Trabelsi')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
 
-    expect(calls.some((c) => c.url.includes(`/api/profile/${OTHER_ID}/friends?page=2`))).toBe(true);
+    expect(calls.some((c) => c.url.includes(`/api/profile/${OTHER_ID}/friends?page=2&limit=10`))).toBe(true);
     expect(calls.some((c) => /\/api\/friends\?/.test(c.url))).toBe(false);
   });
 
@@ -308,7 +460,7 @@ describe('UserProfilePage', () => {
     expect(await screen.findByRole('button', { name: /unblock/i })).toBeInTheDocument();
 
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/blocks'));
-    expect(JSON.parse(post!.body!)).toEqual({ blocked_id: OTHER_ID });
+    expect(JSON.parse(post!.body!)).toEqual({ user_id: OTHER_ID });
     expect(screen.getByText('I love live music.')).toBeInTheDocument();
     expect(screen.queryByText('Organized Upcoming')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
@@ -316,7 +468,7 @@ describe('UserProfilePage', () => {
   });
 
   it('says the friendship is not restored before unblocking', async () => {
-    const calls = mockBackend({ status: 'none', request_id: null }, { profile: { is_blocked: true } });
+    const calls = mockBackend({ status: 'none', request_id: null }, { profile: { blocked_by_me: true } });
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /unblock/i }));
@@ -330,6 +482,52 @@ describe('UserProfilePage', () => {
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith(`/api/blocks/${OTHER_ID}`))).toBe(true);
   });
 
+  it('hides "Load more" when the first page of friends is not full', async () => {
+    mockBackend({ status: 'none', request_id: null }, { profile: { friends: [friend('f-1', 'amira', 'Amira Ben Ali')] } });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('user-main-tab-friends'));
+    expect(screen.getByText('Amira Ben Ali')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the rate limiter message when it answers with an error field', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
+        return { ok: true, status: 200, json: async () => ({ ...baseProfile, blocked_by_me: false }) } as Response;
+      }
+      return { ok: false, status: 429, json: async () => ({ error: 'Rate limit exceeded: 200 per 1 minute' }) } as Response;
+    }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+    expect(await screen.findByText('Rate limit exceeded: 200 per 1 minute')).toBeInTheDocument();
+  });
+
+  it('shows a friendly error when sending a request to a user you blocked', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      { failWith: { status: 403, detail: { code: 'user_blocked' } } },
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+
+    expect(await screen.findByText('You cannot send a friend request to this user.')).toBeInTheDocument();
+  });
+
+  it('treats a "blocked" friendship status as a profile the viewer blocked', async () => {
+    mockBackend(
+      { status: 'blocked', request_id: null },
+      { profile: { events: undefined, friends: undefined } },
+    );
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /^unblock$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^block$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  });
+
   it('shows the message the backend returns when the request limit is reached', async () => {
     mockBackend(
       { status: 'none', request_id: null },
@@ -340,6 +538,27 @@ describe('UserProfilePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
 
     expect(await screen.findByText('You have reached the limit of friend requests for today.')).toBeInTheDocument();
+  });
+
+  it('reports the user from their profile', async () => {
+    const calls = mockBackend({ status: 'none', request_id: null });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^report$/i }));
+    expect(await screen.findByText('Report Jane Doe')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Thanks. We received your report.')).toBeInTheDocument();
+    });
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/reports'));
+    expect(JSON.parse(post!.body!)).toEqual({
+      target_type: 'user',
+      target_id: OTHER_ID,
+      reason: 'spam',
+      origin: 'profile',
+      description: null,
+    });
   });
 
   it('opens the own profile tab instead when the id is the viewer\'s own', async () => {

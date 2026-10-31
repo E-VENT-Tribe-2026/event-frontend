@@ -5,23 +5,22 @@
  * viewer may not see is left out of the response, so the screen shows what is there
  * and never applies the visibility rules itself.
  *
- * Expected backend contract:
- * - GET    /api/profile/{user_id}                  profile with the allowed parts only;
- *          403/404 when the profile is unavailable (owner blocked the viewer, account
- *          suspended, administrator, or no such user)
- * - GET    /api/profile/{user_id}/friends?page&limit  that user's friends, in pages
- * - POST   /api/blocks  { blocked_id }             block a user
- * - DELETE /api/blocks/{user_id}                   unblock a user
- * - PUT    /api/profile/me  { visibility }         'public' | 'friends_only'
+ * Backend contract:
+ * - GET /api/profile/{user_id}                     profile with the allowed parts only;
+ *       403/404 when the profile is unavailable (owner blocked the viewer, account
+ *       suspended, administrator, or no such user)
+ * - GET /api/profile/{user_id}/friends?page&limit  that user's friends (UserSummary), in pages
+ * - PUT /api/profile/me  { visibility }            'public' | 'private'
+ *       (older APIs also accept 'friends_only' for a private profile)
  *
- * Friendship actions live in the shared friendsApi.
+ * Friendship and block actions live in the shared friendsApi.
  */
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
-import { cachedFetch, invalidatePrefix, TTL } from '@/lib/queryCache';
-import { FRIENDS_CHANGED_EVENT, parseFriendsError, type FriendItem, type Page } from '@/lib/friendsApi';
+import { cachedFetch, TTL } from '@/lib/queryCache';
+import { parseFriendsError, type Page, type UserSummary } from '@/lib/friendsApi';
 
-export type FriendshipStatus = 'none' | 'friends' | 'request_sent' | 'request_received' | 'self';
+export type FriendshipStatus = 'none' | 'friends' | 'request_sent' | 'request_received' | 'self' | 'blocked';
 
 export type Friendship = {
   status: FriendshipStatus;
@@ -35,7 +34,7 @@ export type ProfileEventGroup = {
   past?: Array<Record<string, unknown>>;
 };
 
-export type ProfileVisibility = 'public' | 'friends_only';
+export type ProfileVisibility = 'public' | 'private';
 
 export type UserProfile = {
   id: string;
@@ -47,25 +46,56 @@ export type UserProfile = {
   banner_url?: string | null;
   bio?: string | null;
   interests?: string[] | null;
+  visibility?: ProfileVisibility;
+  is_private?: boolean;
   /** Left out when the viewer may not see any events. */
-  events?: { organized?: ProfileEventGroup; joined?: ProfileEventGroup };
+  events?: { organized?: ProfileEventGroup; joined?: ProfileEventGroup } | null;
   /** First page of this user's friends; left out when the viewer may not see them. */
-  friends?: Page<FriendItem>;
+  friends?: UserSummary[];
+  friends_count?: number;
+  organized_events_count?: number;
+  joined_events_count?: number;
   /** True when the viewer has blocked this user. */
-  is_blocked?: boolean;
-  friendship?: Friendship;
+  blocked_by_me?: boolean;
+  friendship?: Friendship | null;
+  /** Present when an administrator is viewing a suspended account. */
+  is_suspended?: boolean;
+  suspension?: { reason?: string | null } | null;
 };
 
 export const PROFILE_UNAVAILABLE_MESSAGE = 'This profile is unavailable';
 
-/** Profile endpoints use a plain-string `detail`. */
+/** Profile endpoints use a plain-string `detail` (403 private) or `{ code }` (404 unavailable). */
 export class ProfileLoadError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code: string | null;
+  constructor(message: string, status: number, code: string | null = null) {
     super(message);
     this.name = 'ProfileLoadError';
     this.status = status;
+    this.code = code;
   }
+}
+
+function parseProfileLoadError(status: number, body: unknown): ProfileLoadError {
+  const rec = (body ?? {}) as { detail?: unknown; code?: unknown };
+  const detail = rec.detail;
+  let code = typeof rec.code === 'string' ? rec.code : null;
+  let message = 'Could not load this profile.';
+
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const d = detail as { code?: unknown; message?: unknown };
+    if (typeof d.code === 'string') code = d.code;
+    if (typeof d.message === 'string' && d.message.trim()) message = d.message;
+  } else if (typeof detail === 'string' && detail.trim()) {
+    message = detail;
+    if (detail === 'profile_unavailable') code = 'profile_unavailable';
+  }
+
+  if (code === 'profile_unavailable' || status === 404) {
+    return new ProfileLoadError(PROFILE_UNAVAILABLE_MESSAGE, status, code ?? 'profile_unavailable');
+  }
+  return new ProfileLoadError(message, status, code);
 }
 
 /** The backend answers 403 or 404 when the viewer cannot see the profile at all. */
@@ -73,28 +103,112 @@ export function isProfileUnavailable(error: unknown): boolean {
   return error instanceof ProfileLoadError && (error.status === 403 || error.status === 404);
 }
 
-/** Visibility as the profile editor shows it; anything that is not public is friends only. */
+/** Visibility as the profile editor shows it. `friends_only` is the older name for private. */
 export function toProfileVisibility(value: unknown): ProfileVisibility {
-  return value === 'public' ? 'public' : 'friends_only';
+  return value === 'friends_only' || value === 'private' ? 'private' : 'public';
 }
 
-function authHeaders(json = false): Record<string, string> {
-  const token = getAuthToken();
+/** Value sent on PUT /api/profile/me. */
+export function visibilityForApi(value: ProfileVisibility): 'public' | 'private' {
+  return value === 'private' ? 'private' : 'public';
+}
+
+function asNonNegInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.floor(value);
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return undefined;
+}
+
+function eventGroupTotal(group: unknown): number | undefined {
+  if (!group || typeof group !== 'object' || Array.isArray(group)) return undefined;
+  const g = group as Record<string, unknown>;
+  const explicit = asNonNegInt(g.count) ?? asNonNegInt(g.total);
+  if (explicit != null) return explicit;
+  const upcoming = Array.isArray(g.upcoming) ? g.upcoming.length : 0;
+  const past = Array.isArray(g.past) ? g.past.length : 0;
+  const cancelled = Array.isArray(g.cancelled) ? g.cancelled.length : 0;
+  if ('upcoming' in g || 'past' in g || 'cancelled' in g) return upcoming + past + cancelled;
+  return undefined;
+}
+
+export function isPrivateUserProfile(
+  profile: Pick<UserProfile, 'visibility' | 'is_private' | 'blocked_by_me'>,
+): boolean {
+  if (profile.blocked_by_me) return false;
+  if (profile.is_private === true) return true;
+  return profile.visibility === 'private';
+}
+
+export function normalizeUserProfile(raw: Record<string, unknown>): UserProfile {
+  const visibilityRaw = raw.visibility ?? raw.profile_visibility;
+  const visibility = visibilityRaw != null ? toProfileVisibility(visibilityRaw) : undefined;
+  const events = raw.events;
+  const friends = raw.friends;
+  const countsObj =
+    raw.counts && typeof raw.counts === 'object' && !Array.isArray(raw.counts)
+      ? (raw.counts as Record<string, unknown>)
+      : {};
+
+  const is_private =
+    raw.blocked_by_me === true
+      ? false
+      : visibility === 'private' || raw.is_private === true || raw.private === true;
+
+  const eventsRecord =
+    events && typeof events === 'object' && !Array.isArray(events)
+      ? (events as Record<string, unknown>)
+      : {};
+
+  const organized_events_count =
+    asNonNegInt(raw.organized_events_count) ??
+    asNonNegInt(raw.organized_count) ??
+    asNonNegInt(countsObj.organized_events) ??
+    asNonNegInt(countsObj.organized) ??
+    eventGroupTotal(eventsRecord.organized) ??
+    0;
+
+  const joined_events_count =
+    asNonNegInt(raw.joined_events_count) ??
+    asNonNegInt(raw.joined_count) ??
+    asNonNegInt(countsObj.joined_events) ??
+    asNonNegInt(countsObj.joined) ??
+    eventGroupTotal(eventsRecord.joined) ??
+    0;
+
+  const friends_count =
+    asNonNegInt(raw.friends_count) ??
+    asNonNegInt(raw.friend_count) ??
+    asNonNegInt(countsObj.friends) ??
+    (Array.isArray(friends) ? friends.length : undefined) ??
+    0;
+
   return {
-    Accept: 'application/json',
-    ...(json ? { 'Content-Type': 'application/json' } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(raw as UserProfile),
+    visibility: visibility ?? (is_private ? 'private' : undefined),
+    is_private,
+    organized_events_count,
+    joined_events_count,
+    friends_count,
   };
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
 export async function fetchUserProfile(userId: string): Promise<UserProfile> {
   const res = await fetch(getApiUrl(`/api/profile/${encodeURIComponent(userId)}`), { headers: authHeaders() });
   const body = await res.json().catch(() => null);
-  if (!res.ok) {
-    const detail = (body as { detail?: unknown } | null)?.detail;
-    throw new ProfileLoadError(typeof detail === 'string' ? detail : 'Could not load this profile.', res.status);
+  if (!res.ok) throw parseProfileLoadError(res.status, body);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw parseProfileLoadError(500, { detail: 'Could not load this profile.' });
   }
-  return body as UserProfile;
+  const root = body as Record<string, unknown>;
+  const inner = [root.data, root.user, root.profile, root].find(
+    (value) => value && typeof value === 'object' && !Array.isArray(value),
+  );
+  return normalizeUserProfile((inner || root) as Record<string, unknown>);
 }
 
 function cacheScope(): string {
@@ -103,9 +217,9 @@ function cacheScope(): string {
 
 /**
  * A page of another user's friends. Cached per signed-in user under the friends
- * prefix, so any friendship change (which clears '/api/friends') refreshes it.
+ * prefix, so any friendship or block change (which clears '/api/friends') refreshes it.
  */
-export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<Page<FriendItem>> {
+export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<Page<UserSummary>> {
   const path = `/api/profile/${encodeURIComponent(userId)}/friends?page=${page}&limit=${limit}`;
   return cachedFetch(
     `/api/friends:${cacheScope()}:${path}`,
@@ -113,7 +227,7 @@ export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<
       const res = await fetch(getApiUrl(path), { headers: authHeaders() });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw parseFriendsError(res.status, body);
-      const p = (body ?? {}) as Partial<Page<FriendItem>>;
+      const p = (body ?? {}) as Partial<Page<UserSummary>>;
       return {
         page: p.page ?? page,
         limit: p.limit ?? limit,
@@ -123,30 +237,4 @@ export function fetchUserFriends(userId: string, page = 1, limit = 20): Promise<
     },
     TTL.MEDIUM,
   );
-}
-
-/** Blocking ends friendships and requests, so the friends and profile caches are cleared. */
-function onBlockChanged(): void {
-  invalidatePrefix('/api/friends');
-  invalidatePrefix('/api/profile');
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FRIENDS_CHANGED_EVENT));
-}
-
-export async function blockUser(userId: string): Promise<void> {
-  const res = await fetch(getApiUrl('/api/blocks'), {
-    method: 'POST',
-    headers: authHeaders(true),
-    body: JSON.stringify({ blocked_id: userId }),
-  });
-  if (!res.ok) throw parseFriendsError(res.status, await res.json().catch(() => null));
-  onBlockChanged();
-}
-
-export async function unblockUser(userId: string): Promise<void> {
-  const res = await fetch(getApiUrl(`/api/blocks/${encodeURIComponent(userId)}`), {
-    method: 'DELETE',
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw parseFriendsError(res.status, await res.json().catch(() => null));
-  onBlockChanged();
 }

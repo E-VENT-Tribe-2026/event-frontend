@@ -1,25 +1,44 @@
-import { Search, Bell, Settings, LogOut, User, ShieldCheck } from 'lucide-react';
+import { Search, Bell, Settings, LogOut, User, ShieldCheck, Palette } from 'lucide-react';
+import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { Link, useNavigate } from 'react-router-dom';
-import { getCurrentUser, updateUser, logout } from '@/lib/storage';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { getCurrentUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
-import { getAuthToken, clearAuthToken } from '@/lib/auth';
-import { fetchNotifications } from '@/lib/notificationsApi';
+import { AUTH_TOKEN_EVENT, getAuthToken, clearAuthToken } from '@/lib/auth';
+import { NOTIFICATION_PREFS_EVENT, readNotificationPrefs } from '@/lib/accountSettings';
+import { countBellUnreads, fetchNotifications, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
+import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
+import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
+import { invalidatePrefix } from '@/lib/queryCache';
 import { useEffect, useState, useRef } from 'react';
-import { getApiUrl } from '@/lib/api';
-import { API_ENDPOINTS } from '@/lib/apiUrls';
 import AppLogo from '@/components/AppLogo';
+import TopNavProfile from '@/components/TopNavProfile';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TopBarProps {
-  search: string;
-  onSearchChange: (v: string) => void;
+  search?: string;
+  onSearchChange?: (v: string) => void;
+  searchPlaceholder?: string;
+  showSearch?: boolean;
 }
 
-export default function TopBar({ search, onSearchChange }: TopBarProps) {
+export default function TopBar({
+  search = '',
+  onSearchChange,
+  searchPlaceholder = 'Search events...',
+  showSearch = true,
+}: TopBarProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState(getCurrentUser);
-  const [hasUnread, setHasUnread] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -43,41 +62,56 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch profile on mount to ensure avatar is up to date after refresh
+  // Shared cached profile — TopBar remounts on every page, so do not hit the network each time.
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) return;
-    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    })
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then((data: Record<string, unknown>) => {
-        const profile = (data.data || data.user || data) as Record<string, unknown>;
-        if (!profile.id) return;
-        updateUser({
-          name: String(profile.full_name || profile.name || ''),
-          avatar: String(profile.avatar_url || ''),
-          profilePhoto: String(profile.avatar_url || ''),
-          bio: String(profile.bio || ''),
-          interests: Array.isArray(profile.interests) ? profile.interests as string[] : [],
-        });
+    if (!getAuthToken()) return;
+    void fetchMyProfile()
+      .then((body) => {
+        applyMyProfileToSession(body);
         setUser(getCurrentUser());
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) return;
-
-    const check = () => {
-      fetchNotifications(token)
-        .then((rows) => setHasUnread(rows.some((n) => !n.read)))
-        .catch(() => {});
+    let cancelled = false;
+    const check = (bust = false) => {
+      const token = getAuthToken();
+      if (!token) {
+        if (!cancelled) setUnreadCount(0);
+        return;
+      }
+      if (bust) {
+        invalidatePrefix('/api/notifications');
+        invalidatePrefix('/api/friends/requests');
+      }
+      Promise.all([
+        fetchNotifications(token).catch(() => [] as Awaited<ReturnType<typeof fetchNotifications>>),
+        fetchIncomingRequestCount().catch(() => 0),
+      ]).then(([rows, pending]) => {
+        if (!cancelled) {
+          const prefs = readNotificationPrefs(getCurrentUser()?.id);
+          setUnreadCount(countBellUnreads(rows, pending, prefs));
+        }
+      });
     };
 
-    check();
+    check(false);
+    const onLive = () => check(true);
+    const onFocus = () => check(false);
+    window.addEventListener(FRIENDS_CHANGED_EVENT, onLive);
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onLive);
+    window.addEventListener(NOTIFICATION_PREFS_EVENT, onLive);
+    window.addEventListener(AUTH_TOKEN_EVENT, onLive);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(FRIENDS_CHANGED_EVENT, onLive);
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onLive);
+      window.removeEventListener(NOTIFICATION_PREFS_EVENT, onLive);
+      window.removeEventListener(AUTH_TOKEN_EVENT, onLive);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [user?.id]);
 
   const handleLogout = () => {
@@ -87,90 +121,161 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-      <div className="mx-auto flex max-w-lg items-center gap-3">
+    <header className="sticky top-0 z-[1100] border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
+      <div className="mx-auto flex max-w-7xl items-center gap-3">
         {/* Logo */}
         <AppLogo size="sm" linkTo="/home" className="shrink-0 hover:opacity-90 transition-opacity" />
 
-        {/* Search */}
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search events..."
-            value={search}
-            onChange={e => onSearchChange(e.target.value)}
-            className="w-full rounded-full border border-border/50 bg-secondary pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all"
-          />
-        </div>
+        {showSearch ? (
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+              value={search}
+              onChange={e => onSearchChange?.(e.target.value)}
+              className="w-full rounded-full border border-border/50 bg-secondary pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/40 transition-all"
+            />
+          </div>
+        ) : (
+          <div className="flex-1" />
+        )}
 
         {/* Notifications */}
-        <Link to="/notifications" className="relative shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors" title="Notifications">
+        <Link
+          to="/notifications"
+          className="relative shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors"
+          title="Notifications"
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+        >
           <Bell className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
-          {hasUnread && (
-            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-accent shadow-accent animate-pulse" />
+          {unreadCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none text-accent-foreground shadow-accent animate-pulse">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
           )}
         </Link>
+
+        <TopNavProfile />
 
         {/* Settings Menu Dropdown */}
         <div className="relative" ref={menuRef}>
           <button
             type="button"
             onClick={() => setShowSettingsMenu(!showSettingsMenu)}
-            className="shrink-0 rounded-full p-2 hover:bg-secondary/80 transition-colors"
             aria-label="Settings"
+            aria-expanded={showSettingsMenu}
+            aria-haspopup="menu"
             title="Settings"
+            className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all active:scale-95 ${
+              showSettingsMenu
+                ? 'gradient-primary text-primary-foreground shadow-glow'
+                : 'glass-card text-muted-foreground hover:text-foreground hover:bg-secondary'
+            }`}
           >
-            <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground transition-colors" />
+            <motion.span
+              className="flex"
+              animate={{ rotate: showSettingsMenu ? 90 : 0 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+            >
+              <Settings className="h-4 w-4" strokeWidth={2.4} />
+            </motion.span>
           </button>
 
           <AnimatePresence>
             {showSettingsMenu && (
               <motion.div
-                initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                role="menu"
+                initial={{ opacity: 0, y: 8, scale: 0.96 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                transition={{ duration: 0.15 }}
-                className="absolute right-0 mt-2 w-48 rounded-2xl glass-card bg-background border border-border p-1.5 shadow-xl z-50 space-y-1"
+                exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                transition={{ duration: 0.16 }}
+                className="absolute right-0 z-50 mt-2 w-72 origin-top-right overflow-hidden rounded-2xl border border-border/70 bg-background/95 p-0 shadow-xl backdrop-blur-xl"
               >
-                <div className="px-3 py-2 border-b border-border/40 mb-1">
-                  <p className="text-xs font-bold text-foreground truncate">{user?.name || 'My Account'}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">Manage preferences</p>
+                <div className="flex items-center gap-3 border-b border-border/50 px-3.5 py-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl gradient-primary shadow-glow shrink-0">
+                    <Settings className="h-4 w-4 text-primary-foreground" strokeWidth={2.4} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-foreground leading-tight">Settings</p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {user?.name || 'Preferences'}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                <Link
-                  to="/profile"
-                  onClick={() => setShowSettingsMenu(false)}
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-foreground hover:bg-secondary transition-colors"
-                >
-                  <User className="h-4 w-4 text-primary" />
-                  Profile
-                </Link>
+                <div className="p-2 space-y-0.5">
+                  <Link
+                    role="menuitem"
+                    to="/profile"
+                    onClick={() => setShowSettingsMenu(false)}
+                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground hover:bg-secondary/80 transition-colors"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 text-primary shrink-0">
+                      <User className="h-4 w-4" />
+                    </span>
+                    Profile
+                  </Link>
 
-                <button
-                  type="button"
-                  onClick={() => { setShowSettingsMenu(false); navigate('/profile'); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-foreground hover:bg-secondary transition-colors text-left"
-                >
-                  <ShieldCheck className="h-4 w-4 text-accent" />
-                  Manage Account
-                </button>
+                  <Link
+                    role="menuitem"
+                    to="/account"
+                    onClick={() => setShowSettingsMenu(false)}
+                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground hover:bg-secondary/80 transition-colors"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent/15 text-accent shrink-0">
+                      <ShieldCheck className="h-4 w-4" />
+                    </span>
+                    Manage account
+                  </Link>
 
-                <div className="my-1 border-t border-border/40" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowSettingsMenu(false);
+                      setThemeOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground hover:bg-secondary/80 transition-colors text-left"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 text-primary shrink-0">
+                      <Palette className="h-4 w-4" />
+                    </span>
+                    Change theme
+                  </button>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors text-left"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Logout
-                </button>
+                <div className="border-t border-border/50 p-2">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors text-left"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-destructive/10 shrink-0">
+                      <LogOut className="h-4 w-4" />
+                    </span>
+                    Log out
+                  </button>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </div>
+
+      <Dialog open={themeOpen} onOpenChange={setThemeOpen}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Change theme</DialogTitle>
+            <DialogDescription>Choose how the app looks on this device.</DialogDescription>
+          </DialogHeader>
+          <ColorSchemePicker />
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }

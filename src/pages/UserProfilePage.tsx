@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import { ArrowLeft, Ban, Calendar, Clock, Lock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import ReportFlag from '@/components/ReportFlag';
+import ReportContentDialog from '@/components/ReportContentDialog';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import AppToast from '@/components/AppToast';
 import { UserAvatar } from '@/components/UserAvatar';
 import {
@@ -20,37 +23,42 @@ import { getCurrentUser } from '@/lib/storage';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
-import { useUserProfile, invalidateUserProfile, invalidateNotifications } from '@/lib/queries';
+import { useUserProfile, invalidateUserProfile, invalidateNotifications, QK } from '@/lib/queries';
 import { invalidatePrefix } from '@/lib/queryCache';
 import { queryClient } from '@/lib/queryClient';
 import {
   FriendsApiError,
   acceptFriendRequest,
+  blockUser,
   cancelFriendRequest,
   declineFriendRequest,
+  findSentRequestId,
+  readRequestId,
   removeFriend,
   sendFriendRequest,
+  unblockUser,
   userAvatarUrl,
   userProfilePath,
-  type FriendItem,
+  type UserSummary,
 } from '@/lib/friendsApi';
 import {
   PROFILE_UNAVAILABLE_MESSAGE,
   ProfileLoadError,
-  blockUser,
   fetchUserFriends,
+  isPrivateUserProfile,
   isProfileUnavailable,
-  unblockUser,
   type ProfileEventGroup,
   type UserProfile,
 } from '@/lib/userProfileApi';
+import { fetchAdminUserDetails, isAdministratorRole, type AdminUserDetailsFull } from '@/lib/adminApi';
 
 type MainTab = 'events' | 'friends';
 type EventTab = 'upcoming' | 'past';
 type FriendshipAction = 'send' | 'cancel' | 'accept' | 'decline' | 'remove';
 type BlockAction = 'block' | 'unblock';
 
-const FRIENDS_PAGE_SIZE = 20;
+// The profile carries the first 10 friends; later pages use the same size so offsets line up.
+const FRIENDS_PAGE_SIZE = 10;
 
 function errorMessage(error: unknown): string {
   if (error instanceof FriendsApiError) return error.message;
@@ -102,6 +110,56 @@ function availableEventTabs(groups: Array<ProfileEventGroup | undefined>): Event
   return (['upcoming', 'past'] as const).filter((tab) => groups.some((g) => Array.isArray(g?.[tab])));
 }
 
+function userProfileFromAdmin(data: AdminUserDetailsFull): UserProfile {
+  return {
+    id: data.id,
+    username: data.username,
+    full_name: data.full_name,
+    avatar_url: data.avatar_url ?? null,
+    avatar_kind: data.avatar_kind ?? 'icon',
+    icon_id: data.icon_id ?? null,
+    visibility: 'public',
+    events: {
+      organized: {
+        upcoming: data.organized_events?.upcoming,
+        past: data.organized_events?.past,
+      },
+      joined: {
+        upcoming: data.joined_events?.upcoming,
+        past: data.joined_events?.past,
+      },
+    },
+    is_suspended: data.is_suspended,
+    suspension: data.suspension,
+  };
+}
+
+function PrivateProfileStats({
+  joined,
+  friends,
+  organized,
+}: {
+  joined: number;
+  friends: number;
+  organized: number;
+}) {
+  const items = [
+    { label: 'Joined events', value: joined, testId: 'profile-stat-joined' },
+    { label: 'Friends', value: friends, testId: 'profile-stat-friends' },
+    { label: 'Organized events', value: organized, testId: 'profile-stat-organized' },
+  ];
+  return (
+    <div data-testid="profile-private-stats" className="grid grid-cols-3 gap-2 rounded-2xl glass-card p-3">
+      {items.map((item) => (
+        <div key={item.label} className="text-center" data-testid={item.testId}>
+          <p className="text-lg font-bold tabular-nums text-foreground">{item.value}</p>
+          <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function UserProfilePage() {
   const navigate = useNavigate();
   const { userId = '' } = useParams<{ userId: string }>();
@@ -112,9 +170,10 @@ export default function UserProfilePage() {
   const [eventTab, setEventTab] = useState<EventTab>('upcoming');
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [confirmBlock, setConfirmBlock] = useState<BlockAction | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Friends of the viewed user beyond the first page, which comes with the profile.
-  const [moreFriends, setMoreFriends] = useState<FriendItem[]>([]);
+  const [moreFriends, setMoreFriends] = useState<UserSummary[]>([]);
   const [friendsPage, setFriendsPage] = useState(1);
   const [friendsHasMore, setFriendsHasMore] = useState(false);
   const [friendsLoadingMore, setFriendsLoadingMore] = useState(false);
@@ -138,17 +197,47 @@ export default function UserProfilePage() {
     };
   }, [tokenReady]);
 
-  const { data: profile, isLoading, error, refetch } = useUserProfile(
+  const { data: publicProfile, isLoading, error, refetch } = useUserProfile(
     isSelf || !tokenReady ? undefined : viewer?.id,
     userId,
   );
+
+  const viewerIsAdmin = isAdministratorRole(viewer?.role);
+  const [adminOverride, setAdminOverride] = useState<UserProfile | null>(null);
+  const [adminOverrideLoading, setAdminOverrideLoading] = useState(false);
+  const publicUnavailable = isProfileUnavailable(error);
+
+  useEffect(() => {
+    if (!viewerIsAdmin || !publicUnavailable || !userId) {
+      setAdminOverride(null);
+      return;
+    }
+    let cancelled = false;
+    setAdminOverrideLoading(true);
+    fetchAdminUserDetails(userId)
+      .then((data) => {
+        if (!cancelled) setAdminOverride(userProfileFromAdmin(data));
+      })
+      .catch(() => {
+        if (!cancelled) setAdminOverride(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAdminOverrideLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerIsAdmin, publicUnavailable, userId]);
+
+  const profile = publicProfile ?? adminOverride;
 
   // A new first page (other user, refetch after an action) restarts the friends list.
   const firstFriendsPage = profile?.friends;
   useEffect(() => {
     setMoreFriends([]);
     setFriendsPage(1);
-    setFriendsHasMore(Boolean(firstFriendsPage?.has_more));
+    // A full first page may have more behind it; an empty next page then hides "Load more".
+    setFriendsHasMore((firstFriendsPage?.length ?? 0) >= FRIENDS_PAGE_SIZE);
   }, [firstFriendsPage]);
 
   const refreshProfile = async () => {
@@ -159,12 +248,17 @@ export default function UserProfilePage() {
   const action = useMutation({
     mutationFn: async (kind: FriendshipAction) => {
       if (!profile) return;
-      const requestId = profile.friendship?.request_id ?? null;
+      const requestId = readRequestId(profile.friendship) ?? profile.friendship?.request_id ?? null;
       switch (kind) {
         case 'send':
           return sendFriendRequest(profile.id);
-        case 'cancel':
-          return cancelFriendRequest(requestId as number);
+        case 'cancel': {
+          const id = typeof requestId === 'number' ? requestId : await findSentRequestId(profile.id);
+          if (typeof id !== 'number') {
+            throw new FriendsApiError('Friend request not found.', 404, 'request_not_found');
+          }
+          return cancelFriendRequest(id);
+        }
         case 'accept':
           return acceptFriendRequest(requestId as number);
         case 'decline':
@@ -173,7 +267,15 @@ export default function UserProfilePage() {
           return removeFriend(profile.id);
       }
     },
-    onSuccess: async () => {
+    onSuccess: async (data, kind) => {
+      if (kind === 'send') {
+        const sentId = readRequestId(data);
+        if (sentId != null && viewer?.id) {
+          queryClient.setQueryData(QK.userProfile(viewer.id, userId), (old: UserProfile | undefined) =>
+            old ? { ...old, friendship: { status: 'request_sent', request_id: sentId } } : old,
+          );
+        }
+      }
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
       await refreshProfile();
@@ -185,7 +287,10 @@ export default function UserProfilePage() {
   });
 
   const block = useMutation({
-    mutationFn: (kind: BlockAction) => (kind === 'block' ? blockUser(userId) : unblockUser(userId)),
+    mutationFn: async (kind: BlockAction) => {
+      if (kind === 'block') await blockUser(userId);
+      else await unblockUser(userId);
+    },
     onSuccess: async (_data, kind) => {
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
@@ -198,21 +303,25 @@ export default function UserProfilePage() {
     },
   });
 
+  const profileIsPrivate = Boolean(profile && isPrivateUserProfile(profile));
+
   const eventGroups = useMemo(() => {
+    if (profileIsPrivate) return [];
     const groups: Array<{ title: string; group: ProfileEventGroup }> = [];
     if (profile?.events?.organized) groups.push({ title: 'Organized', group: profile.events.organized });
     if (profile?.events?.joined) groups.push({ title: 'Joined', group: profile.events.joined });
     return groups;
-  }, [profile]);
+  }, [profile, profileIsPrivate]);
 
   const eventTabs = useMemo(() => availableEventTabs(eventGroups.map((g) => g.group)), [eventGroups]);
 
   const mainTabs = useMemo(() => {
+    if (profileIsPrivate) return [];
     const list: Array<{ id: MainTab; label: string; icon: typeof Calendar }> = [];
     if (eventTabs.length > 0) list.push({ id: 'events', label: 'Events', icon: Calendar });
     if (profile?.friends) list.push({ id: 'friends', label: 'Friends', icon: Users });
     return list;
-  }, [eventTabs, profile]);
+  }, [eventTabs, profile, profileIsPrivate]);
 
   // Keep the selected tabs on parts the backend returned.
   const activeMainTab = mainTabs.some((t) => t.id === mainTab) ? mainTab : mainTabs[0]?.id;
@@ -223,7 +332,7 @@ export default function UserProfilePage() {
   const run = (kind: FriendshipAction) => action.mutate(kind);
   const busy = action.isPending || block.isPending;
 
-  const friends = [...(profile?.friends?.data ?? []), ...moreFriends];
+  const friends = [...(profile?.friends ?? []), ...moreFriends];
 
   const loadMoreFriends = async () => {
     const next = friendsPage + 1;
@@ -282,11 +391,19 @@ export default function UserProfilePage() {
   };
 
   const renderActions = (p: UserProfile) => {
-    if (p.is_blocked) {
+    if (p.blocked_by_me || p.friendship?.status === 'blocked') {
       return (
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setConfirmBlock('unblock')} disabled={busy} className={outline}>
             <Ban className="h-3.5 w-3.5" /> Unblock
+          </button>
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            disabled={busy}
+            className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
+          >
+            <ReportFlag className="h-3.5 w-3.5" /> Report
           </button>
         </div>
       );
@@ -302,6 +419,14 @@ export default function UserProfilePage() {
         >
           <Ban className="h-3.5 w-3.5" /> Block
         </button>
+        <button
+          type="button"
+          onClick={() => setReportOpen(true)}
+          disabled={busy}
+          className={`${primary} border border-destructive/40 bg-secondary text-destructive hover:bg-destructive/10`}
+        >
+          <ReportFlag className="h-3.5 w-3.5" /> Report
+        </button>
       </div>
     );
   };
@@ -316,6 +441,7 @@ export default function UserProfilePage() {
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
+      {busy && <ProfileLoadingRunner overlay label="Loading…" />}
 
       <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-lg">
         <button
@@ -329,8 +455,8 @@ export default function UserProfilePage() {
         <h1 className="text-lg font-bold text-foreground">Profile</h1>
       </header>
 
-      {!tokenReady || isLoading ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">Loading profile…</p>
+      {!tokenReady || isLoading || adminOverrideLoading ? (
+        <ProfileLoadingRunner compact />
       ) : !getAuthToken() ? (
         <div className="px-4 py-16 text-center" role="alert">
           <p className="text-sm text-muted-foreground">You are not signed in on this tab. Please log in again.</p>
@@ -342,11 +468,11 @@ export default function UserProfilePage() {
             Log in
           </button>
         </div>
-      ) : isProfileUnavailable(error) ? (
+      ) : publicUnavailable && !adminOverride ? (
         <div className="px-4 py-16 text-center" role="alert">
           <p className="text-sm text-muted-foreground">{PROFILE_UNAVAILABLE_MESSAGE}</p>
         </div>
-      ) : error || !profile ? (
+      ) : (error && !adminOverride) || !profile ? (
         <div className="px-4 py-16 text-center" role="alert">
           <p className="text-sm text-muted-foreground">{profileLoadMessage(error)}</p>
           <button
@@ -381,27 +507,68 @@ export default function UserProfilePage() {
 
           <div className="space-y-3 px-4 pt-8">
             <div>
-              <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+                {profileIsPrivate && (
+                  <span
+                    data-testid="profile-private-tag"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground"
+                  >
+                    <Lock className="h-3 w-3" />
+                    Private
+                  </span>
+                )}
+                {profile.is_suspended && (
+                  <span
+                    data-testid="account-status-badge"
+                    className="inline-flex items-center rounded-full border border-destructive/40 bg-destructive/10 px-2.5 py-0.5 text-[11px] font-semibold text-destructive"
+                  >
+                    Suspended
+                  </span>
+                )}
+              </div>
               {profile.username && <p className="text-sm text-muted-foreground">@{profile.username}</p>}
             </div>
 
-            {renderActions(profile)}
-
-            {profile.bio ? (
-              <p className="whitespace-pre-line text-sm text-foreground/90">{profile.bio}</p>
-            ) : null}
-
-            {profile.interests && profile.interests.length > 0 && (
-              <div className="flex flex-wrap gap-2" aria-label="Interests">
-                {profile.interests.map((interest) => (
-                  <span
-                    key={interest}
-                    className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
-                  >
-                    {interest}
-                  </span>
-                ))}
+            {profile.is_suspended && (
+              <div
+                className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-foreground"
+                role="status"
+              >
+                <p>
+                  <strong>This account is suspended.</strong>
+                  {profile.suspension?.reason ? ` Reason: ${profile.suspension.reason}` : ''}
+                </p>
               </div>
+            )}
+
+            {!profile.is_suspended && renderActions(profile)}
+
+            {profileIsPrivate ? (
+              <PrivateProfileStats
+                joined={profile.joined_events_count ?? 0}
+                friends={profile.friends_count ?? 0}
+                organized={profile.organized_events_count ?? 0}
+              />
+            ) : (
+              <>
+                {profile.bio ? (
+                  <p className="whitespace-pre-line text-sm text-foreground/90">{profile.bio}</p>
+                ) : null}
+
+                {profile.interests && profile.interests.length > 0 && (
+                  <div className="flex flex-wrap gap-2" aria-label="Interests">
+                    {profile.interests.map((interest) => (
+                      <span
+                        key={interest}
+                        className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
+                      >
+                        {interest}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -468,22 +635,22 @@ export default function UserProfilePage() {
                   ) : (
                     <ul className="space-y-2">
                       {friends.map((f) => {
-                        const name = f.user.full_name || f.user.display_name || f.user.username || 'User';
+                        const name = f.full_name || f.display_name || f.username || 'User';
                         return (
                           <motion.li
-                            key={f.user.id}
+                            key={f.id}
                             layout
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0 }}
                             className="flex items-center gap-3 rounded-2xl glass-card px-4 py-3 cursor-pointer hover:border-primary/40 transition-all"
-                            onClick={() => navigate(userProfilePath(f.user.id, viewer?.id ?? null))}
+                            onClick={() => navigate(userProfilePath(f.id, viewer?.id ?? null))}
                           >
-                            <UserAvatar src={userAvatarUrl(f.user)} seed={f.user.id} name={name} size="md" />
+                            <UserAvatar src={userAvatarUrl(f)} seed={f.id} name={name} size="md" />
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-semibold text-foreground">{name}</p>
-                              {f.user.username && (
-                                <p className="truncate text-xs text-muted-foreground">@{f.user.username}</p>
+                              {f.username && (
+                                <p className="truncate text-xs text-muted-foreground">@{f.username}</p>
                               )}
                             </div>
                           </motion.li>
@@ -532,6 +699,19 @@ export default function UserProfilePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {profile && (
+        <ReportContentDialog
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+          targetType="user"
+          targetId={profile.id}
+          origin="profile"
+          title={`Report ${displayName}`}
+          onSuccess={(message) => setToast({ show: true, message, type: 'success' })}
+          onError={(message) => setToast({ show: true, message, type: 'error' })}
+        />
+      )}
 
       <BottomNav />
     </div>

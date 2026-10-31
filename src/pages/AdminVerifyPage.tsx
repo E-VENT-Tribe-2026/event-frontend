@@ -4,12 +4,12 @@ import { motion } from 'framer-motion';
 import { ShieldCheck, KeyRound, LogOut } from 'lucide-react';
 import AppToast from '@/components/AppToast';
 import { setAuthToken, clearAuthToken } from '@/lib/auth';
-import { supabase } from '@/lib/supabase';
+import { syncSupabaseSession } from '@/lib/supabase';
 import { logout, setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
-import { destinationAfterSignIn, hasChosenUsername } from '@/lib/username';
+import { destinationAfterSignIn, profileFromMeResponse } from '@/lib/username';
 import {
   getPendingAdminVerification,
   clearPendingAdminVerification,
@@ -84,9 +84,7 @@ export default function AdminVerifyPage() {
 
     // Verified — this is now an upgraded aal2 token. Continue exactly like a normal sign-in would
     setAuthToken(result.accessToken);
-    if (supabase) {
-      await supabase.auth.setSession({ access_token: result.accessToken, refresh_token: '' }).catch(() => {});
-    }
+    await syncSupabaseSession(result.accessToken, '');
     clearPendingAdminVerification();
 
     const me = await fetchAuthUserFromToken(result.accessToken);
@@ -100,7 +98,7 @@ export default function AdminVerifyPage() {
         headers: { Authorization: `Bearer ${result.accessToken}`, Accept: 'application/json' },
       });
       const profileData = await profileRes.json().catch(() => ({} as Record<string, unknown>));
-      const p = (profileData.data || profileData.user || profileData) as Record<string, unknown>;
+      const p = profileFromMeResponse(profileData);
       avatarUrl = String(p.avatar_url || '');
       fullName = String(p.full_name || p.name || fullName);
       bio = String(p.bio || '');
