@@ -221,36 +221,82 @@
     animation: shimmer 1.5s infinite;
   }
 
-  .profile-run-bob {
-    animation: profile-run-bob 0.42s ease-in-out infinite;
+  .profile-run-svg .profile-run-approach,
+  .profile-run-svg .profile-run-body,
+  .profile-run-svg .profile-run-leg-far,
+  .profile-run-svg .profile-run-leg-near,
+  .profile-run-svg .profile-run-shin-far,
+  .profile-run-svg .profile-run-shin-near,
+  .profile-run-svg .profile-run-arm-far,
+  .profile-run-svg .profile-run-arm-near,
+  .profile-run-svg .profile-run-forearm-far,
+  .profile-run-svg .profile-run-forearm-near,
+  .profile-run-svg .profile-run-ground,
+  .profile-run-svg .profile-run-streaks {
+    transform-box: view-box;
   }
-  .profile-run-leg-a {
-    transform-origin: 40px 56px;
-    animation: profile-run-leg-a 0.42s ease-in-out infinite;
+
+  .profile-run-approach {
+    transform-origin: 80px 124px;
+    animation: profile-run-approach 2.6s cubic-bezier(0.2, 0.05, 0.75, 0.15) infinite;
   }
-  .profile-run-leg-b {
-    transform-origin: 40px 56px;
-    animation: profile-run-leg-b 0.42s ease-in-out infinite;
+  .profile-run-body {
+    transform-origin: 80px 124px;
+    animation: profile-run-body 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
   }
-  .profile-run-arm-a {
-    transform-origin: 40px 34px;
-    animation: profile-run-arm-a 0.42s ease-in-out infinite;
+  .profile-run-leg-far {
+    transform-origin: 80px 72px;
+    animation: profile-run-leg-far 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
   }
-  .profile-run-arm-b {
-    transform-origin: 40px 34px;
-    animation: profile-run-arm-b 0.42s ease-in-out infinite;
+  .profile-run-leg-near {
+    transform-origin: 80px 72px;
+    animation: profile-run-leg-near 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  }
+  .profile-run-shin-far {
+    transform-origin: 80px 98px;
+    animation: profile-run-shin-far 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  }
+  .profile-run-shin-near {
+    transform-origin: 80px 98px;
+    animation: profile-run-shin-near 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  }
+  .profile-run-arm-far {
+    transform-origin: 80px 48px;
+    animation: profile-run-arm-far 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  }
+  .profile-run-arm-near {
+    transform-origin: 80px 48px;
+    animation: profile-run-arm-near 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  }
+  .profile-run-forearm-far {
+    transform-origin: 80px 70px;
+    animation: profile-run-forearm-far 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  }
+  .profile-run-forearm-near {
+    transform-origin: 80px 70px;
+    animation: profile-run-forearm-near 0.56s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
   }
   .profile-run-ground {
     animation: profile-run-ground 0.42s linear infinite;
   }
+  .profile-run-streaks {
+    transform-origin: 80px 58px;
+    animation: profile-run-streaks 0.42s ease-in-out infinite;
+  }
 
   @media (prefers-reduced-motion: reduce) {
-    .profile-run-bob,
-    .profile-run-leg-a,
-    .profile-run-leg-b,
-    .profile-run-arm-a,
-    .profile-run-arm-b,
-    .profile-run-ground {
+    .profile-run-approach,
+    .profile-run-body,
+    .profile-run-leg-far,
+    .profile-run-leg-near,
+    .profile-run-shin-far,
+    .profile-run-shin-near,
+    .profile-run-arm-far,
+    .profile-run-arm-near,
+    .profile-run-forearm-far,
+    .profile-run-forearm-near,
+    .profile-run-ground,
+    .profile-run-streaks {
       animation: none;
     }
   }
@@ -305,33 +351,61 @@
   100% { background-position: 200% 0; }
 }
 
-@keyframes profile-run-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
+@keyframes profile-run-approach {
+  0% { transform: scale(0.34); opacity: 0.45; }
+  10% { opacity: 1; }
+  86% { transform: scale(1.9); opacity: 1; }
+  100% { transform: scale(2.25); opacity: 0; }
 }
-@keyframes profile-run-leg-a {
-  0% { transform: rotate(36deg); }
-  50% { transform: rotate(-40deg); }
-  100% { transform: rotate(36deg); }
+@keyframes profile-run-body {
+  0%, 100% { transform: translateY(0) rotate(8deg); }
+  25% { transform: translateY(-7px) rotate(10deg); }
+  50% { transform: translateY(0) rotate(8deg); }
+  75% { transform: translateY(-7px) rotate(10deg); }
 }
-@keyframes profile-run-leg-b {
-  0% { transform: rotate(-40deg); }
-  50% { transform: rotate(36deg); }
-  100% { transform: rotate(-40deg); }
+@keyframes profile-run-leg-far {
+  0%, 100% { transform: rotate(40deg); }
+  50% { transform: rotate(-36deg); }
 }
-@keyframes profile-run-arm-a {
-  0% { transform: rotate(-38deg); }
-  50% { transform: rotate(30deg); }
-  100% { transform: rotate(-38deg); }
+@keyframes profile-run-leg-near {
+  0%, 100% { transform: rotate(-36deg); }
+  50% { transform: rotate(40deg); }
 }
-@keyframes profile-run-arm-b {
-  0% { transform: rotate(30deg); }
-  50% { transform: rotate(-38deg); }
-  100% { transform: rotate(30deg); }
+@keyframes profile-run-shin-far {
+  0%, 100% { transform: rotate(14deg); }
+  22% { transform: rotate(58deg); }
+  50% { transform: rotate(8deg); }
+  78% { transform: rotate(40deg); }
+}
+@keyframes profile-run-shin-near {
+  0%, 100% { transform: rotate(8deg); }
+  22% { transform: rotate(40deg); }
+  50% { transform: rotate(14deg); }
+  78% { transform: rotate(58deg); }
+}
+@keyframes profile-run-arm-far {
+  0%, 100% { transform: rotate(-42deg); }
+  50% { transform: rotate(34deg); }
+}
+@keyframes profile-run-arm-near {
+  0%, 100% { transform: rotate(34deg); }
+  50% { transform: rotate(-42deg); }
+}
+@keyframes profile-run-forearm-far {
+  0%, 100% { transform: rotate(-18deg); }
+  50% { transform: rotate(28deg); }
+}
+@keyframes profile-run-forearm-near {
+  0%, 100% { transform: rotate(28deg); }
+  50% { transform: rotate(-18deg); }
 }
 @keyframes profile-run-ground {
   from { transform: translateX(0); }
-  to { transform: translateX(-20px); }
+  to { transform: translateX(-38px); }
+}
+@keyframes profile-run-streaks {
+  0%, 100% { transform: translateX(0); opacity: 0.18; }
+  50% { transform: translateX(-10px); opacity: 0.4; }
 }
 
 @keyframes bounce-marker {

@@ -19,6 +19,7 @@ import {
   normalizeUsername,
 } from '@/lib/username';
 import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
+import DatePickerField from '@/components/DatePickerField';
 import {
   isInviteCodeFormat,
   normalizeInviteCode,
@@ -450,12 +451,13 @@ return (
               <label htmlFor="signup-dob" className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-0.5 mb-1">
                 Birthdate
               </label>
-              <input
+              <DatePickerField
                 id="signup-dob"
-                type="date"
                 value={dob}
-                onChange={e => setDob(e.target.value)}
-                className="w-full rounded-xl bg-secondary px-3 py-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/50"
+                max={new Date().toISOString().slice(0, 10)}
+                placeholder="Birthdate"
+                onChange={setDob}
+                className="py-3 text-xs"
               />
               {errors.dob && <p className="text-xs text-destructive mt-1">{errors.dob}</p>}
             </div>

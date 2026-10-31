@@ -1,5 +1,4 @@
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { BrowserRouter } from 'react-router-dom';
 import { Toaster as Sonner } from '@/components/ui/sonner';
@@ -8,21 +7,22 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import RealtimeBridge from '@/components/RealtimeBridge';
 import RouteDocumentTitle from '@/components/RouteDocumentTitle';
-import { queryClient } from '@/lib/queryClient';
+import { queryClient, queryPersister, SESSION_CACHE_MAX_AGE } from '@/lib/queryClient';
 import AppRoutes from '@/app/AppRoutes';
 import SessionGuard from '@/app/SessionGuard';
-
-const persister = typeof window !== 'undefined'
-  ? createSyncStoragePersister({
-    storage: window.localStorage,
-    key: 'event-tribe-query-cache',
-  })
-  : undefined;
 
 const App = () => (
   <PersistQueryClientProvider
     client={queryClient}
-    persistOptions={{ persister: persister! }}
+    persistOptions={{
+      persister: queryPersister!,
+      maxAge: SESSION_CACHE_MAX_AGE,
+      buster: import.meta.env.VITE_CACHE_BUSTER ?? '',
+      dehydrateOptions: {
+        shouldDehydrateQuery: (query) =>
+          query.state.status === 'success' && query.queryKey[0] !== 'notifications',
+      },
+    }}
   >
     <TooltipProvider>
       <Toaster />

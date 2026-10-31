@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Ban, Calendar, Clock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
+import { ArrowLeft, Ban, Calendar, Clock, Lock, UserMinus, UserPlus, X, Check, Users } from 'lucide-react';
 import ReportFlag from '@/components/ReportFlag';
 import ReportContentDialog from '@/components/ReportContentDialog';
 import { motion } from 'framer-motion';
@@ -45,6 +45,7 @@ import {
   PROFILE_UNAVAILABLE_MESSAGE,
   ProfileLoadError,
   fetchUserFriends,
+  isPrivateUserProfile,
   isProfileUnavailable,
   type ProfileEventGroup,
   type UserProfile,
@@ -117,6 +118,7 @@ function userProfileFromAdmin(data: AdminUserDetailsFull): UserProfile {
     avatar_url: data.avatar_url ?? null,
     avatar_kind: data.avatar_kind ?? 'icon',
     icon_id: data.icon_id ?? null,
+    visibility: 'public',
     events: {
       organized: {
         upcoming: data.organized_events?.upcoming,
@@ -130,6 +132,32 @@ function userProfileFromAdmin(data: AdminUserDetailsFull): UserProfile {
     is_suspended: data.is_suspended,
     suspension: data.suspension,
   };
+}
+
+function PrivateProfileStats({
+  joined,
+  friends,
+  organized,
+}: {
+  joined: number;
+  friends: number;
+  organized: number;
+}) {
+  const items = [
+    { label: 'Joined events', value: joined, testId: 'profile-stat-joined' },
+    { label: 'Friends', value: friends, testId: 'profile-stat-friends' },
+    { label: 'Organized events', value: organized, testId: 'profile-stat-organized' },
+  ];
+  return (
+    <div data-testid="profile-private-stats" className="grid grid-cols-3 gap-2 rounded-2xl glass-card p-3">
+      {items.map((item) => (
+        <div key={item.label} className="text-center" data-testid={item.testId}>
+          <p className="text-lg font-bold tabular-nums text-foreground">{item.value}</p>
+          <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function UserProfilePage() {
@@ -275,21 +303,25 @@ export default function UserProfilePage() {
     },
   });
 
+  const profileIsPrivate = Boolean(profile && isPrivateUserProfile(profile));
+
   const eventGroups = useMemo(() => {
+    if (profileIsPrivate) return [];
     const groups: Array<{ title: string; group: ProfileEventGroup }> = [];
     if (profile?.events?.organized) groups.push({ title: 'Organized', group: profile.events.organized });
     if (profile?.events?.joined) groups.push({ title: 'Joined', group: profile.events.joined });
     return groups;
-  }, [profile]);
+  }, [profile, profileIsPrivate]);
 
   const eventTabs = useMemo(() => availableEventTabs(eventGroups.map((g) => g.group)), [eventGroups]);
 
   const mainTabs = useMemo(() => {
+    if (profileIsPrivate) return [];
     const list: Array<{ id: MainTab; label: string; icon: typeof Calendar }> = [];
     if (eventTabs.length > 0) list.push({ id: 'events', label: 'Events', icon: Calendar });
     if (profile?.friends) list.push({ id: 'friends', label: 'Friends', icon: Users });
     return list;
-  }, [eventTabs, profile]);
+  }, [eventTabs, profile, profileIsPrivate]);
 
   // Keep the selected tabs on parts the backend returned.
   const activeMainTab = mainTabs.some((t) => t.id === mainTab) ? mainTab : mainTabs[0]?.id;
@@ -409,6 +441,7 @@ export default function UserProfilePage() {
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
+      {busy && <ProfileLoadingRunner overlay label="Loading…" />}
 
       <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-lg">
         <button
@@ -476,6 +509,15 @@ export default function UserProfilePage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-bold text-foreground">{profile.full_name || profile.username}</h2>
+                {profileIsPrivate && (
+                  <span
+                    data-testid="profile-private-tag"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground"
+                  >
+                    <Lock className="h-3 w-3" />
+                    Private
+                  </span>
+                )}
                 {profile.is_suspended && (
                   <span
                     data-testid="account-status-badge"
@@ -502,21 +544,31 @@ export default function UserProfilePage() {
 
             {!profile.is_suspended && renderActions(profile)}
 
-            {profile.bio ? (
-              <p className="whitespace-pre-line text-sm text-foreground/90">{profile.bio}</p>
-            ) : null}
+            {profileIsPrivate ? (
+              <PrivateProfileStats
+                joined={profile.joined_events_count ?? 0}
+                friends={profile.friends_count ?? 0}
+                organized={profile.organized_events_count ?? 0}
+              />
+            ) : (
+              <>
+                {profile.bio ? (
+                  <p className="whitespace-pre-line text-sm text-foreground/90">{profile.bio}</p>
+                ) : null}
 
-            {profile.interests && profile.interests.length > 0 && (
-              <div className="flex flex-wrap gap-2" aria-label="Interests">
-                {profile.interests.map((interest) => (
-                  <span
-                    key={interest}
-                    className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
-                  >
-                    {interest}
-                  </span>
-                ))}
-              </div>
+                {profile.interests && profile.interests.length > 0 && (
+                  <div className="flex flex-wrap gap-2" aria-label="Interests">
+                    {profile.interests.map((interest) => (
+                      <span
+                        key={interest}
+                        className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
+                      >
+                        {interest}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
 

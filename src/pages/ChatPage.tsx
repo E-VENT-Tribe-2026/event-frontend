@@ -24,6 +24,7 @@ import {
   encodeChatPayload,
   parseChatPayload,
 } from '@/lib/chatPayload';
+import { useTopBarSearch } from '@/app/AppChrome';
 import ChatListView, { type ChatTab } from '@/pages/chat/ChatListView';
 import ChatThreadView from '@/pages/chat/ChatThreadView';
 import {
@@ -74,7 +75,7 @@ export default function ChatPage() {
   const [handledSelectedParam, setHandledSelectedParam] = useState(false);
   const [chatApiMissing, setChatApiMissing] = useState(false);
   const [chatTab, setChatTab] = useState<ChatTab>('active');
-  const [search, setSearch] = useState('');
+  const { search, setSearch } = useTopBarSearch();
   const [showPoll, setShowPoll] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);

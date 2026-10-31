@@ -2,7 +2,6 @@ import { Ban, Calendar, Clock, Send } from 'lucide-react';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
-import TopBar from '@/components/TopBar';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isChatUnread } from '@/lib/chatUnread';
 import { isExpiredOver48h, type ChatEvent } from '@/pages/chat/chatModel';
@@ -55,11 +54,6 @@ export default function ChatListView({
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={onCloseToast} />
 
       <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-lg">
-        <TopBar
-          search={search}
-          onSearchChange={onSearchChange}
-          searchPlaceholder="Search chats..."
-        />
         <header className="mx-auto max-w-2xl border-b border-border px-4 py-3">
           <h1 className="text-xl font-bold text-gradient">Chats</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Your event conversations</p>

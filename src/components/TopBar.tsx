@@ -1,6 +1,13 @@
-import { Search, Bell, Settings, LogOut, User, ShieldCheck } from 'lucide-react';
+import { Search, Bell, Settings, LogOut, User, ShieldCheck, Palette } from 'lucide-react';
 import ColorSchemePicker from '@/components/ColorSchemePicker';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { getCurrentUser, logout } from '@/lib/storage';
 import { UserAvatar } from '@/components/UserAvatar';
 import { AUTH_TOKEN_EVENT, getAuthToken, clearAuthToken } from '@/lib/auth';
@@ -31,6 +38,7 @@ export default function TopBar({
   const [user, setUser] = useState(getCurrentUser);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -113,8 +121,8 @@ export default function TopBar({
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-      <div className="mx-auto flex max-w-lg items-center gap-3">
+    <header className="sticky top-0 z-[1100] border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
+      <div className="mx-auto flex max-w-7xl items-center gap-3">
         {/* Logo */}
         <AppLogo size="sm" linkTo="/home" className="shrink-0 hover:opacity-90 transition-opacity" />
 
@@ -223,10 +231,21 @@ export default function TopBar({
                     </span>
                     Manage account
                   </Link>
-                </div>
 
-                <div className="border-t border-border/50 px-3 py-3">
-                  <ColorSchemePicker compact />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowSettingsMenu(false);
+                      setThemeOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground hover:bg-secondary/80 transition-colors text-left"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 text-primary shrink-0">
+                      <Palette className="h-4 w-4" />
+                    </span>
+                    Change theme
+                  </button>
                 </div>
 
                 <div className="border-t border-border/50 p-2">
@@ -247,6 +266,16 @@ export default function TopBar({
           </AnimatePresence>
         </div>
       </div>
+
+      <Dialog open={themeOpen} onOpenChange={setThemeOpen}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Change theme</DialogTitle>
+            <DialogDescription>Choose how the app looks on this device.</DialogDescription>
+          </DialogHeader>
+          <ColorSchemePicker />
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }

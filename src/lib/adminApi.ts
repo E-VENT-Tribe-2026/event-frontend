@@ -2,6 +2,7 @@ import { getApiUrl } from './api';
 import { API_ENDPOINTS } from './apiUrls';
 import { getAuthToken } from './auth';
 import { getPendingAdminVerification } from './adminAuth';
+import { displayChatContent } from './chatPayload';
 import { getCurrentUser } from './storage';
 
 export function isAdministratorRole(role: unknown): boolean {
@@ -453,6 +454,15 @@ export function formatReportTime(isoString: string): string {
   });
 }
 
+/** Compact list timestamp: `2026-10-06 · 09:12`. */
+export function formatReportListTime(isoString: string): string {
+  const d = new Date(isoString);
+  if (!isoString || isNaN(d.getTime())) return isoString;
+  const date = d.toLocaleDateString('en-CA');
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${date} · ${time}`;
+}
+
 /** What was reported, in a few words: the event, the user, or a message and its event. */
 export function reportedItemLabel(report: AdminReportSummary): string {
   if (report.target_type === 'user') {
@@ -470,14 +480,71 @@ function asText(value: unknown): string {
 }
 
 function readEventRef(value: unknown): AdminReportEventRef | null {
-  if (!value || typeof value !== 'object') return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  const id = asText(row.id);
-  return id ? { id, title: asText(row.title) || 'Untitled event' } : null;
+  const id = asText(row.id) || asText(row.event_id);
+  const title = asText(row.title) || asText(row.event_title) || asText(row.name);
+  if (!id && !title) return null;
+  return { id, title: title || 'Untitled event' };
 }
 
-function readStatus(value: unknown): AdminReportStatus {
-  return value === 'dismissed' || value === 'action_taken' ? value : 'open';
+/** Event on a report row: nested `event`, or event_id/title, or the target when the report is about an event. */
+export function eventRefFromReportRow(
+  row: Record<string, unknown>,
+  targetType: AdminReportTargetType,
+): AdminReportEventRef | null {
+  const nested = readEventRef(row.event) ?? (targetType === 'event' ? readEventRef(row.target) : null);
+  if (nested) return nested;
+  const id =
+    asText(row.event_id) ||
+    (targetType === 'event' ? asText(row.target_id) || asText(row.reported_event_id) : '');
+  const title =
+    asText(row.event_title) ||
+    asText(row.target_title) ||
+    asText(row.reported_event_title) ||
+    (targetType === 'event' ? asText(row.title) : '');
+  if (!id && !title) return null;
+  return { id, title: title || 'Untitled event' };
+}
+
+function unwrapReportPayload(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const row = value as Record<string, unknown>;
+  for (const key of ['report', 'data', 'item'] as const) {
+    const nested = row[key];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested) && (nested as { id?: unknown }).id != null) {
+      return nested as Record<string, unknown>;
+    }
+  }
+  return row;
+}
+
+function normalizeToken(value: unknown): string {
+  return asText(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function readOutcome(value: unknown): AdminReportOutcome | null {
+  const n = normalizeToken(value);
+  if (n === 'dismissed' || n === 'dismiss') return 'dismissed';
+  if (n === 'warned' || n === 'warn') return 'warned';
+  if (n === 'content_removed' || n === 'removed' || n === 'remove') return 'content_removed';
+  if (n === 'suspended' || n === 'suspend') return 'suspended';
+  return null;
+}
+
+function readStatus(value: unknown, row: Record<string, unknown> = {}): AdminReportStatus {
+  const n = normalizeToken(value);
+  if (n === 'dismissed' || n === 'dismiss' || n === 'rejected') return 'dismissed';
+  if (n === 'action_taken' || n === 'actioned') return 'action_taken';
+  if (n === 'closed' || n === 'complete' || n === 'completed' || n === 'resolved') {
+    const outcome = readOutcome(row.outcome);
+    return outcome && outcome !== 'dismissed' ? 'action_taken' : 'dismissed';
+  }
+  if (row.is_open === false || row.closed === true) {
+    const outcome = readOutcome(row.outcome);
+    return outcome && outcome !== 'dismissed' ? 'action_taken' : 'dismissed';
+  }
+  return 'open';
 }
 
 function readTargetType(value: unknown): AdminReportTargetType {
@@ -488,65 +555,177 @@ function readOrigin(value: unknown): AdminReportOrigin {
   return value === 'profile' || value === 'event_chat' ? value : 'event_details';
 }
 
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function personFromName(name: string, id = ''): AdminEventPerson | null {
+  const full_name = name.trim();
+  if (!full_name && !id) return null;
+  return { id, username: null, full_name, avatar_url: null, icon_id: null };
+}
+
+function readMessageRef(row: Record<string, unknown>): AdminReportMessageRef | null {
+  const reported = asObject(row.reported);
+  const candidates = [row.message, reported?.message, reported, row.target, row.reported_message];
+  for (const candidate of candidates) {
+    const msg = asObject(candidate);
+    if (!msg) continue;
+    const typeHint = asText(msg.type) || asText(msg.target_type);
+    const looksLikeMessage =
+      typeHint === 'message' ||
+      msg.content != null ||
+      msg.text != null ||
+      msg.body != null ||
+      msg.sender != null ||
+      msg.sender_name != null ||
+      msg.message_id != null;
+    if (!looksLikeMessage) continue;
+    const content = displayChatContent(msg.content ?? msg.text ?? msg.body ?? msg.message);
+    const sender =
+      readPerson(msg.sender) ??
+      readPerson(msg.user) ??
+      readPerson(msg.author) ??
+      personFromName(asText(msg.sender_name) || asText(msg.sender_full_name), asText(msg.sender_id));
+    const id = asText(msg.id) || asText(msg.message_id);
+    if (content || sender || id) return { id, content, sender };
+  }
+  return null;
+}
+
+function readChatContext(row: Record<string, unknown>): AdminReportChatMessage[] {
+  const reported = asObject(row.reported);
+  const raw = [row.chat_context, row.messages, row.context, reported?.chat_context].find(Array.isArray);
+  if (!Array.isArray(raw)) return [];
+  return raw.map((m) => {
+    const c = asObject(m) ?? {};
+    const sender = readPerson(c.sender) ?? readPerson(c.user);
+    return {
+      id: asText(c.id) || asText(c.message_id),
+      sender_name: asText(c.sender_name) || personDisplayName(sender) || 'Unknown',
+      content: displayChatContent(c.content ?? c.text ?? c.body),
+      created_at: asText(c.created_at),
+      reported: c.reported === true || c.is_reported === true,
+    };
+  });
+}
+
 function readReportSummary(value: unknown): AdminReportSummary {
-  const row = (value ?? {}) as Record<string, unknown>;
-  const msg = row.message && typeof row.message === 'object' ? (row.message as Record<string, unknown>) : null;
+  const row = unwrapReportPayload(value);
+  const reported = asObject(row.reported);
+  const targetType = readTargetType(row.target_type ?? reported?.type);
   return {
     id: asText(row.id),
-    status: readStatus(row.status),
-    target_type: readTargetType(row.target_type),
+    status: readStatus(row.status ?? row.state, row),
+    target_type: targetType,
     reason: asText(row.reason),
     origin: readOrigin(row.origin),
     created_at: asText(row.created_at),
     reporter: readPerson(row.reporter),
-    event: readEventRef(row.event),
-    reported_user: readPerson(row.reported_user),
-    message: msg ? { id: asText(msg.id), content: asText(msg.content), sender: readPerson(msg.sender) } : null,
+    event: eventRefFromReportRow(row, targetType),
+    reported_user: readPerson(row.reported_user) ?? readPerson(reported?.user),
+    message: readMessageRef(row),
   };
 }
 
 function readReportDetail(value: unknown): AdminReportDetail {
-  const row = (value ?? {}) as Record<string, unknown>;
-  const outcome = row.outcome;
-  const context = Array.isArray(row.chat_context) ? row.chat_context : [];
+  const row = unwrapReportPayload(value);
+  const summary = readReportSummary(row);
+  const chat_context = readChatContext(row);
+  const flagged = chat_context.find((m) => m.reported) ?? chat_context[0];
+  let message = summary.message;
+  if (summary.target_type === 'message' && flagged) {
+    const sender = message?.sender ?? personFromName(flagged.sender_name);
+    message = {
+      id: message?.id || flagged.id,
+      content: message?.content || flagged.content,
+      sender,
+    };
+  }
+  const outcome = readOutcome(row.outcome) ?? (readStatus(row.status ?? row.state, row) === 'dismissed' ? 'dismissed' : null);
   return {
-    ...readReportSummary(row),
+    ...summary,
+    message,
     description: asText(row.description) || null,
-    chat_context: context.map((m) => {
-      const c = (m ?? {}) as Record<string, unknown>;
-      return {
-        id: asText(c.id),
-        sender_name: asText(c.sender_name) || 'Unknown',
-        content: asText(c.content),
-        created_at: asText(c.created_at),
-        reported: c.reported === true,
-      };
-    }),
+    chat_context,
     content_removed: row.content_removed === true,
     target_user: readPerson(row.target_user),
     target_user_is_admin: row.target_user_is_admin === true,
-    outcome:
-      outcome === 'dismissed' || outcome === 'warned' || outcome === 'content_removed' || outcome === 'suspended'
-        ? outcome
-        : null,
+    outcome,
     closed_at: asText(row.closed_at) || null,
     closed_by: readPerson(row.closed_by),
   };
 }
 
 export function readUserReportRefs(value: unknown): AdminUserReportRef[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((v) => {
-    const row = (v ?? {}) as Record<string, unknown>;
-    return {
-      id: asText(row.id),
-      status: readStatus(row.status),
-      reason: asText(row.reason),
-      target_type: readTargetType(row.target_type),
-      created_at: asText(row.created_at),
-      event: readEventRef(row.event),
-    };
-  });
+  const rows = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object' && Array.isArray((value as { items?: unknown }).items)
+      ? ((value as { items: unknown[] }).items)
+      : [];
+  return rows
+    .map((v) => {
+      const row = (v ?? {}) as Record<string, unknown>;
+      const target_type = readTargetType(row.target_type);
+      return {
+        id: asText(row.id),
+        status: readStatus(row.status ?? row.state, row),
+        reason: asText(row.reason),
+        target_type,
+        created_at: asText(row.created_at),
+        event: eventRefFromReportRow(row, target_type),
+      };
+    })
+    .filter((row) => Boolean(row.id));
+}
+
+function reportsMadeFromUserPayload(data: Record<string, unknown>): unknown {
+  if (data.reports_made !== undefined) return data.reports_made;
+  if (data.reportsMade !== undefined) return data.reportsMade;
+  if (data.filed_reports !== undefined) return data.filed_reports;
+  const nested = data.reports;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    const group = nested as Record<string, unknown>;
+    return group.made ?? group.filed ?? group.by_user ?? group.submitted;
+  }
+  return undefined;
+}
+
+function reportsAboutFromUserPayload(data: Record<string, unknown>): unknown {
+  if (data.reports_about !== undefined) return data.reports_about;
+  if (data.reportsAbout !== undefined) return data.reportsAbout;
+  const nested = data.reports;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    const group = nested as Record<string, unknown>;
+    return group.about ?? group.against ?? group.on_user;
+  }
+  return undefined;
+}
+
+export function userReportListsFromDetails(data: unknown): {
+  about: AdminUserReportRef[];
+  made: AdminUserReportRef[];
+  madeProvided: boolean;
+} {
+  const row = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+  const madeRaw = reportsMadeFromUserPayload(row);
+  return {
+    about: readUserReportRefs(reportsAboutFromUserPayload(row)),
+    made: readUserReportRefs(madeRaw),
+    madeProvided: madeRaw !== undefined,
+  };
+}
+
+export function reportSummaryToUserRef(report: AdminReportSummary): AdminUserReportRef {
+  return {
+    id: report.id,
+    status: report.status,
+    reason: report.reason,
+    target_type: report.target_type,
+    created_at: report.created_at,
+    event: report.event,
+  };
 }
 
 // ---- Content removal (#236 backend) ----
@@ -1006,7 +1185,12 @@ function readPerson(value: unknown): AdminEventPerson | null {
     username,
     full_name,
     display_name,
-    avatar_url: typeof row.avatar_url === 'string' ? row.avatar_url : null,
+    avatar_url:
+      typeof row.avatar_url === 'string'
+        ? row.avatar_url
+        : typeof row.avatar === 'string'
+          ? row.avatar
+          : null,
     avatar_kind: typeof row.avatar_kind === 'string' ? row.avatar_kind : undefined,
     icon_id: typeof row.icon_id === 'string' ? row.icon_id : null,
   };
@@ -1183,11 +1367,13 @@ export async function fetchAdminReports(
   page = 1,
   limit = 20,
   status?: 'open',
+  filters?: { reporterId?: string },
 ): Promise<AdminReportsResponse> {
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(limit));
   if (status) params.set('status', status);
+  if (filters?.reporterId) params.set('reporter_id', filters.reporterId);
   const url = `${getApiUrl(API_ENDPOINTS.ADMIN_REPORTS)}?${params.toString()}`;
   const res = await fetch(url, {
     method: 'GET',
@@ -1205,6 +1391,20 @@ export async function fetchAdminReports(
     limit: typeof body.limit === 'number' ? body.limit : limit,
     total_pages: typeof body.total_pages === 'number' ? body.total_pages : pageNo,
   };
+}
+
+/** Reports this user filed. Uses GET /api/admin/reports?reporter_id= when user details omit reports_made. */
+export async function fetchReportsFiledByUser(userId: string): Promise<AdminUserReportRef[]> {
+  const id = userId.trim().toLowerCase();
+  if (!id) return [];
+  try {
+    const page = await fetchAdminReports(1, 50, undefined, { reporterId: userId });
+    return page.items
+      .filter((row) => (row.reporter?.id || '').trim().toLowerCase() === id || !row.reporter)
+      .map(reportSummaryToUserRef);
+  } catch {
+    return [];
+  }
 }
 
 /** The number of open reports. GET /api/admin/reports/open-count */
@@ -1228,14 +1428,39 @@ export async function fetchAdminReportDetail(reportId: string): Promise<AdminRep
   return readReportDetail(await handleAdminResponse<unknown>(res));
 }
 
-/** Closes an open report as Dismissed. POST /api/admin/reports/{id}/dismiss */
+async function postAdminReport(url: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(getApiUrl(url), {
+    method: 'POST',
+    headers: { ...getAdminHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+}
+
+/** Closes an open report as Dismissed. POST /api/admin/reports/{id}/dismiss — path only, no body. */
 export async function dismissReport(reportId: string): Promise<AdminReportDetail> {
-  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(reportId)), {
+  const id = reportId.trim();
+  let res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(id)), {
     method: 'POST',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  return readReportDetail(await handleAdminResponse<unknown>(res));
+  if (res.status === 404 || res.status === 405 || res.status === 422 || res.status >= 500) {
+    res = await postAdminReport(API_ENDPOINTS.ADMIN_REPORT_ACTION(id), { action: 'dismiss' });
+  }
+  const body = await handleAdminResponse<unknown>(res);
+  let detail = readReportDetail(body);
+  if (!detail.id) detail = { ...detail, id };
+  if (detail.status === 'open') {
+    try {
+      const fresh = await fetchAdminReportDetail(id);
+      if (fresh.status !== 'open') return fresh;
+    } catch {
+      /* POST already succeeded with a message-only body. */
+    }
+    return { ...detail, id, status: 'dismissed', outcome: detail.outcome ?? 'dismissed' };
+  }
+  return detail;
 }
 
 /**
@@ -1248,12 +1473,10 @@ export async function actOnReport(
   action: AdminReportAction,
   reason?: string,
 ): Promise<AdminReportDetail> {
-  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_ACTION(reportId)), {
-    method: 'POST',
-    headers: { ...getAdminHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(reason ? { action, reason } : { action }),
-    cache: 'no-store',
-  });
+  const res = await postAdminReport(
+    API_ENDPOINTS.ADMIN_REPORT_ACTION(reportId.trim()),
+    reason ? { action, reason } : { action },
+  );
   return readReportDetail(await handleAdminResponse<unknown>(res));
 }
 

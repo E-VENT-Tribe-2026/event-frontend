@@ -254,7 +254,7 @@ export default function EventDetailsPage() {
       applyEvent(cached);
       setLoadingApi(false);
     } else {
-      setLoadingApi(true);
+    setLoadingApi(true);
     }
 
     (async () => {
@@ -266,7 +266,7 @@ export default function EventDetailsPage() {
         const data = await cachedFetch(
           eventKey,
           async () => {
-            const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
+        const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
             if (!res.ok) {
               if (res.status === 404) {
                 const err = new Error('Event not found') as Error & { status?: number };

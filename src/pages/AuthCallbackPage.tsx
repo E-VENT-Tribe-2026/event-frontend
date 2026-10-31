@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { setAuthToken, clearAuthToken } from '@/lib/auth';
+import { setAuthToken } from '@/lib/auth';
+import { announceAccountRefusal } from '@/lib/accountRefusal';
 import { readSuspension, type SuspensionNotice } from '@/lib/suspension';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
@@ -103,8 +104,9 @@ export default function AuthCallbackPage() {
 
       const suspension = await fetchSuspension(session.access_token);
       if (suspension) {
-        clearAuthToken();
-        navigate('/login', { replace: true, state: { suspension } });
+        // Keep the token so RequireAuth does not bounce them; the overlay
+        // is the only way out (welcome or sign-in, both of which sign out).
+        announceAccountRefusal({ kind: 'suspended', reason: suspension.reason });
         return;
       }
 

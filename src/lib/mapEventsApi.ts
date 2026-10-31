@@ -32,7 +32,7 @@ export function fetchMapEvents(params: URLSearchParams, signal?: AbortSignal): P
       if (!res.ok) throw new Error('fetch failed');
       return parseEventsApiList(await res.json());
     },
-    TTL.MEDIUM,
+    TTL.SESSION,
     true,
   );
 }

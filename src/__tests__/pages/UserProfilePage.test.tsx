@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import UserProfilePage from '@/pages/UserProfilePage';
@@ -54,7 +54,7 @@ type Friendship = { status: string; request_id: number | null };
 /** Fake backend: GET profile returns the current friendship; friend calls mutate it. */
 function mockBackend(
   initial: Friendship,
-  overrides: { failWith?: { status: number; detail: unknown }; profile?: Record<string, unknown> } = {},
+  overrides: { failWith?: { status: number; detail: unknown }; profile?: Record<string, unknown>; holdPost?: Promise<void> } = {},
 ) {
   let friendship = { ...initial };
   let blocked = Boolean(overrides.profile?.blocked_by_me);
@@ -112,6 +112,7 @@ function mockBackend(
     }
     if (overrides.failWith) return json(overrides.failWith.status, { detail: overrides.failWith.detail });
     if (method === 'POST' && url.endsWith('/api/friends/requests')) {
+      if (overrides.holdPost) await overrides.holdPost;
       friendship = { status: 'request_sent', request_id: 7 };
       return json(201, { request_id: 7 });
     }
@@ -174,6 +175,8 @@ describe('UserProfilePage', () => {
     expect(screen.getByTestId('profile-banner')).toBeInTheDocument();
     expect(screen.getByText('Organized Upcoming')).toBeInTheDocument();
     expect(screen.getByText('Joined Upcoming')).toBeInTheDocument();
+    expect(screen.queryByTestId('profile-private-tag')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('profile-private-stats')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('user-tab-past'));
     expect(screen.getByText('Organized Past')).toBeInTheDocument();
@@ -200,6 +203,23 @@ describe('UserProfilePage', () => {
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/friends/requests'));
     expect(JSON.parse(post!.body!)).toEqual({ receiver_id: OTHER_ID });
     expect(screen.queryByRole('button', { name: /send friend request/i })).not.toBeInTheDocument();
+  });
+
+  it('covers the screen with loading while a friend request is sending', async () => {
+    let release!: () => void;
+    const holdPost = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockBackend({ status: 'none', request_id: null }, { holdPost });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
+    expect(await screen.findByText('Loading…')).toBeInTheDocument();
+    await act(async () => {
+      release();
+    });
+    expect(await screen.findByRole('button', { name: /cancel friend request/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Loading…')).not.toBeInTheDocument());
   });
 
   it('cancels a request the viewer sent, then offers "Send Friend Request" again', async () => {
@@ -359,6 +379,37 @@ describe('UserProfilePage', () => {
     expect(screen.queryByText(/no events/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/no friends/i)).not.toBeInTheDocument();
     // Friendship actions still work on a friends-only profile.
+    expect(screen.getByRole('button', { name: /send friend request/i })).toBeInTheDocument();
+  });
+
+  it('shows a Private tag and counts instead of lists on a private profile', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      {
+        profile: {
+          visibility: 'private',
+          bio: 'hidden bio',
+          interests: ['Music'],
+          events: undefined,
+          friends: undefined,
+          joined_events_count: 4,
+          friends_count: 7,
+          organized_events_count: 2,
+        },
+      },
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('profile-private-tag')).toHaveTextContent('Private');
+    expect(screen.getByTestId('profile-stat-joined')).toHaveTextContent('4');
+    expect(screen.getByTestId('profile-stat-friends')).toHaveTextContent('7');
+    expect(screen.getByTestId('profile-stat-organized')).toHaveTextContent('2');
+    expect(screen.getByText('Joined events')).toBeInTheDocument();
+    expect(screen.getByText('Friends')).toBeInTheDocument();
+    expect(screen.getByText('Organized events')).toBeInTheDocument();
+    expect(screen.queryByText('hidden bio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByText('Organized Upcoming')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send friend request/i })).toBeInTheDocument();
   });
 

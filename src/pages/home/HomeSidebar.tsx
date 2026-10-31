@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom';
-import { ArrowRight, Calendar, UserPlus, Users } from 'lucide-react';
+import { Calendar, UserPlus, Users } from 'lucide-react';
+import MyCalendarSection from '@/components/MyCalendarSection';
 import { UserAvatar } from '@/components/UserAvatar';
 import { userProfilePath } from '@/lib/friendsApi';
 import type { EventItem, User } from '@/lib/storage';
@@ -34,18 +34,13 @@ export default function HomeSidebar({
 }: HomeSidebarProps) {
   return (
     <aside className="space-y-4">
-      <div className="rounded-2xl bg-indigo-500/10 border border-indigo-500/20 p-4 space-y-3 shadow-lg shadow-black/5 backdrop-blur-sm">
-        <Link to="/profile" className="flex items-center justify-between group">
-          <div className="flex items-center gap-3 min-w-0">
-            <UserAvatar src={user.avatar || user.profilePhoto} seed={user.id} name={user.name} size="md" className="ring-2 ring-indigo-500/40 shrink-0" />
-            <div className="min-w-0">
-              <h2 className="text-sm font-bold text-foreground truncate group-hover:text-indigo-500 transition-colors">{user.name}</h2>
-              <p className="text-[10px] text-muted-foreground">View profile</p>
-            </div>
-          </div>
-          <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-indigo-500 transition-colors shrink-0" />
-        </Link>
-      </div>
+      <MyCalendarSection
+        events={upcomingForYou}
+        onOpenEvent={(id) => {
+          const event = upcomingForYou.find((row) => row.id === id);
+          if (event) onOpenEvent(event);
+        }}
+      />
 
       <div data-testid="upcoming-events" className="rounded-2xl bg-secondary/40 border border-border/80 p-4 space-y-3.5 shadow-lg shadow-black/5 backdrop-blur-sm">
         <div className="flex items-center justify-between pb-1 border-b border-border/40">

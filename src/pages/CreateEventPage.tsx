@@ -1,13 +1,12 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { ArrowLeft, Type, Calendar, MapPin, Users, Euro, Clock } from 'lucide-react';
+import { ArrowLeft, Type, Calendar, MapPin, Users, Euro } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { addEvent, getCurrentUser, type EventItem } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import BottomNav from '@/components/BottomNav';
-import TopBar from '@/components/TopBar';
 import CategoryPills from '@/components/CategoryPills';
 import EventBannerField from '@/components/EventBannerField';
 import { getCategoryBanner } from '@/lib/categoryBanners';
@@ -18,6 +17,8 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { hasSignedInSession } from '@/lib/signedIn';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
+import DatePickerField from '@/components/DatePickerField';
+import TimePickerField from '@/components/TimePickerField';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { invalidateEvents, prependCreatedEvent } from '@/lib/queries';
@@ -107,9 +108,6 @@ export default function CreateEventPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dateInputType, setDateInputType] = useState<'text' | 'date'>('text');
-  const [timeInputType, setTimeInputType] = useState<'text' | 'time'>('text');
-
   const [pickedLat, setPickedLat] = useState<number | null>(null);
   const [pickedLng, setPickedLng] = useState<number | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>(GERMANY_DEFAULT);
@@ -414,7 +412,6 @@ export default function CreateEventPage() {
       </div>
 
       <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-lg">
-        <TopBar showSearch={false} />
         <header className="border-b border-border px-4 py-3">
           <div className="mx-auto flex max-w-lg items-center gap-3">
             <button
@@ -485,42 +482,24 @@ export default function CreateEventPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label htmlFor="create-event-date" className="block text-xs font-semibold text-foreground">Event date</label>
-              <div className="relative">
-                <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  id="create-event-date"
-                  type={dateInputType}
-                  min={dateInputType === 'date' ? todayIso : undefined}
-                  placeholder="YYYY-MM-DD"
-                  value={form.date}
-                  onFocus={() => setDateInputType('date')}
-                  onBlur={() => { if (!form.date) setDateInputType('text'); }}
-                  onChange={e => update('date', e.target.value)}
-                  className={`${inputCls('date')} pl-10`}
-                  aria-describedby="create-event-date-hint"
-                />
-              </div>
-              <p id="create-event-date-hint" className="text-[10px] text-muted-foreground px-0.5">Tap to pick from calendar.</p>
+              <DatePickerField
+                id="create-event-date"
+                value={form.date}
+                min={todayIso}
+                onChange={(next) => update('date', next)}
+                className={errors.date ? 'ring-1 ring-destructive border-destructive/50' : undefined}
+              />
               {errors.date && <span className="text-[10px] text-destructive px-1">{errors.date}</span>}
             </div>
             <div className="space-y-1">
               <label htmlFor="create-event-time" className="block text-xs font-semibold text-foreground">Event time</label>
-              <div className="relative">
-                <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  id="create-event-time"
-                  type={timeInputType}
-                  placeholder="HH:MM (24h)"
-                  min={timeInputType === 'time' ? minTime : undefined}
-                  value={form.time}
-                  onFocus={() => setTimeInputType('time')}
-                  onBlur={() => { if (!form.time) setTimeInputType('text'); }}
-                  onChange={e => update('time', e.target.value)}
-                  className={`${inputCls('time')} pl-10`}
-                  aria-describedby="create-event-time-hint"
-                />
-              </div>
-              <p id="create-event-time-hint" className="text-[10px] text-muted-foreground px-0.5">Tap to pick start time.</p>
+              <TimePickerField
+                id="create-event-time"
+                value={form.time}
+                min={minTime}
+                onChange={(next) => update('time', next)}
+                className={errors.time ? 'ring-1 ring-destructive border-destructive/50' : undefined}
+              />
               {errors.time && <span className="text-[10px] text-destructive px-1">{errors.time}</span>}
             </div>
           </div>

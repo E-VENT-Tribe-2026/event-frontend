@@ -3,7 +3,7 @@
  *
  * Features:
  * - In-memory cache with configurable TTL (time-to-live)
- * - sessionStorage persistence for selected keys (survives soft navigation)
+ * - sessionStorage persistence for the tab session (survives reload, cleared on tab close)
  * - In-flight request deduplication (same key won't fire twice simultaneously)
  * - Manual invalidation by key or key prefix
  * - Stale-while-revalidate: returns cached data immediately, refreshes in background
@@ -28,10 +28,10 @@ const PERSISTENT_KEYS = new Set<string>();
 
 // ── Default TTLs (ms) ────────────────────────────────────────────────────────
 export const TTL = {
-  SHORT:   30_000,   //  30 s  — participant counts, my-status
-  MEDIUM:  120_000,  //   2 m  — events list, favorites
-  LONG:    300_000,  //   5 m  — max-price, recommendations, profile
-  SESSION: 900_000,  //  15 m  — my-events, joined-events (rarely change mid-session)
+  SHORT:   30_000,              //  30 s  — notifications, chat, attendee counts
+  MEDIUM:  10 * 60_000,         //  10 m  — events list, favorites, friends
+  LONG:    30 * 60_000,         //  30 m  — profile, max-price, recommendations
+  SESSION: 8 * 60 * 60_000,     //   8 h  — tab session (reload still hits cache)
 } as const;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ function removeFromSession(key: string): void {
  * @param key       Unique cache key (e.g. "/api/events/max-price")
  * @param fetcher   Async function that returns the data
  * @param ttl       How long the cached value is considered fresh (ms)
- * @param persist   Whether to also persist to sessionStorage
+ * @param persist   Whether to also persist to sessionStorage (default: yes, for the tab session)
  */
 function readEntry<T>(key: string, persist: boolean): CacheEntry<T> | null {
   const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
@@ -116,7 +116,7 @@ export async function cachedFetch<T>(
   key: string,
   fetcher: () => Promise<T>,
   ttl: number = TTL.MEDIUM,
-  persist = false,
+  persist = true,
 ): Promise<T> {
   const cached = readEntry<T>(key, persist);
   if (cached && !isStale(cached)) {
@@ -141,7 +141,7 @@ export function staleWhileRevalidate<T>(
   fetcher: () => Promise<T>,
   ttl: number = TTL.MEDIUM,
   onUpdate: (data: T) => void,
-  persist = false,
+  persist = true,
 ): T | null {
   // Return whatever we have immediately
   const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
@@ -168,7 +168,7 @@ export function setCacheEntry<T>(
   key: string,
   data: T,
   ttl: number = TTL.MEDIUM,
-  persist = false,
+  persist = true,
 ): void {
   const entry: CacheEntry<T> = { data, fetchedAt: Date.now(), ttl };
   memoryCache.set(key, entry);
@@ -237,7 +237,19 @@ export function clearCache(): void {
  * Get a cached value synchronously (returns null if not cached or stale).
  */
 export function getCached<T>(key: string): T | null {
-  const entry = memoryCache.get(key) as CacheEntry<T> | undefined;
+  const entry = readEntry<T>(key, true);
   if (entry && !isStale(entry)) return entry.data;
   return null;
+}
+
+if (typeof window !== 'undefined') {
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const storageKey = sessionStorage.key(i);
+      if (!storageKey?.startsWith('qc:')) continue;
+      const key = storageKey.slice(3);
+      const entry = readFromSession(key);
+      if (entry) memoryCache.set(key, entry);
+    }
+  } catch { /* ignore */ }
 }

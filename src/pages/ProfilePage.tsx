@@ -11,8 +11,7 @@ import {
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Palette, Mail } from 'lucide-react';
-import ColorSchemePicker from '@/components/ColorSchemePicker';
+import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Mail } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
@@ -748,6 +747,7 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
+      {busyKey && <ProfileLoadingRunner overlay label="Loading…" />}
 
       <div
         data-testid="profile-banner"
@@ -941,13 +941,6 @@ export default function ProfilePage() {
           </div>
         )}
 
-        <div className="rounded-2xl glass-card p-4 space-y-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Palette className="h-4 w-4 text-primary" /> Appearance
-          </h3>
-          <ColorSchemePicker />
-        </div>
-
         {/* Pending Payments */}
         {approvedRequests.length > 0 && (
           <div className="rounded-2xl glass-card p-4 space-y-3 glow-border">
@@ -1039,7 +1032,7 @@ export default function ProfilePage() {
               {eventSubTab === 'invitations' ? (
                 <InvitationsTab viewerId={user?.id} />
               ) : eventSubTab !== 'favourites' ? (
-                <div className="space-y-2.5">
+                <div className="space-y-2.5" data-testid="profile-event-list">
                   {currentEventList.length === 0 ? (
                     <p className="text-center py-8 text-xs text-muted-foreground">
                       No {eventSubTab} events found.

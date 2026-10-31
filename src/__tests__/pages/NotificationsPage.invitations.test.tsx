@@ -52,4 +52,36 @@ describe('NotificationsPage: invitation notification (#291)', () => {
     fireEvent.click(screen.getByText("ann_a invited you to 'Summer Picnic' on 2027-01-01"));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/event/c9f0f895-fb98-4b91-99f5-1fd0297e236d'));
   });
+
+  it('keeps invitation and chat rows on the Activity filter', () => {
+    useNotificationsMock.mockReturnValue({
+      data: [
+        ...ROWS,
+        {
+          id: '402',
+          type: 'invitation',
+          message: 'Sam invited you to Brunch',
+          related_event_id: 'ev-2',
+          event_title: 'Brunch',
+          created_at: new Date().toISOString(),
+          read: false,
+        },
+        {
+          id: '280',
+          type: 'event_updated',
+          message: 'Picnic moved',
+          related_event_id: 'ev-3',
+          event_title: 'Picnic',
+          created_at: new Date().toISOString(),
+          read: true,
+        },
+      ],
+      isLoading: false,
+    });
+    render(<MemoryRouter><NotificationsPage /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('tab', { name: /Activity/ }));
+    expect(screen.getByText("ann_a invited you to 'Summer Picnic' on 2027-01-01")).toBeInTheDocument();
+    expect(screen.getByText('Sam invited you to Brunch')).toBeInTheDocument();
+    expect(screen.queryByText('Picnic moved')).not.toBeInTheDocument();
+  });
 });

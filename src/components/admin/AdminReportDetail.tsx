@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -154,8 +153,8 @@ export default function AdminReportDetail({
     try {
       const updated =
         activeAction === 'dismiss'
-          ? await dismissReport(report.id)
-          : await actOnReport(report.id, activeAction, needsReason ? reason.trim() : undefined);
+          ? await dismissReport(reportId)
+          : await actOnReport(reportId, activeAction, needsReason ? reason.trim() : undefined);
       setReport(updated);
       setActiveAction(null);
       onSuccessToast(activeAction === 'dismiss' ? 'Report dismissed.' : 'Action taken. The report is closed.');
@@ -361,34 +360,43 @@ export default function AdminReportDetail({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--adm-fg)' }}>
                       <MessageSquare className="h-4 w-4" style={{ color: 'var(--adm-primary-text)' }} />
-                      Message by {name(report.message?.sender ?? report.reported_user)}
+                      Sender: {name(report.message?.sender ?? report.reported_user ?? report.target_user)}
                     </p>
-                    {(report.message?.sender?.id || report.reported_user?.id) && (
+                    {(report.message?.sender?.id || report.reported_user?.id || report.target_user?.id) && (
                       <OpenButton
                         label="Open user"
                         icon={<UserIcon className="h-3 w-3" />}
                         onClick={
                           onOpenUser
-                            ? () => onOpenUser((report.message?.sender?.id || report.reported_user?.id) as string)
+                            ? () =>
+                                onOpenUser(
+                                  (report.message?.sender?.id ||
+                                    report.reported_user?.id ||
+                                    report.target_user?.id) as string,
+                                )
                             : undefined
                         }
                       />
                     )}
                   </div>
-                  {report.message?.content && (
-                    <p
-                      className="text-xs leading-relaxed rounded-xl border p-3"
-                      style={{ color: 'var(--adm-fg)', background: 'hsl(213 40% 18% / .5)', borderColor: 'var(--adm-border)' }}
-                    >
-                      {report.message.content}
-                    </p>
-                  )}
+                  <p className={LABEL_CLASS} style={{ color: 'var(--adm-muted-fg)' }}>
+                    Reported text
+                  </p>
+                  <p
+                    className="text-sm leading-relaxed rounded-xl border p-3 whitespace-pre-wrap"
+                    style={{ color: 'var(--adm-fg)', background: 'hsl(213 40% 18% / .5)', borderColor: 'var(--adm-border)' }}
+                    data-testid="reported-message-text"
+                  >
+                    {report.message?.content ||
+                      report.chat_context.find((m) => m.reported)?.content ||
+                      'The message text is not available.'}
+                  </p>
                 </div>
               )}
             </div>
 
             {/* ===== Chat context ===== */}
-            {report.origin === 'event_chat' && report.chat_context.length > 0 && (
+            {report.chat_context.length > 0 && (
               <div className="rounded-[16px] border p-5 space-y-3" style={CARD_STYLE}>
                 <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>Chat context</h3>
                 <ol className="space-y-2" aria-label="Chat context">
@@ -504,13 +512,11 @@ export default function AdminReportDetail({
             <AlertDialogCancel disabled={acting} className="rounded-lg text-xs mt-0">
               Cancel
             </AlertDialogCancel>
-            <AlertDialogAction
+            <button
+              type="button"
               disabled={acting || (needsReason && !reason.trim())}
-              onClick={(e) => {
-                e.preventDefault();
-                void handleConfirm();
-              }}
-              className="rounded-lg text-xs font-semibold text-white"
+              onClick={() => void handleConfirm()}
+              className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
               style={{ background: activeAction === 'dismiss' ? 'var(--adm-primary)' : 'var(--adm-danger)' }}
             >
               {acting ? (
@@ -523,7 +529,7 @@ export default function AdminReportDetail({
               ) : (
                 'Confirm'
               )}
-            </AlertDialogAction>
+            </button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

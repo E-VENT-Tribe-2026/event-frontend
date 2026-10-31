@@ -3,8 +3,9 @@ import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Ban, Check, Search, Sparkles, UserMinus, UserPlus, Users, X, Loader2, Inbox, Send } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
-import TopBar from '@/components/TopBar';
+import { useTopBarSearch } from '@/app/AppChrome';
 import AppToast from '@/components/AppToast';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import { UserAvatar } from '@/components/UserAvatar';
 import {
   AlertDialog,
@@ -264,7 +265,7 @@ export default function FriendsPage() {
   const openProfile = (userId: string) => navigate(userProfilePath(userId, currentUserId));
 
   // ── Search State ────────────────────────────────────────────────────────
-  const [query, setQuery] = useState('');
+  const { search: query, setSearch: setQuery } = useTopBarSearch();
   const [results, setResults] = useState<UserSearchResult[]>([]);
   const [searchPage, setSearchPage] = useState(0);
   const [searchHasMore, setSearchHasMore] = useState(false);
@@ -467,12 +468,8 @@ export default function FriendsPage() {
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
+      {busyKey && <ProfileLoadingRunner overlay label="Loading…" />}
       <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-md">
-        <TopBar
-          search={query}
-          onSearchChange={setQuery}
-          searchPlaceholder="Search by username..."
-        />
         <header className="mx-auto flex max-w-lg items-center border-b border-border/60 px-4 py-2.5">
           <h1 className="text-base font-bold text-foreground">Friends</h1>
         </header>

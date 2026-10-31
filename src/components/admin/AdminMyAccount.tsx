@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Shield, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import ReportFlag from '@/components/ReportFlag';
-import { fetchAdminUserDetails, type AdminUserDetailsFull } from '@/lib/adminApi';
+import { fetchAdminAccount, fetchAdminUserDetails, type AdminUserDetailsFull } from '@/lib/adminApi';
 
 interface AdminMyAccountProps {
   adminId: string;

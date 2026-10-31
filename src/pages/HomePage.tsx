@@ -1,8 +1,9 @@
 ﻿import { useState, useMemo, useEffect, useCallback } from 'react';
 import { getCurrentUser, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
-import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
+import { useTopBarSearch } from '@/app/AppChrome';
 import AppToast from '@/components/AppToast';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { SlidersHorizontal } from 'lucide-react';
 import CategoryPills from '@/components/CategoryPills';
@@ -36,7 +37,7 @@ import {
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState('');
+  const { search } = useTopBarSearch();
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [budgetMin, setBudgetMin] = useState(0);
@@ -110,9 +111,9 @@ export default function HomePage() {
             if (!res.ok) throw new Error('Failed to load suggestions');
             return res.json().catch(() => null);
           },
-          TTL.MEDIUM,
+          TTL.SESSION,
         ),
-        cachedFetch(`/api/friends/excluded:${userId}`, () => fetchExcludedIds(token, userId), TTL.MEDIUM),
+        cachedFetch(`/api/friends/excluded:${userId}`, () => fetchExcludedIds(token, userId), TTL.SESSION),
         fetchSentRequests(1, 50).catch(() => ({ data: [] as Array<{ user?: { id?: string } }> })),
       ]);
 
@@ -372,10 +373,9 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-background pb-20 relative">
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
+      {addingFriendId && <ProfileLoadingRunner overlay label="Loading…" />}
 
       <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border/40">
-        <TopBar search={search} onSearchChange={setSearch} />
-
         <div className="mx-auto max-w-7xl px-4 pt-2 pb-3">
           <div className="flex items-center gap-2">
             <CategoryPills

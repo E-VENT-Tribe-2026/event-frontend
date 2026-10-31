@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, screen, fireEvent } from '@testing-library/react';
 import App from '@/App';
 import { ACCOUNT_REFUSED_EVENT, type AccountRefusal } from '@/lib/accountRefusal';
 import { setAuthToken, getAuthToken } from '@/lib/auth';
@@ -53,11 +53,17 @@ describe('App — sign-out on account refusal (ticket #294 Part 6)', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
   });
 
-  it('signs out a suspended user and sends them to /login with the suspension', () => {
+  it('blocks a suspended user until they leave for sign in', () => {
     render(<App />);
     mockNavigate.mockClear();
 
     refuse({ kind: 'suspended', reason: 'Spam in event chats.' });
+
+    expect(getAuthToken()).toBe('token-abc');
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.getByTestId('suspension-gate')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to sign in' }));
 
     expect(getAuthToken()).toBeNull();
     expect(mockNavigate).toHaveBeenCalledTimes(1);
@@ -65,5 +71,16 @@ describe('App — sign-out on account refusal (ticket #294 Part 6)', () => {
       replace: true,
       state: { suspension: { reason: 'Spam in event chats.' } },
     });
+  });
+
+  it('blocks a suspended user until they leave for welcome', () => {
+    render(<App />);
+    mockNavigate.mockClear();
+
+    refuse({ kind: 'suspended', reason: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Go to welcome' }));
+
+    expect(getAuthToken()).toBeNull();
+    expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
   });
 });

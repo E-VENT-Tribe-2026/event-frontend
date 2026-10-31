@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Loader2, ChevronRight } from 'lucide-react';
+import { Loader2, ChevronRight, Calendar, MessageSquare, User as UserIcon, Users } from 'lucide-react';
 import ReportFlag from '@/components/ReportFlag';
+import { UserAvatar } from '@/components/UserAvatar';
 import {
   fetchAdminReports,
-  formatReportTime,
+  formatReportListTime,
   personDisplayName,
   reportedItemLabel,
   reportReasonLabel,
   reportStatusLabel,
+  type AdminEventPerson,
+  type AdminReportOrigin,
   type AdminReportStatus,
   type AdminReportSummary,
 } from '@/lib/adminApi';
@@ -22,12 +25,14 @@ interface AdminReportsTabProps {
 const PAGE_SIZE = 20;
 const OPEN_PAGE_SIZE = 50;
 
+const MAGENTA_PILL: React.CSSProperties = {
+  background: 'hsl(312 72% 46% / .22)',
+  color: 'hsl(312 85% 82%)',
+  borderColor: 'hsl(312 70% 55% / .4)',
+};
+
 const STATUS_STYLES: Record<AdminReportStatus, React.CSSProperties> = {
-  open: {
-    background: 'hsl(0 84% 60% / .15)',
-    color: 'var(--adm-danger-text)',
-    borderColor: 'hsl(0 84% 60% / .35)',
-  },
+  open: MAGENTA_PILL,
   dismissed: {
     background: 'var(--adm-secondary)',
     color: 'var(--adm-muted-fg)',
@@ -51,37 +56,110 @@ export function ReportStatusPill({ status }: { status: AdminReportStatus }) {
   );
 }
 
-const TARGET_LABEL = { event: 'Event', user: 'User', message: 'Chat message' } as const;
+const ORIGIN_META: Record<AdminReportOrigin, { label: string; Icon: typeof Calendar }> = {
+  event_chat: { label: 'From event chat', Icon: MessageSquare },
+  event_details: { label: 'From event page', Icon: Calendar },
+  profile: { label: 'From profile', Icon: UserIcon },
+};
+
+function subjectPerson(report: AdminReportSummary): AdminEventPerson | null {
+  if (report.target_type === 'event') return null;
+  if (report.target_type === 'message') return report.message?.sender ?? report.reported_user;
+  return report.reported_user;
+}
+
+function subjectTitle(report: AdminReportSummary): string {
+  if (report.target_type === 'event') return report.event?.title || 'Unknown event';
+  const person = subjectPerson(report);
+  return person ? personDisplayName(person) : report.target_type === 'user' ? 'Unknown user' : 'Unknown user';
+}
+
+function typeLabel(report: AdminReportSummary): string {
+  if (report.target_type === 'event') return 'Event';
+  if (report.target_type === 'message') return 'Message';
+  return 'User';
+}
 
 function ReportRow({ report, onOpen }: { report: AdminReportSummary; onOpen: (id: string) => void }) {
+  const [hovered, setHovered] = useState(false);
   const item = reportedItemLabel(report);
-  const reporter = report.reporter ? personDisplayName(report.reporter) : 'Deleted user';
+  const title = subjectTitle(report);
+  const reporter = report.reporter;
+  const reporterName = reporter ? personDisplayName(reporter) : 'Deleted user';
+  const origin = ORIGIN_META[report.origin];
+  const OriginIcon = origin.Icon;
+
   return (
     <button
       type="button"
       onClick={() => onOpen(report.id)}
-      aria-label={`Open report about ${item}`}
-      className="group w-full flex items-center justify-between gap-3 rounded-[12px] border px-3.5 py-2.5 text-left transition-all active:scale-[0.99] bg-[var(--adm-card)] border-[var(--adm-border)] hover:bg-[hsl(213_50%_17%)] hover:border-[hsl(271_76%_53%/.55)]"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label={`Open report by ${reporterName} about ${item}`}
+      className="group flex w-full items-center gap-3 rounded-[14px] border px-4 py-3 text-left transition-all active:scale-[0.99]"
+      style={{
+        background: hovered ? 'hsl(213 50% 17%)' : 'var(--adm-card)',
+        borderColor: hovered ? 'hsl(271 76% 53% / .55)' : 'var(--adm-border)',
+      }}
     >
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold truncate" style={{ color: 'var(--adm-fg)' }}>
-            {item}
-          </p>
-          <span className="text-[10px] font-medium" style={{ color: 'var(--adm-muted-fg)' }}>
-            {TARGET_LABEL[report.target_type]}
-          </span>
-        </div>
-        <p className="text-[11px] truncate" style={{ color: 'var(--adm-muted-fg)' }}>
-          <span style={{ color: 'var(--adm-fg)' }}>{reportReasonLabel(report.reason)}</span>
-          {' · '}by {reporter}
-          {' · '}
-          {formatReportTime(report.created_at)}
+      <UserAvatar
+        src={reporter?.avatar_url}
+        srcSecondary={reporter?.avatar_url}
+        seed={reporter?.id || report.id}
+        name={reporterName}
+        size="md"
+        alt={`Avatar of ${reporterName}`}
+      />
+
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--adm-muted-fg)' }}>
+          Reported by
         </p>
+        <p className="truncate text-sm font-semibold" style={{ color: 'var(--adm-fg)' }}>
+          {reporterName}
+        </p>
+        <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+          {report.target_type === 'event' ? (
+            <Users className="h-3 w-3 shrink-0" style={{ color: 'hsl(185 75% 72%)' }} />
+          ) : report.target_type === 'message' ? (
+            <MessageSquare className="h-3 w-3 shrink-0" style={{ color: 'hsl(185 75% 72%)' }} />
+          ) : null}
+          <span className="font-semibold uppercase tracking-wider" style={{ color: 'var(--adm-muted-fg)' }}>
+            {typeLabel(report)}
+          </span>
+          <span className="truncate" style={{ color: 'var(--adm-fg)' }}>
+            {title}
+          </span>
+        </p>
+        {report.target_type === 'message' && report.message?.content ? (
+          <p className="mt-0.5 truncate text-[11px] italic" style={{ color: 'var(--adm-fg)' }}>
+            “{report.message.content}”
+          </p>
+        ) : null}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+
+      <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
+        <span
+          className="inline-flex max-w-[11rem] truncate rounded-full border px-2.5 py-0.5 text-[10px] font-semibold"
+          style={MAGENTA_PILL}
+        >
+          {reportReasonLabel(report.reason)}
+        </span>
+        <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+          <OriginIcon className="h-3 w-3 shrink-0" />
+          {origin.label}
+        </span>
+        <span className="tabular-nums text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+          {formatReportListTime(report.created_at)}
+        </span>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1.5">
         <ReportStatusPill status={report.status} />
-        <ChevronRight className="h-4 w-4 transition-colors group-hover:text-[var(--adm-fg)]" style={{ color: 'var(--adm-muted-fg)' }} />
+        <ChevronRight
+          className="h-4 w-4 transition-colors group-hover:text-[var(--adm-fg)]"
+          style={{ color: 'var(--adm-muted-fg)' }}
+        />
       </div>
     </button>
   );
@@ -89,6 +167,7 @@ function ReportRow({ report, onOpen }: { report: AdminReportSummary; onOpen: (id
 
 function ReportSection({
   title,
+  hint,
   count,
   reports,
   loading,
@@ -100,6 +179,7 @@ function ReportSection({
   label,
 }: {
   title: string;
+  hint?: string;
   count: number;
   reports: AdminReportSummary[];
   loading: boolean;
@@ -112,18 +192,24 @@ function ReportSection({
 }) {
   return (
     <section className="space-y-3" aria-label={label}>
-      <div className="flex items-center justify-between px-1">
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--adm-muted-fg)' }}>
-          {title}
-        </p>
-        <span className="text-xs" style={{ color: 'var(--adm-muted-fg)' }} data-testid={`${label}-count`}>
-          {count} {count === 1 ? 'report' : 'reports'}
-        </span>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
+        <h2
+          className="text-sm font-bold"
+          style={{ color: 'var(--adm-fg)' }}
+          data-testid={`${label}-count`}
+        >
+          {title} · {count}
+        </h2>
+        {hint && (
+          <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+            {hint}
+          </p>
+        )}
       </div>
 
       {loading ? (
         <div
-          className="flex flex-col items-center justify-center py-10 space-y-3 rounded-2xl border"
+          className="flex flex-col items-center justify-center space-y-3 rounded-2xl border py-10"
           style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
         >
           <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--adm-primary)' }} />
@@ -133,7 +219,7 @@ function ReportSection({
         </div>
       ) : reports.length === 0 ? (
         <div
-          className="flex flex-col items-center justify-center py-8 text-center rounded-2xl border border-dashed p-6 space-y-2"
+          className="flex flex-col items-center justify-center space-y-2 rounded-2xl border border-dashed p-6 py-8 text-center"
           style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
         >
           <ReportFlag className="h-8 w-8 opacity-70" />
@@ -143,7 +229,7 @@ function ReportSection({
         </div>
       ) : (
         <>
-          <ul className="space-y-1.5">
+          <ul className="space-y-2">
             {reports.map((r) => (
               <li key={r.id}>
                 <ReportRow report={r} onOpen={onOpen} />
@@ -156,7 +242,7 @@ function ReportSection({
                 type="button"
                 disabled={loadingMore}
                 onClick={onLoadMore}
-                className="inline-flex items-center gap-2 rounded-xl border px-5 py-2.5 text-xs font-semibold transition-all disabled:opacity-50 active:scale-95"
+                className="inline-flex items-center gap-2 rounded-xl border px-5 py-2.5 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
                 style={{ borderColor: 'var(--adm-border)', background: 'var(--adm-secondary)', color: 'var(--adm-fg)' }}
               >
                 {loadingMore ? (
@@ -240,6 +326,7 @@ export default function AdminReportsTab({ onOpenReport, onErrorToast, liveVersio
       <ReportSection
         label="open-reports"
         title="Open reports"
+        hint="Reports not handled yet, newest first. Handling one moves it out of this list."
         count={open.total}
         reports={open.items}
         loading={open.loading}

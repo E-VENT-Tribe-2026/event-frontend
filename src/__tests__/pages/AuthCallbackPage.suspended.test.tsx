@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
+import { ACCOUNT_REFUSED_EVENT } from '@/lib/accountRefusal';
 import { clearAuthToken, getAuthToken } from '@/lib/auth';
 
 const { mockNavigate, getSessionMock } = vi.hoisted(() => ({
@@ -82,7 +83,10 @@ describe('AuthCallbackPage — suspended Google account (ticket #294 Part 5)', (
     expect((call?.[1]?.headers as Record<string, string>).Authorization).toBe('Bearer google-token');
   });
 
-  it('signs out and sends a suspended user back to the login page with the notice', async () => {
+  it('keeps the session and announces suspension so the app can block them', async () => {
+    const onRefused = vi.fn();
+    const listener = (e: Event) => onRefused((e as CustomEvent).detail);
+    window.addEventListener(ACCOUNT_REFUSED_EVENT, listener);
     mockBackend(async () => jsonResponse(
       { detail: { code: 'account_suspended', message: 'Your account is suspended.', reason: 'Spam' } },
       403,
@@ -90,16 +94,20 @@ describe('AuthCallbackPage — suspended Google account (ticket #294 Part 5)', (
     renderPage();
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true, state: { suspension: { reason: 'Spam' } } });
+      expect(onRefused).toHaveBeenCalledWith({ kind: 'suspended', reason: 'Spam' });
     });
-    expect(mockNavigate).toHaveBeenCalledTimes(1);
-    expect(getAuthToken()).toBeNull();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(getAuthToken()).toBe('google-token');
     // It stops there: no admin check, no profile load.
     expect(calledUrls().some((u) => u.includes('/api/auth/mfa/status'))).toBe(false);
     expect(calledUrls().some((u) => u.includes('/api/profile/me'))).toBe(false);
+    window.removeEventListener(ACCOUNT_REFUSED_EVENT, listener);
   });
 
   it('passes a null reason through', async () => {
+    const onRefused = vi.fn();
+    const listener = (e: Event) => onRefused((e as CustomEvent).detail);
+    window.addEventListener(ACCOUNT_REFUSED_EVENT, listener);
     mockBackend(async () => jsonResponse(
       { detail: { code: 'account_suspended', message: 'Your account is suspended.', reason: null } },
       403,
@@ -107,8 +115,10 @@ describe('AuthCallbackPage — suspended Google account (ticket #294 Part 5)', (
     renderPage();
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true, state: { suspension: { reason: null } } });
+      expect(onRefused).toHaveBeenCalledWith({ kind: 'suspended', reason: null });
     });
+    expect(mockNavigate).not.toHaveBeenCalled();
+    window.removeEventListener(ACCOUNT_REFUSED_EVENT, listener);
   });
 
   it('lets a user who is not suspended continue normally', async () => {
