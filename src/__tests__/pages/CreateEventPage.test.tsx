@@ -125,10 +125,10 @@ describe('CreateEventPage', () => {
     );
   }
 
-  it('lets you pick a category from the same pills as the homepage', () => {
+  it('lets you pick a category from the same pills as the homepage', async () => {
     renderPage();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Music' })).toHaveAttribute('aria-checked', 'true');
+    expect(await screen.findByRole('radio', { name: 'Music' })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('radio', { name: 'Sports' }));
     expect(screen.getByRole('radio', { name: 'Sports' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('radio', { name: 'Music' })).toHaveAttribute('aria-checked', 'false');

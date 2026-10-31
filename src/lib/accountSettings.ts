@@ -104,7 +104,14 @@ export function isChatNotificationType(type: string): boolean {
 export function notificationAllowed(type: string, prefs: NotificationPrefs = DEFAULT_NOTIFICATION_PREFS): boolean {
   const t = type.toLowerCase().trim();
   if (t === 'warning' || t.includes('warn')) return true;
-  if (t === 'friend_request_accepted' || t.startsWith('friend_request')) return prefs.friend_requests;
+  if (
+    t === 'friend_request_accepted' ||
+    t.startsWith('friend_request') ||
+    t.includes('friend_request') ||
+    (t.includes('friend') && t.includes('request'))
+  ) {
+    return prefs.friend_requests;
+  }
   if (t === 'event_invitation' || t.includes('invit')) return prefs.invitations;
   if (isChatNotificationType(t)) return prefs.event_chat;
   if (t === 'reminder' || t.includes('remind')) return prefs.reminders;

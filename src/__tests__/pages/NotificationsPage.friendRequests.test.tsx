@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import AppChrome from '@/app/AppChrome';
 import type { ApiNotification } from '@/lib/notificationsApi';
 import NotificationsPage from '@/pages/NotificationsPage';
 
@@ -70,8 +71,10 @@ const EXAMPLE_ROWS: ApiNotification[] = [
 
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <NotificationsPage />
+    <MemoryRouter initialEntries={['/notifications']}>
+      <AppChrome>
+        <NotificationsPage />
+      </AppChrome>
     </MemoryRouter>
   );
 }

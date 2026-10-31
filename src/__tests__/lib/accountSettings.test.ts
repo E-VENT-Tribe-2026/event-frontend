@@ -37,6 +37,7 @@ describe('notificationAllowed', () => {
   it('hides opted-out kinds', () => {
     expect(notificationAllowed('friend_request_received', off)).toBe(false);
     expect(notificationAllowed('event_invitation', off)).toBe(false);
+    expect(notificationAllowed('invitation', off)).toBe(false);
     expect(notificationAllowed('event_chat', off)).toBe(false);
     expect(notificationAllowed('chat_message', off)).toBe(false);
     expect(notificationAllowed('reminder', off)).toBe(false);

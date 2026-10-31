@@ -194,7 +194,7 @@ describe('ProfilePage identity', () => {
     expect(screen.getByRole('button', { name: /^save$/i })).toBeInTheDocument();
   });
 
-  it('lets the user change the color scheme from Appearance', async () => {
+  it('does not offer appearance controls on the profile page', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -205,10 +205,9 @@ describe('ProfilePage identity', () => {
     );
 
     renderPage();
-
-    fireEvent.click(await screen.findByRole('radio', { name: 'Light' }));
-    expect(document.documentElement.dataset.colorScheme).toBe('light');
-    expect(screen.getByText('Appearance')).toBeInTheDocument();
+    await screen.findByTestId('profile-full-name');
+    expect(screen.queryByText('Appearance')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Light' })).not.toBeInTheDocument();
   });
 
   it('saves the profile visibility with the profile update and keeps the choice', async () => {

@@ -139,7 +139,7 @@ describe('TopBar bell dot (#296)', () => {
     await waitFor(() => expect(bellDot()).not.toBeNull());
   });
 
-  it('switches the color scheme from the settings menu', async () => {
+  it('opens Change theme from settings and switches the color scheme', async () => {
     stubBackend({ notifications: [], pending: 0 });
     renderBar();
     const trigger = screen.getByRole('button', { name: 'Settings' });
@@ -147,6 +147,8 @@ describe('TopBar bell dot (#296)', () => {
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(await screen.findByRole('menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Change theme' }));
+    expect(await screen.findByRole('dialog', { name: 'Change theme' })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('radio', { name: 'Light' }));
     expect(document.documentElement.dataset.colorScheme).toBe('light');
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }));

@@ -3,13 +3,14 @@ import { HOME_LOCATION_EVENT, mapStartView, readHomeLocation } from '@/lib/accou
 import { getCurrentUser, getEvents as getLocalEvents, type EventItem } from '@/lib/storage';
 import { hasSignedInSession } from '@/lib/signedIn';
 import BottomNav from '@/components/BottomNav';
-import TopBar from '@/components/TopBar';
+import { useTopBarSearch } from '@/app/AppChrome';
 import { LocateFixed, RefreshCw } from 'lucide-react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import AppToast from '@/components/AppToast';
+import DatePickerField from '@/components/DatePickerField';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
 import { friendsAttendingHtml } from '@/lib/friendsAttendingPopup';
@@ -81,7 +82,7 @@ export default function MapPage() {
   const [selectedCity, setSelectedCity] = useState(
     () => readHomeLocation(getCurrentUser()?.id)?.city ?? '',
   );
-  const [titleSearch, setTitleSearch] = useState('');
+  const { search: titleSearch, setSearch: setTitleSearch } = useTopBarSearch();
   const [debouncedTitle, setDebouncedTitle] = useState('');
   const [debouncedFilterDate, setDebouncedFilterDate] = useState('');
   const [rawEvents, setRawEvents] = useState<EventItem[]>([]);
@@ -403,11 +404,6 @@ export default function MapPage() {
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast((t) => ({ ...t, show: false }))} />
 
       <div className="sticky top-0 z-[1000] bg-background/95 backdrop-blur-md">
-        <TopBar
-          search={titleSearch}
-          onSearchChange={setTitleSearch}
-          searchPlaceholder="Search events..."
-        />
         <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
           <div>
             <h1 className="text-base font-bold text-foreground leading-none">Explore Map</h1>
@@ -446,13 +442,14 @@ export default function MapPage() {
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-semibold uppercase text-muted-foreground">Date</label>
-            <input
-              type="date"
+            <label htmlFor="map-filter-date" className="text-[10px] font-semibold uppercase text-muted-foreground">Date</label>
+            <DatePickerField
+              id="map-filter-date"
               value={filterDate}
-              onChange={(e) => setFilterDate(e.target.value)}
-              className="w-full rounded-xl border border-border/50 bg-secondary px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-              aria-label="Filter by event date"
+              allowEmpty
+              placeholder="Any date"
+              onChange={setFilterDate}
+              className="py-2 text-xs"
             />
           </div>
         </div>

@@ -16,6 +16,8 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
+import DatePickerField from '@/components/DatePickerField';
+import TimePickerField from '@/components/TimePickerField';
 import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { formatPageTitle } from '@/lib/documentTitle';
@@ -431,12 +433,24 @@ export default function EditEventPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label htmlFor="edit-event-date" className="block text-xs font-semibold text-foreground">Event date</label>
-                <input id="edit-event-date" type="date" min={todayIso} value={form.date} onChange={(e) => update('date', e.target.value)} className={inputCls('date')} />
+                <DatePickerField
+                  id="edit-event-date"
+                  value={form.date}
+                  min={todayIso}
+                  onChange={(next) => update('date', next)}
+                  className={errors.date ? 'ring-1 ring-destructive border-destructive/50' : undefined}
+                />
                 {errors.date && <span className="text-[10px] text-destructive px-1">{errors.date}</span>}
               </div>
               <div className="space-y-1">
                 <label htmlFor="edit-event-time" className="block text-xs font-semibold text-foreground">Event time</label>
-                <input id="edit-event-time" type="time" min={minTime} value={form.time} onChange={(e) => update('time', e.target.value)} className={inputCls('time')} />
+                <TimePickerField
+                  id="edit-event-time"
+                  value={form.time}
+                  min={minTime}
+                  onChange={(next) => update('time', next)}
+                  className={errors.time ? 'ring-1 ring-destructive border-destructive/50' : undefined}
+                />
                 {errors.time && <span className="text-[10px] text-destructive px-1">{errors.time}</span>}
               </div>
             </div>

@@ -36,7 +36,7 @@ export async function fetchMyProfile(token: string | null = getAuthToken()): Pro
       if (!res.ok) throw new ProfileMeError(res.status, body);
       return body;
     },
-    TTL.LONG,
+    TTL.SESSION,
     true,
   );
 }

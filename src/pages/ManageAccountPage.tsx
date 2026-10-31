@@ -16,10 +16,10 @@ import {
   Trash2,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import TopBar from '@/components/TopBar';
 import BottomNav from '@/components/BottomNav';
 import { UserAvatar } from '@/components/UserAvatar';
 import AppToast from '@/components/AppToast';
+import ProfileLoadingRunner from '@/components/ProfileLoadingRunner';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -40,7 +40,7 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { profileFromMeResponse } from '@/lib/username';
 import { fetchBlockedUsers, unblockUser, userAvatarUrl, userProfilePath, type BlockedUserItem } from '@/lib/friendsApi';
 import { clearCache } from '@/lib/queryCache';
-import { clearAllQueries } from '@/lib/queries';
+import { clearAllQueries, invalidateNotifications } from '@/lib/queries';
 import { stopSessionTimeout } from '@/lib/sessionTimeout';
 import {
   changeAccountPassword,
@@ -177,6 +177,10 @@ export default function ManageAccountPage() {
     if (!user) navigate('/login');
   }, [user, navigate]);
 
+  useEffect(() => {
+    setPrefs(readNotificationPrefs(user?.id));
+  }, [user?.id]);
+
   if (!user) return null;
 
   const leaveSession = () => {
@@ -247,9 +251,11 @@ export default function ManageAccountPage() {
   };
 
   const togglePref = (key: NotificationPrefKey, on: boolean) => {
+    if (!user?.id) return;
     const next = { ...prefs, [key]: on };
     setPrefs(next);
     writeNotificationPrefs(user.id, next);
+    invalidateNotifications();
   };
 
   const handleHomeSelect = (result: LocationResult) => {
@@ -291,8 +297,7 @@ export default function ManageAccountPage() {
         show={toast.show}
         onClose={() => setToast((t) => ({ ...t, show: false }))}
       />
-      <TopBar showSearch={false} />
-
+      {unblockingId && <ProfileLoadingRunner overlay label="Loading…" />}
       <motion.main
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}

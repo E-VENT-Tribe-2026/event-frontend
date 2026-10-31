@@ -178,6 +178,22 @@ describe('HomePage — Upcoming For You section (#244)', () => {
     });
   });
 
+  it('opens My Calendar as a popup and shows that day’s events in a modal', async () => {
+    mockFetch({
+      myEvents: [apiEventRow({ id: 'organized-1', title: 'My Organized Event', status: 'active' })],
+      joinedEvents: [apiEventRow({ id: 'joined-1', title: 'Event I Joined', start_datetime: '2030-08-01T15:00:00.000Z' })],
+    });
+
+    renderHome();
+    await waitFor(() => expect(screen.getByTestId('my-calendar')).toHaveTextContent('2'));
+    fireEvent.click(screen.getByTestId('my-calendar'));
+    const calendarDialog = await screen.findByTestId('my-calendar-dialog');
+    fireEvent.click(within(calendarDialog).getByRole('gridcell', { name: '20' }));
+    const dayModal = await screen.findByTestId('my-calendar-day-events');
+    expect(within(dayModal).getByText('My Organized Event')).toBeInTheDocument();
+    expect(within(dayModal).queryByText('Event I Joined')).not.toBeInTheDocument();
+  });
+
   it('shows an empty-state message when the user has no upcoming events', async () => {
     mockFetch({ myEvents: [], joinedEvents: [] });
 

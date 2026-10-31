@@ -72,6 +72,7 @@ describe('LoginPage — suspended account (ticket #294 Part 5)', () => {
     const banner = await screen.findByRole('alert');
     expect(banner).toHaveTextContent('Your account is suspended.');
     expect(banner).toHaveTextContent('Repeated spam in event chats.');
+    expect(screen.getByRole('link', { name: 'Go to welcome' })).toHaveAttribute('href', '/');
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(getAuthToken()).toBeNull();
   });

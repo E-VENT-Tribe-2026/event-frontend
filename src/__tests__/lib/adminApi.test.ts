@@ -15,6 +15,11 @@ import {
   liftSuspension,
   isSuspendedAccount,
   sendSignupInvite,
+  userReportListsFromDetails,
+  readUserReportRefs,
+  fetchAdminReports,
+  fetchAdminReportDetail,
+  dismissReport,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 import * as storageModule from '@/lib/storage';
@@ -442,4 +447,145 @@ describe('adminApi service', () => {
       }),
     );
   });
+
+  it('reads an event report from target_id and event_title when event is not nested', () => {
+    const refs = readUserReportRefs([
+      {
+        id: '41',
+        status: 'open',
+        reason: 'misleading_event',
+        target_type: 'event',
+        created_at: '2026-10-25T10:00:00Z',
+        target_id: 'ev-1',
+        event_title: 'Rooftop Jazz Night',
+      },
+    ]);
+    expect(refs[0].event).toEqual({ id: 'ev-1', title: 'Rooftop Jazz Night' });
+  });
+
+  it('reads reports_made from nested reports.made', () => {
+    const lists = userReportListsFromDetails({
+      reports: {
+        made: [{ id: '9', status: 'open', reason: 'spam', target_type: 'event', event: { id: 'ev-2', title: 'Brunch' } }],
+        about: [],
+      },
+    });
+    expect(lists.madeProvided).toBe(true);
+    expect(lists.made[0].event?.title).toBe('Brunch');
+  });
+
+  it('asks the reports list for one reporter', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 11,
+            status: 'open',
+            target_type: 'event',
+            reason: 'spam',
+            origin: 'event_details',
+            created_at: '2026-10-25T10:00:00Z',
+            reporter: { id: 'u-alice', full_name: 'Alice' },
+            event: { id: 'ev-1', title: 'Jazz' },
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 50,
+        total_pages: 1,
+      }),
+    );
+    const page = await fetchAdminReports(1, 50, undefined, { reporterId: 'u-alice' });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('reporter_id=u-alice');
+    expect(page.items[0].event?.title).toBe('Jazz');
+  });
+
+  it('reads a reported chat message’s text and sender from nested reported.message', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 13,
+        status: 'open',
+        reason: 'spam',
+        origin: 'event_chat',
+        created_at: '2026-10-23T08:00:00Z',
+        reporter: { id: 'u-alice', full_name: 'Alice Martin', username: 'alice' },
+        reported: {
+          type: 'message',
+          message: {
+            id: 501,
+            content: '{"v":1,"type":"text","text":"Buy cheap followers now!!!"}',
+            sender: { id: 'u-bob', full_name: 'Bob Stone', username: 'bob' },
+          },
+        },
+      }),
+    );
+    const detail = await fetchAdminReportDetail('13');
+    expect(detail.target_type).toBe('message');
+    expect(detail.message?.content).toBe('Buy cheap followers now!!!');
+    expect(detail.message?.sender?.full_name).toBe('Bob Stone');
+  });
+
+  it('dismisses a report with POST /dismiss and no body, and reads a nested Dismissed status', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        report: {
+          id: 11,
+          status: 'Dismissed',
+          target_type: 'event',
+          reason: 'spam',
+          origin: 'event_details',
+          created_at: '2026-10-25T10:00:00Z',
+          event: { id: 'ev-1', title: 'Jazz' },
+        },
+      }),
+    );
+    const closed = await dismissReport('11');
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/reports/11/dismiss');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+    expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+    expect(closed.status).toBe('dismissed');
+    expect(closed.outcome).toBe('dismissed');
+    expect(closed.event?.title).toBe('Jazz');
+  });
+
+  it('falls back to POST /action when /dismiss is missing', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ detail: 'Not Found' }, { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 11,
+          status: 'dismissed',
+          target_type: 'event',
+          reason: 'spam',
+          origin: 'event_details',
+          created_at: '2026-10-25T10:00:00Z',
+        }),
+      );
+    const closed = await dismissReport('11');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/admin/reports/11/action');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ action: 'dismiss' });
+    expect(closed.status).toBe('dismissed');
+  });
+
+  it('falls back to POST /action when /dismiss returns 500', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response('Internal Server Error', { status: 500, headers: { 'content-type': 'text/plain' } }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 11,
+          status: 'dismissed',
+          target_type: 'event',
+          reason: 'spam',
+          origin: 'event_details',
+          created_at: '2026-10-25T10:00:00Z',
+        }),
+      );
+    const closed = await dismissReport('11');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/admin/reports/11/action');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ action: 'dismiss' });
+    expect(closed.status).toBe('dismissed');
+  });
+
 });

@@ -61,6 +61,27 @@ describe('fetchUserProfile blocking', () => {
     });
   });
 
+  it('reads visibility and activity counts from a private profile payload', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      id: 'u3',
+      username: 'private_user',
+      full_name: 'Private User',
+      avatar_url: null,
+      avatar_kind: 'icon',
+      icon_id: 'sun',
+      visibility: 'friends_only',
+      joined_events_count: 4,
+      friends_count: 7,
+      organized_events_count: 2,
+    }));
+    const profile = await fetchUserProfile('u3');
+    expect(profile.visibility).toBe('private');
+    expect(profile.is_private).toBe(true);
+    expect(profile.joined_events_count).toBe(4);
+    expect(profile.friends_count).toBe(7);
+    expect(profile.organized_events_count).toBe(2);
+  });
+
   it('treats friends_only as private for the editor', () => {
     expect(toProfileVisibility('public')).toBe('public');
     expect(toProfileVisibility('private')).toBe('private');

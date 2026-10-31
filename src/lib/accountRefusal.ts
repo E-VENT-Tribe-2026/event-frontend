@@ -21,6 +21,11 @@ export type AccountRefusal =
   | { kind: 'suspended'; reason: string | null }
   | { kind: 'administrator' };
 
+export function announceAccountRefusal(refusal: AccountRefusal) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent<AccountRefusal>(ACCOUNT_REFUSED_EVENT, { detail: refusal }));
+}
+
 const ADMINISTRATOR_REFUSAL = 'Administrator accounts cannot perform user actions.';
 
 const WRAPPED = Symbol.for('eventapp.accountRefusalWatcher');
@@ -52,7 +57,7 @@ function inspect(res: Response, token: string) {
         const refusal = refusalFrom(body);
         // The session may have changed while the body was read.
         if (!refusal || getAuthToken() !== token) return;
-        window.dispatchEvent(new CustomEvent<AccountRefusal>(ACCOUNT_REFUSED_EVENT, { detail: refusal }));
+        announceAccountRefusal(refusal);
       })
       .catch(() => {});
   } catch {

@@ -14,6 +14,17 @@ describe('cachedFetch', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('restores a persisted entry from sessionStorage without refetching', async () => {
+    const fetcher = vi.fn(async () => ({ n: 1 }));
+    sessionStorage.setItem(
+      'qc:k-sess',
+      JSON.stringify({ data: { n: 9 }, fetchedAt: Date.now(), ttl: TTL.MEDIUM }),
+    );
+    const value = await cachedFetch('k-sess', fetcher, TTL.MEDIUM);
+    expect(value).toEqual({ n: 9 });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('returns stale data immediately while a refresh runs', async () => {
     const fetcher = vi.fn(async () => ({ n: 2 }));
     setCacheEntry('k-stale', { n: 1 }, 1);

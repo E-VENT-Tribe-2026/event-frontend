@@ -14,7 +14,7 @@ import { deleteNotification, deleteNotifications, markAllNotificationsRead, mark
 import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck, AlertTriangle, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
-import TopBar from '@/components/TopBar';
+import { useTopBarSearch } from '@/app/AppChrome';
 import AppToast from '@/components/AppToast';
 import WarningDialog from '@/components/WarningDialog';
 import { useNotifications, invalidateNotifications } from '@/lib/queries';
@@ -93,32 +93,52 @@ function isFriendKind(kind: NotificationKind): boolean {
   return kind === 'friend_request' || kind === 'friend_request_accepted';
 }
 
+function isActivityKind(kind: NotificationKind): boolean {
+  return (
+    kind === 'user_joined' ||
+    kind === 'user_left' ||
+    kind === 'event_created' ||
+    kind === 'event_invitation' ||
+    kind === 'event_chat'
+  );
+}
+
+function isUpdatesKind(kind: NotificationKind): boolean {
+  return kind === 'event_updated' || kind === 'event_cancelled' || kind === 'event_deleted';
+}
+
 /** A warning that still waits for acknowledgement: it cannot be selected or deleted. */
 function isWaitingWarning(n: UINotification): boolean {
   return n.kind === 'warning' && !n.warningAcknowledged && !n.warningWithdrawn;
 }
 
-function normalizeKind(type: string): NotificationKind {
+function normalizeKind(type: string, isWarning?: boolean): NotificationKind {
   const t = type.toLowerCase().trim();
-  if (t === 'warning') return 'warning';
-  if (t === 'friend_request_accepted') return 'friend_request_accepted';
-  if (t === 'event_invitation') return 'event_invitation';
+  if (isWarning || t === 'warning' || t.includes('warn')) return 'warning';
+  if (t === 'friend_request_accepted' || (t.includes('friend') && t.includes('accept'))) {
+    return 'friend_request_accepted';
+  }
+  if (t.startsWith('friend_request') || t.includes('friend_request') || t.includes('friend request')) {
+    return 'friend_request';
+  }
+  if (t.includes('invit')) return 'event_invitation';
   if (t === 'event_chat' || t === 'chat' || t === 'chat_message' || t === 'new_message' || t === 'message' || t.includes('chat')) {
     return 'event_chat';
   }
-  if (t.startsWith('friend_request')) return 'friend_request';
+  if (t === 'reminder' || t.includes('remind')) return 'reminder';
   if (t === 'user_joined' || t.includes('joined')) return 'user_joined';
-  if (t === 'user_left' || t.includes('left')) return 'user_left';
-  if (t === 'event_created' || t.includes('creat')) return 'event_created';
-  if (t === 'event_updated' || t.includes('updat')) return 'event_updated';
-  if (t === 'event_deleted' || t.includes('delet')) return 'event_deleted';
+  if (t === 'user_left' || t.includes('participant_left') || t.includes('user_left') || t.endsWith('_left')) {
+    return 'user_left';
+  }
+  if (t === 'event_created' || t.includes('created')) return 'event_created';
+  if (t === 'event_updated' || t.includes('updated')) return 'event_updated';
+  if (t === 'event_deleted' || t.includes('deleted')) return 'event_deleted';
   if (t === 'event_cancelled' || t.includes('cancel')) return 'event_cancelled';
-  if (t === 'reminder') return 'reminder';
   return 'other';
 }
 
 function fromApi(n: ApiNotification): UINotification {
-  const kind = normalizeKind(n.type);
+  const kind = normalizeKind(n.type, n.is_warning === true);
   const base: UINotification = {
     id: n.id,
     kind,
@@ -183,10 +203,11 @@ export default function NotificationsPage() {
   }, []);
 
   useEffect(() => {
+    setPrefs(readNotificationPrefs(user?.id));
     const syncPrefs = () => setPrefs(readNotificationPrefs(getCurrentUser()?.id));
     window.addEventListener(NOTIFICATION_PREFS_EVENT, syncPrefs);
     return () => window.removeEventListener(NOTIFICATION_PREFS_EVENT, syncPrefs);
-  }, []);
+  }, [user?.id]);
 
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
@@ -195,7 +216,7 @@ export default function NotificationsPage() {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'success' | 'error' });
   const [subFilter, setSubFilter] = useState<'all' | 'friends' | 'activity' | 'updates' | 'reminders'>('all');
-  const [search, setSearch] = useState('');
+  const { search, setSearch } = useTopBarSearch();
   const [visibleCount, setVisibleCount] = useState(10);
   const PAGE_SIZE = 10;
 
@@ -278,17 +299,16 @@ export default function NotificationsPage() {
 
   const filteredItems = useMemo(() => {
     let next = feedItems;
-    if (subFilter === 'friends') {
-      next = feedItems.filter((n) => isFriendKind(n.kind));
-    } else if (subFilter === 'activity') {
-      next = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'event_invitation' || n.kind === 'event_chat');
-    } else if (subFilter === 'updates') {
-      next = feedItems.filter((n) => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted');
-    } else if (subFilter === 'reminders') {
-      next = feedItems.filter((n) => n.kind === 'reminder');
-    }
+    if (subFilter === 'friends') next = feedItems.filter((n) => isFriendKind(n.kind));
+    else if (subFilter === 'activity') next = feedItems.filter((n) => isActivityKind(n.kind));
+    else if (subFilter === 'updates') next = feedItems.filter((n) => isUpdatesKind(n.kind));
+    else if (subFilter === 'reminders') next = feedItems.filter((n) => n.kind === 'reminder');
     return next.filter(matchesSearch);
   }, [feedItems, subFilter, query]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [subFilter, query]);
 
   const groupedItems = useMemo(() => {
     const today: UINotification[] = [];
@@ -318,8 +338,8 @@ export default function NotificationsPage() {
   }, [filteredItems]);
 
   const unreadCount = useMemo(() => feedItems.filter((n) => !n.read).length, [feedItems]);
-  const activityCount = feedItems.filter((n) => n.kind === 'user_joined' || n.kind === 'user_left' || n.kind === 'event_created' || n.kind === 'event_invitation' || n.kind === 'event_chat').length;
-  const updatesCount = feedItems.filter((n) => n.kind === 'event_updated' || n.kind === 'event_cancelled' || n.kind === 'event_deleted').length;
+  const activityCount = feedItems.filter((n) => isActivityKind(n.kind)).length;
+  const updatesCount = feedItems.filter((n) => isUpdatesKind(n.kind)).length;
   const remindersCount = feedItems.filter((n) => n.kind === 'reminder').length;
   const friendsCount = feedItems.filter((n) => isFriendKind(n.kind)).length;
   const selectedCount = selectedIds.size;
@@ -373,7 +393,8 @@ export default function NotificationsPage() {
   };
 
   const onDeleteSelected = async () => {
-    const ids = Array.from(selectedIds);
+    const visible = new Set(filteredItems.map((n) => n.id));
+    const ids = Array.from(selectedIds).filter((id) => visible.has(id) && !isPendingItem(id));
     if (ids.length === 0 || deletingSelected) return;
 
     const previousItems = items;
@@ -669,11 +690,6 @@ export default function NotificationsPage() {
       />
 
       <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-md">
-        <TopBar
-          search={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="Search notifications..."
-        />
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
           <h1 className="text-base font-bold text-foreground">Notifications</h1>
           <div className="flex items-center gap-2">

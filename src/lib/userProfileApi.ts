@@ -46,10 +46,15 @@ export type UserProfile = {
   banner_url?: string | null;
   bio?: string | null;
   interests?: string[] | null;
+  visibility?: ProfileVisibility;
+  is_private?: boolean;
   /** Left out when the viewer may not see any events. */
   events?: { organized?: ProfileEventGroup; joined?: ProfileEventGroup } | null;
   /** First page of this user's friends; left out when the viewer may not see them. */
   friends?: UserSummary[];
+  friends_count?: number;
+  organized_events_count?: number;
+  joined_events_count?: number;
   /** True when the viewer has blocked this user. */
   blocked_by_me?: boolean;
   friendship?: Friendship | null;
@@ -108,6 +113,85 @@ export function visibilityForApi(value: ProfileVisibility): 'public' | 'private'
   return value === 'private' ? 'private' : 'public';
 }
 
+function asNonNegInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.floor(value);
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return undefined;
+}
+
+function eventGroupTotal(group: unknown): number | undefined {
+  if (!group || typeof group !== 'object' || Array.isArray(group)) return undefined;
+  const g = group as Record<string, unknown>;
+  const explicit = asNonNegInt(g.count) ?? asNonNegInt(g.total);
+  if (explicit != null) return explicit;
+  const upcoming = Array.isArray(g.upcoming) ? g.upcoming.length : 0;
+  const past = Array.isArray(g.past) ? g.past.length : 0;
+  const cancelled = Array.isArray(g.cancelled) ? g.cancelled.length : 0;
+  if ('upcoming' in g || 'past' in g || 'cancelled' in g) return upcoming + past + cancelled;
+  return undefined;
+}
+
+export function isPrivateUserProfile(
+  profile: Pick<UserProfile, 'visibility' | 'is_private' | 'blocked_by_me'>,
+): boolean {
+  if (profile.blocked_by_me) return false;
+  if (profile.is_private === true) return true;
+  return profile.visibility === 'private';
+}
+
+export function normalizeUserProfile(raw: Record<string, unknown>): UserProfile {
+  const visibilityRaw = raw.visibility ?? raw.profile_visibility;
+  const visibility = visibilityRaw != null ? toProfileVisibility(visibilityRaw) : undefined;
+  const events = raw.events;
+  const friends = raw.friends;
+  const countsObj =
+    raw.counts && typeof raw.counts === 'object' && !Array.isArray(raw.counts)
+      ? (raw.counts as Record<string, unknown>)
+      : {};
+
+  const is_private =
+    raw.blocked_by_me === true
+      ? false
+      : visibility === 'private' || raw.is_private === true || raw.private === true;
+
+  const eventsRecord =
+    events && typeof events === 'object' && !Array.isArray(events)
+      ? (events as Record<string, unknown>)
+      : {};
+
+  const organized_events_count =
+    asNonNegInt(raw.organized_events_count) ??
+    asNonNegInt(raw.organized_count) ??
+    asNonNegInt(countsObj.organized_events) ??
+    asNonNegInt(countsObj.organized) ??
+    eventGroupTotal(eventsRecord.organized) ??
+    0;
+
+  const joined_events_count =
+    asNonNegInt(raw.joined_events_count) ??
+    asNonNegInt(raw.joined_count) ??
+    asNonNegInt(countsObj.joined_events) ??
+    asNonNegInt(countsObj.joined) ??
+    eventGroupTotal(eventsRecord.joined) ??
+    0;
+
+  const friends_count =
+    asNonNegInt(raw.friends_count) ??
+    asNonNegInt(raw.friend_count) ??
+    asNonNegInt(countsObj.friends) ??
+    (Array.isArray(friends) ? friends.length : undefined) ??
+    0;
+
+  return {
+    ...(raw as UserProfile),
+    visibility: visibility ?? (is_private ? 'private' : undefined),
+    is_private,
+    organized_events_count,
+    joined_events_count,
+    friends_count,
+  };
+}
+
 function authHeaders(): Record<string, string> {
   const token = getAuthToken();
   return { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
@@ -124,7 +208,7 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile> {
   const inner = [root.data, root.user, root.profile, root].find(
     (value) => value && typeof value === 'object' && !Array.isArray(value),
   );
-  return (inner || root) as UserProfile;
+  return normalizeUserProfile((inner || root) as Record<string, unknown>);
 }
 
 function cacheScope(): string {

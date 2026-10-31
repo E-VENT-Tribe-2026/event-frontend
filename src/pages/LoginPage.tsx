@@ -7,6 +7,8 @@ import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { announceAccountRefusal } from '@/lib/accountRefusal';
+import { isSuspendedAccount } from '@/lib/adminApi';
 import { setAuthToken } from '@/lib/auth';
 import { fetchAuthUserFromToken } from '@/lib/authProfile';
 import { destinationAfterSignIn } from '@/lib/username';
@@ -118,6 +120,14 @@ export default function LoginPage() {
         bio = String(p.bio || '');
         interests = Array.isArray(p.interests) ? (p.interests as string[]) : [];
         username = typeof p.username === 'string' ? p.username : undefined;
+        if (isSuspendedAccount(p)) {
+          const raw = p.suspension;
+          const reason =
+            raw && typeof raw === 'object' && typeof (raw as { reason?: unknown }).reason === 'string'
+              ? ((raw as { reason: string }).reason.trim() || null)
+              : null;
+          announceAccountRefusal({ kind: 'suspended', reason });
+        }
       } catch {
         /* use defaults */
       }
@@ -223,6 +233,13 @@ export default function LoginPage() {
                 )}
               </div>
             </div>
+          )}
+          {suspension && (
+            <p className="text-center text-sm">
+              <Link to="/" className="text-primary font-semibold hover:underline">
+                Go to welcome
+              </Link>
+            </p>
           )}
 
           {/* Form */}

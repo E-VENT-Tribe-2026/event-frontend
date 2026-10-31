@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   fetchAdminUserDetails,
+  fetchReportsFiledByUser,
   fetchUserWarnings,
   grantAdminRole,
   warnUser,
@@ -43,7 +44,7 @@ import {
   suspendUser,
   liftSuspension,
   isSuspendedAccount,
-  readUserReportRefs,
+  userReportListsFromDetails,
   reportReasonLabel,
   type AdminUserReportRef,
   type AdminUserDetailsFull,
@@ -360,43 +361,58 @@ function PersonColumn({
   );
 }
 
+function reportKindLabel(type: AdminUserReportRef['target_type']): string {
+  return type === 'user' ? 'User' : type === 'message' ? 'Chat message' : 'Event';
+}
+
 function ReportList({
   icon,
   title,
   reports,
   emptyMessage,
   onOpenReport,
+  onOpenEvent,
 }: {
   icon: LucideIcon;
   title: string;
   reports: AdminUserReportRef[];
   emptyMessage: string;
   onOpenReport?: (reportId: string) => void;
+  onOpenEvent?: (eventId: string) => void;
 }) {
   return (
-    <div className="space-y-2" aria-label={title}>
+    <div id={title === 'Reports made by this user' ? 'reports-made' : undefined} className="space-y-2" aria-label={title}>
       <SectionTitle icon={icon} title={title} count={reports.length} size="sm" />
       {reports.length === 0 ? (
         <EmptyBox>{emptyMessage}</EmptyBox>
       ) : (
         <div className="space-y-2">
-          {reports.map((r) => (
-            <button
+          {reports.map((r) => {
+            const eventTitle = r.event?.title;
+            const eventId = r.event?.id;
+            const showEvent = r.target_type === 'event' || Boolean(eventTitle);
+            return (
+            <div
               key={r.id}
-              type="button"
-              onClick={onOpenReport ? () => onOpenReport(r.id) : undefined}
-              aria-label={`Open report: ${reportReasonLabel(r.reason)}${r.event ? `, event ${r.event.title}` : ''}`}
-              className="flex w-full items-center justify-between gap-3 rounded-xl p-2.5 text-left transition-colors hover:bg-[hsl(213_45%_22%/.7)]"
+              className="flex items-center justify-between gap-3 rounded-xl p-2.5"
               style={{ background: 'hsl(213 40% 18% / .55)' }}
             >
-              <div className="min-w-0">
+              <button
+                type="button"
+                onClick={onOpenReport ? () => onOpenReport(r.id) : undefined}
+                aria-label={`Open report: ${reportReasonLabel(r.reason)}${eventTitle ? `, event ${eventTitle}` : ''}`}
+                className="min-w-0 flex-1 text-left"
+              >
                 <p className="truncate text-[13px] font-semibold" style={{ color: 'var(--adm-fg)' }}>
                   {reportReasonLabel(r.reason)}
+                  <span className="ml-1.5 text-[11px] font-medium" style={{ color: 'var(--adm-muted-fg)' }}>
+                    {reportKindLabel(r.target_type)}
+                  </span>
                 </p>
-                {r.event && (
+                {showEvent && (
                   <p className="flex items-center gap-1 truncate text-[11px]" style={{ color: 'var(--adm-primary-text)' }}>
                     <CalendarDays className="h-3 w-3 shrink-0" />
-                    Event: {r.event.title}
+                    Event: {eventTitle || 'Unknown event'}
                   </p>
                 )}
                 {r.created_at && (
@@ -404,10 +420,23 @@ function ReportList({
                     {formatYmd(r.created_at)}
                   </p>
                 )}
+              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {eventId && onOpenEvent && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenEvent(eventId)}
+                    className="rounded-lg border px-2 py-1 text-[10px] font-semibold"
+                    style={{ borderColor: 'var(--adm-border)', color: 'var(--adm-primary-text)' }}
+                  >
+                    Open event
+                  </button>
+                )}
+                <ReportStatusPill status={r.status} />
               </div>
-              <ReportStatusPill status={r.status} />
-            </button>
-          ))}
+            </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -439,6 +468,7 @@ export default function AdminUserDetail({
   const [withdrawWarningId, setWithdrawWarningId] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<boolean>(false);
   const [pendingWithdrawWarning, setPendingWithdrawWarning] = useState<AdminUserWarning | null>(null);
+  const [filedReports, setFiledReports] = useState<AdminUserReportRef[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -469,6 +499,26 @@ export default function AdminUserDetail({
       cancelled = true;
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (!user) return;
+    const lists = userReportListsFromDetails(user);
+    if (lists.madeProvided && lists.made.length > 0) {
+      setFiledReports(null);
+      return;
+    }
+    let cancelled = false;
+    fetchReportsFiledByUser(user.id)
+      .then((rows) => {
+        if (!cancelled) setFiledReports(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setFiledReports([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const openDialog = (kind: DialogKind) => {
     setReason('');
@@ -557,8 +607,10 @@ export default function AdminUserDetail({
   const needsReason = dialogKind === 'warn' || dialogKind === 'suspend' || dialogKind === 'lift';
 
   const extra = (user ?? {}) as UserExtra;
-  const reportsAbout = readUserReportRefs(extra.reports_about);
-  const reportsMade = readUserReportRefs(extra.reports_made);
+  const reportLists = userReportListsFromDetails(user);
+  const reportsAbout = reportLists.about;
+  const reportsMade =
+    reportLists.made.length > 0 ? reportLists.made : (filedReports ?? reportLists.made);
   const warnings = (user?.warnings ?? []) as WarningExtra[];
   const warningCount = warnings.length;
   const sortedWarnings = [...warnings].sort(
@@ -786,6 +838,33 @@ export default function AdminUserDetail({
                   <AlertTriangle className="h-3.5 w-3.5" />
                   Warn
                 </button>
+
+                {!isAdmin && (
+                  <button
+                    type="button"
+                    data-testid="action-reports-made"
+                    onClick={() =>
+                      document.getElementById('reports-made')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95"
+                    style={{
+                      borderColor: 'var(--adm-border)',
+                      background: 'var(--adm-secondary)',
+                      color: 'var(--adm-fg)',
+                    }}
+                  >
+                    <Flag className="h-3.5 w-3.5" style={{ color: 'var(--adm-primary-text)' }} />
+                    Reports they made
+                    {reportsMade.length > 0 && (
+                      <span
+                        className="rounded-full px-1.5 text-[10px] font-bold"
+                        style={{ background: 'hsl(271 76% 53%)', color: 'white' }}
+                      >
+                        {reportsMade.length}
+                      </span>
+                    )}
+                  </button>
+                )}
 
                 {isSuspended ? (
                   <button
@@ -1067,6 +1146,7 @@ export default function AdminUserDetail({
                   reports={reportsAbout}
                   emptyMessage="No reports about this user."
                   onOpenReport={onOpenReport}
+                  onOpenEvent={onOpenEvent}
                 />
 
                 <div className="border-t" style={{ borderColor: 'var(--adm-border)' }} />
@@ -1077,6 +1157,7 @@ export default function AdminUserDetail({
                   reports={reportsMade}
                   emptyMessage="This user has not reported anything."
                   onOpenReport={onOpenReport}
+                  onOpenEvent={onOpenEvent}
                 />
               </div>
             )}

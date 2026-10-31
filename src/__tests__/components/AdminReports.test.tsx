@@ -162,15 +162,18 @@ describe('Reports tab', () => {
 
     const open = await screen.findByRole('region', { name: 'open-reports' });
     await within(open).findByText('Rooftop Jazz Night');
-    expect(within(open).getByTestId('open-reports-count')).toHaveTextContent('2 reports');
-    const row = within(open).getByRole('button', { name: /report about Rooftop Jazz Night/ });
+    expect(within(open).getByTestId('open-reports-count')).toHaveTextContent('Open reports · 2');
+    expect(within(open).getByText(/Reports not handled yet/)).toBeInTheDocument();
+    const row = within(open).getByRole('button', { name: /report by Alice Martin about Rooftop Jazz Night/ });
+    expect(row).toHaveTextContent('Reported by');
+    expect(row).toHaveTextContent('Alice Martin');
     expect(row).toHaveTextContent('Misleading event');
-    expect(row).toHaveTextContent('by Alice Martin');
-    expect(row).toHaveTextContent('Oct 25, 2026');
+    expect(row).toHaveTextContent('From event page');
+    expect(row).toHaveTextContent('2026-10-25');
     expect(row).toHaveTextContent('Open');
 
     const all = screen.getByRole('region', { name: 'all-reports' });
-    expect(within(all).getByTestId('all-reports-count')).toHaveTextContent('3 reports');
+    expect(within(all).getByTestId('all-reports-count')).toHaveTextContent('All reports · 3');
     expect(within(all).getByText('Dismissed')).toBeInTheDocument();
     expect(calls.every((c) => c.cache === 'no-store')).toBe(true);
   });
@@ -203,8 +206,23 @@ describe('Reports tab', () => {
 
     openItems = [messageReport, eventReport];
     rerender(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} liveVersion={1} />);
-    expect(await within(open).findByText('Message by Bob Stone in Board Games Evening')).toBeInTheDocument();
-    expect(within(open).getByTestId('open-reports-count')).toHaveTextContent('2 reports');
+    expect(await within(open).findByText('Bob Stone')).toBeInTheDocument();
+    expect(within(open).getByText('From event chat')).toBeInTheDocument();
+    expect(within(open).getByTestId('open-reports-count')).toHaveTextContent('Open reports · 2');
+  });
+
+  it('lists a chat report with the sender and the reported text', async () => {
+    routes.push(
+      on('GET', '/api/admin/reports', (c) =>
+        c.search.get('status') === 'open' ? page([messageReport], 1, 1, 1) : page([messageReport], 1, 1, 1),
+      ),
+    );
+    render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
+    const open = await screen.findByRole('region', { name: 'open-reports' });
+    const row = await within(open).findByRole('button', { name: /report by Alice Martin about Message by Bob Stone/ });
+    expect(row).toHaveTextContent('Message');
+    expect(row).toHaveTextContent('Bob Stone');
+    expect(row).toHaveTextContent('Buy cheap followers now!!!');
   });
 
   it('opens a report when its row is pressed', async () => {
@@ -212,7 +230,7 @@ describe('Reports tab', () => {
     const onOpenReport = vi.fn();
     render(<AdminReportsTab onOpenReport={onOpenReport} onErrorToast={vi.fn()} />);
     const open = await screen.findByRole('region', { name: 'open-reports' });
-    fireEvent.click(await within(open).findByRole('button', { name: /report about Bob Stone/ }));
+    fireEvent.click(await within(open).findByRole('button', { name: /report by Alice Martin about Bob Stone/ }));
     expect(onOpenReport).toHaveBeenCalledWith('12');
   });
 });
@@ -279,6 +297,8 @@ describe('Report details', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Open event details/ }));
     expect(h.onOpenEvent).toHaveBeenCalledWith('ev-2');
+    expect(await screen.findByText('Sender: Bob Stone')).toBeInTheDocument();
+    expect(screen.getByTestId('reported-message-text')).toHaveTextContent('Buy cheap followers now!!!');
   });
 
   it('offers Dismiss, Warn, Remove and Suspend on an open event report, and says warning and suspending apply to the organizer', async () => {
@@ -499,6 +519,15 @@ describe('Report history in user details', () => {
           ],
           reports_made: [
             { id: 23, status: 'dismissed', reason: 'other', target_type: 'user', created_at: '2026-10-19T10:00:00Z', event: null },
+            {
+              id: 24,
+              status: 'open',
+              reason: 'misleading_event',
+              target_type: 'event',
+              created_at: '2026-10-25T11:00:00Z',
+              target_id: 'ev-1',
+              event_title: 'Rooftop Jazz Night',
+            },
           ],
         }),
       ),
@@ -519,8 +548,45 @@ describe('Report history in user details', () => {
 
     const made = screen.getByLabelText('Reports made by this user');
     expect(within(made).getByText('Dismissed')).toBeInTheDocument();
+    expect(within(made).getByText('Event: Rooftop Jazz Night')).toBeInTheDocument();
+    expect(screen.getByTestId('action-reports-made')).toHaveTextContent('Reports they made');
     fireEvent.click(within(made).getByRole('button', { name: /Open report: Other/ }));
     expect(onOpenReport).toHaveBeenCalledWith('23');
+  });
+
+  it('loads event reports they filed when user details omit reports_made', async () => {
+    routes.push(
+      on('GET', '/api/admin/users/u-bob', () => userBody({ reports_made: [] })),
+      on('GET', '/api/admin/users/u-bob/warnings', () => ({ items: [] })),
+      on('GET', '/api/admin/reports', () => ({
+        items: [
+          {
+            id: 40,
+            status: 'open',
+            target_type: 'event',
+            reason: 'spam',
+            origin: 'event_details',
+            created_at: '2026-10-25T12:00:00Z',
+            reporter: BOB,
+            event: { id: 'ev-jazz', title: 'Rooftop Jazz Night' },
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 50,
+        total_pages: 1,
+      })),
+    );
+    const onOpenEvent = vi.fn();
+    render(
+      <MemoryRouter>
+        <AdminUserDetail userId="u-bob" onBack={vi.fn()} onOpenEvent={onOpenEvent} onErrorToast={vi.fn()} onSuccessToast={vi.fn()} />
+      </MemoryRouter>,
+    );
+    const made = await screen.findByLabelText('Reports made by this user');
+    expect(await within(made).findByText('Event: Rooftop Jazz Night')).toBeInTheDocument();
+    fireEvent.click(within(made).getByRole('button', { name: /Open event/i }));
+    expect(onOpenEvent).toHaveBeenCalledWith('ev-jazz');
   });
 
   it("shows no report history in an administrator's details", async () => {

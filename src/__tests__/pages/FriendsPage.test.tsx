@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import AppChrome from '@/app/AppChrome';
 import { setAuthToken } from '@/lib/auth';
 import { invalidatePrefix } from '@/lib/queryCache';
 import FriendsPage, { SEARCH_DEBOUNCE_MS } from '@/pages/FriendsPage';
@@ -52,11 +53,13 @@ function route(method: string, path: string, respond: (url: URL) => Promise<Resp
 function renderFriends(initial = '/friends') {
   return render(
     <MemoryRouter initialEntries={[initial]}>
-      <Routes>
-        <Route path="/friends" element={<FriendsPage />} />
-        <Route path="/profile" element={<p>OWN PROFILE TAB</p>} />
-        <Route path="/user/:id" element={<p>OTHER PROFILE</p>} />
-      </Routes>
+      <AppChrome>
+        <Routes>
+          <Route path="/friends" element={<FriendsPage />} />
+          <Route path="/profile" element={<p>OWN PROFILE TAB</p>} />
+          <Route path="/user/:id" element={<p>OTHER PROFILE</p>} />
+        </Routes>
+      </AppChrome>
     </MemoryRouter>,
   );
 }
@@ -109,7 +112,7 @@ describe('FriendsPage', () => {
     );
     renderFriends();
     expect(await screen.findByTestId('friends-discover')).toBeInTheDocument();
-    expect(screen.getByText('Maya K')).toBeInTheDocument();
+    expect(await screen.findByText('Maya K')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add Maya K' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Add Maya K' })).not.toBeInTheDocument());
     const posted = fetchMock.mock.calls.some((call) => {
@@ -118,6 +121,32 @@ describe('FriendsPage', () => {
       return method === 'POST' && url.includes('/api/friends/requests');
     });
     expect(posted).toBe(true);
+  });
+
+  it('covers the screen with loading while a friend request is sending', async () => {
+    let finish!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    handlers.unshift(
+      route('GET', '/api/friends/suggestions', () =>
+        json({ data: [user('sug-1', 'maya_k', 'Maya K')] }),
+      ),
+      route('POST', '/api/friends/requests', () => pending),
+    );
+    renderFriends();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Maya K' }));
+    expect(await screen.findByTestId('profile-loading-runner')).toBeInTheDocument();
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    await act(async () => {
+      finish(
+        new Response(
+          JSON.stringify({ request_id: 99, created_at: '2026-10-01T10:00:00Z', user: user('sug-1', 'maya_k', 'Maya K') }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    });
+    await waitFor(() => expect(screen.queryByTestId('profile-loading-runner')).not.toBeInTheDocument());
   });
 
   it('shows the four sections and lists friends with picture, username and full name', async () => {

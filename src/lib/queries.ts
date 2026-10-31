@@ -2,12 +2,12 @@
  * TanStack Query hooks for frequently accessed data.
  *
  * These replace the manual fetch + useState patterns in pages.
- * Data is automatically cached in localStorage via the persisted QueryClient.
+ * Data is automatically cached in sessionStorage via the persisted QueryClient.
  * On successful mutations (join, leave, create, delete) call the relevant
  * queryClient.invalidateQueries() to trigger a background refresh.
  */
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient } from './queryClient';
+import { keepPreviousData, useQuery, useMutation } from '@tanstack/react-query';
+import { queryClient, SESSION_STALE_TIME } from './queryClient';
 import { getApiUrl } from './api';
 import { getAuthToken, notifyAuthExpired } from './auth';
 import { mapApiEventToItem, parseEventsApiList, parseJoinedEventsApiList } from './mapApiEvent';
@@ -55,7 +55,7 @@ export function useProfile(userId: string | undefined) {
     queryKey: QK.profile(userId ?? ''),
     queryFn: () => apiFetch<Record<string, unknown>>(getApiUrl('/api/profile/me')),
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 5 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -66,13 +66,13 @@ export function useUserProfile(viewerId: string | undefined, userId: string | un
     queryKey: QK.userProfile(viewerId ?? '', userId ?? ''),
     queryFn: () => fetchUserProfile(userId as string),
     enabled: Boolean(viewerId && userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 15 * 60 * 1000,
     // A refused profile (private/missing) is not worth retrying.
     retry: false,
   });
 }
 
-const EVENTS_PAGE_SIZE = 50;
+const EVENTS_PAGE_SIZE = 100;
 const EVENTS_MAX_PAGES = 40;
 
 function eventsListHasMore(body: unknown, pageSize: number, rowCount: number): boolean {
@@ -123,7 +123,8 @@ export function useEvents(params: {
   return useQuery({
     queryKey: QK.events(p),
     queryFn: () => fetchAllPublicEvents(p),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -133,7 +134,7 @@ export function useEventDetail(id: string | undefined) {
     queryKey: QK.eventDetail(id ?? ''),
     queryFn: () => apiFetch<Record<string, unknown>>(`/api/events/${id}`),
     enabled: Boolean(id),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -142,7 +143,7 @@ export function useMaxPrice() {
   return useQuery({
     queryKey: QK.maxPrice(),
     queryFn: () => apiFetch<{ max_price: number }>('/api/events/max-price'),
-    staleTime: 5 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -152,7 +153,7 @@ export function useFavorites(userId: string | undefined) {
     queryKey: QK.favorites(userId ?? ''),
     queryFn: () => apiFetch<Array<{ id?: string; event_id?: string }>>('/api/favorites/all'),
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
     select: (data) => new Set(data.map((f) => f.id || f.event_id || '')),
   });
 }
@@ -168,7 +169,7 @@ export function useRecommendations(userId: string | undefined, hasInterests: boo
       ) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken() && hasInterests),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -197,7 +198,7 @@ export function useMyEvents(userId: string | undefined) {
       ) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -210,7 +211,7 @@ export function useJoinedEvents(userId: string | undefined) {
       return parseJoinedEventsApiList(rows).map(mapApiEventToItem) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
 }
 
@@ -220,8 +221,47 @@ export function useParticipantCount(eventId: string | undefined) {
     queryKey: QK.participants(eventId ?? ''),
     queryFn: () => apiFetch<{ count: number }>(`/api/participants/${eventId}/participants/count`),
     enabled: Boolean(eventId),
-    staleTime: 2 * 60 * 1000,
+    staleTime: SESSION_STALE_TIME,
   });
+}
+
+/** Warm home/profile queries as soon as a session exists so the first screen is cached. */
+export function prefetchSignedInQueries(userId?: string) {
+  const tasks: Array<Promise<unknown>> = [
+    queryClient.prefetchQuery({
+      queryKey: QK.maxPrice(),
+      queryFn: () => apiFetch<{ max_price: number }>('/api/events/max-price'),
+    }),
+    queryClient.prefetchQuery({
+      queryKey: QK.events({}),
+      queryFn: () => fetchAllPublicEvents({}),
+    }),
+  ];
+  if (userId && getAuthToken()) {
+    tasks.push(
+      queryClient.prefetchQuery({
+        queryKey: QK.favorites(userId),
+        queryFn: () => apiFetch<Array<{ id?: string; event_id?: string }>>('/api/favorites/all'),
+      }),
+      queryClient.prefetchQuery({
+        queryKey: QK.myEvents(userId),
+        queryFn: async () => {
+          const data = await apiFetch<{ data?: unknown[] }>('/api/events/my-events');
+          return (Array.isArray(data.data) ? data.data : []).map((row) =>
+            mapApiEventToItem(row as Record<string, unknown>),
+          );
+        },
+      }),
+      queryClient.prefetchQuery({
+        queryKey: QK.joinedEvents(userId),
+        queryFn: async () => {
+          const rows = await apiFetch<unknown>('/api/participants/my/events');
+          return parseJoinedEventsApiList(rows).map(mapApiEventToItem);
+        },
+      }),
+    );
+  }
+  return Promise.allSettled(tasks);
 }
 
 // ── Invalidation helpers ──────────────────────────────────────────────────────

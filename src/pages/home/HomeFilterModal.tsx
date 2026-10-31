@@ -1,5 +1,6 @@
 import { Calendar, MapPin, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import DatePickerField from '@/components/DatePickerField';
 
 type HomeFilterModalProps = {
   open: boolean;
@@ -63,18 +64,20 @@ export default function HomeFilterModal({
             </div>
 
             <div className="p-6 space-y-4">
-              <label className="flex flex-col gap-1.5">
-                <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="home-filter-date" className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                   <Calendar className="h-3.5 w-3.5 text-primary" /> Event date
-                </span>
-                <input
-                  type="date"
+                </label>
+                <DatePickerField
+                  id="home-filter-date"
                   value={filterDate}
                   min={minDate}
-                  onChange={(e) => onFilterDateChange(e.target.value)}
-                  className="rounded-xl bg-secondary px-3.5 py-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40 border border-border/50"
+                  allowEmpty
+                  placeholder="Any date"
+                  onChange={onFilterDateChange}
+                  className="py-2.5 text-xs"
                 />
-              </label>
+              </div>
 
               <label className="flex flex-col gap-1.5">
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
