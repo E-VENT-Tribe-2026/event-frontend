@@ -200,6 +200,7 @@ describe('UserProfilePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /send friend request/i }));
 
     expect(await screen.findByRole('button', { name: /cancel friend request/i })).toBeInTheDocument();
+    expect(screen.getByText('Friend request sent')).toBeInTheDocument();
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/friends/requests'));
     expect(JSON.parse(post!.body!)).toEqual({ receiver_id: OTHER_ID });
     expect(screen.queryByRole('button', { name: /send friend request/i })).not.toBeInTheDocument();

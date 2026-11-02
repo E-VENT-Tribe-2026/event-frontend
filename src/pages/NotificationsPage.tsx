@@ -24,8 +24,8 @@ import { acknowledgeWarning } from '@/lib/warningsApi';
 // Same text as WarningsGate shows when an acknowledgement fails.
 const ACK_ERROR = "We couldn't confirm that you read this warning. Check your connection and try again.";
 
-const WARN = 'hsl(38 92% 52%)';
-const WARN_TEXT = 'hsl(38 95% 66%)';
+const WARN = 'hsl(0 84% 60%)';
+const WARN_TEXT = 'hsl(0 90% 72%)';
 
 type NotificationKind =
   | 'user_joined'
@@ -85,7 +85,7 @@ const colorMap: Record<NotificationKind, string> = {
   friend_request_accepted: 'text-green-500 bg-green-500/15',
   event_invitation: 'text-primary bg-primary/20',
   event_chat:      'text-primary bg-primary/20',
-  warning:         '',
+  warning:         'text-destructive bg-destructive/15',
   other:           'text-primary bg-primary/20',
 };
 
@@ -511,7 +511,7 @@ export default function NotificationsPage() {
     }
   };
 
-  // Amber warning card (mockup .nt.n-warn), on top of the normal card layout.
+  // Red warning card, distinct from other notification kinds.
   const renderWarningCard = (n: UINotification, i: number) => {
     const waiting = isWaitingWarning(n);
     const isDeleting = deletingIds.has(n.id);
@@ -532,11 +532,11 @@ export default function NotificationsPage() {
         tabIndex={0}
         aria-label="Warning from an administrator: tap to read"
         data-testid="warning-card"
-        className="flex items-center gap-3.5 rounded-2xl glass-card p-4 transition-all shadow-sm cursor-pointer hover:!border-[hsl(38_92%_52%_/_.9)] outline-none focus-visible:ring-2 focus-visible:ring-[hsl(38_92%_52%)]"
+        className="flex items-center gap-3.5 rounded-2xl glass-card p-4 transition-all shadow-sm cursor-pointer hover:!border-[hsl(0_84%_60%_/_.9)] outline-none focus-visible:ring-2 focus-visible:ring-[hsl(0_84%_60%)]"
         style={{
-          border: '1px solid hsl(38 92% 52% / .6)',
-          background: 'linear-gradient(145deg, hsl(38 55% 20% / .7), hsl(213 50% 14%))',
-          boxShadow: `inset 4px 0 0 ${WARN}, 0 0 0 3px hsl(38 92% 52% / .08)`,
+          border: '1px solid hsl(0 84% 60% / .6)',
+          background: 'linear-gradient(145deg, hsl(0 55% 18% / .75), hsl(213 50% 14%))',
+          boxShadow: `inset 4px 0 0 ${WARN}, 0 0 0 3px hsl(0 84% 60% / .1)`,
         }}
         onClick={() => onOpenWarning(n)}
         onKeyDown={onKeyDown}
@@ -551,7 +551,7 @@ export default function NotificationsPage() {
             aria-label="Select notification"
           />
         )}
-        <div className="shrink-0 rounded-xl p-2.5 shadow-xs" style={{ background: 'hsl(38 92% 52% / .2)' }}>
+        <div className="shrink-0 rounded-xl p-2.5 shadow-xs" style={{ background: 'hsl(0 84% 60% / .2)' }}>
           <AlertTriangle className="h-4 w-4" style={{ color: WARN_TEXT }} aria-hidden="true" />
         </div>
         <div className="flex-1 min-w-0">

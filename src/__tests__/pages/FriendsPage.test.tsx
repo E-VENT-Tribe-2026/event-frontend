@@ -115,6 +115,7 @@ describe('FriendsPage', () => {
     expect(await screen.findByText('Maya K')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add Maya K' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Add Maya K' })).not.toBeInTheDocument());
+    expect(screen.getByText('Friend request sent')).toBeInTheDocument();
     const posted = fetchMock.mock.calls.some((call) => {
       const url = String(call[0]);
       const method = (call[1] as RequestInit | undefined)?.method;

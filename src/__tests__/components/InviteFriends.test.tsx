@@ -89,6 +89,7 @@ describe('InviteFriendsDialog', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Invite Name ann' }));
 
     expect(await screen.findByText('Invited')).toBeInTheDocument();
+    expect(screen.getByText('Invitation sent')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Invite Name ann' })).toBeDisabled();
     const post = calls.find((c) => c.method === 'POST');
     expect(JSON.parse(post!.body!)).toEqual({ event_id: EVENT_ID, invitee_id: 'f1' });

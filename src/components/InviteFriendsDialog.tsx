@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import AppToast from '@/components/AppToast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { UserAvatar } from '@/components/UserAvatar';
 import { FriendsApiError, userAvatarUrl } from '@/lib/friendsApi';
@@ -29,6 +30,7 @@ export default function InviteFriendsDialog({ open, onOpenChange, eventId }: Pro
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [invitingId, setInvitingId] = useState<string | null>(null);
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
   // Ignore answers of older searches that arrive late.
   const requestSeq = useRef(0);
 
@@ -71,6 +73,7 @@ export default function InviteFriendsDialog({ open, onOpenChange, eventId }: Pro
       setFriends((prev) =>
         prev.map((f) => (f.user.id === friend.user.id ? { ...f, invite_status: 'invited', can_invite: false } : f)),
       );
+      setToast({ show: true, message: 'Invitation sent', type: 'success' });
     } catch (e) {
       setError(e instanceof FriendsApiError ? e.message : 'Could not send the invitation. Please try again.');
     } finally {
@@ -80,6 +83,12 @@ export default function InviteFriendsDialog({ open, onOpenChange, eventId }: Pro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      <AppToast
+        message={toast.message}
+        type={toast.type}
+        show={toast.show}
+        onClose={() => setToast((t) => ({ ...t, show: false }))}
+      />
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Invite friends</DialogTitle>

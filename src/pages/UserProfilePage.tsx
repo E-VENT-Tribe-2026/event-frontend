@@ -275,6 +275,7 @@ export default function UserProfilePage() {
             old ? { ...old, friendship: { status: 'request_sent', request_id: sentId } } : old,
           );
         }
+        setToast({ show: true, message: 'Friend request sent', type: 'success' });
       }
       invalidatePrefix('/api/notifications');
       invalidateNotifications();
