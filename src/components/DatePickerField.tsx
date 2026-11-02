@@ -61,6 +61,7 @@ export default function DatePickerField({
           <Calendar
             mode="single"
             selected={selected}
+            defaultMonth={selected ?? minDate}
             onSelect={(date) => {
               if (!date) {
                 if (allowEmpty) onChange('');

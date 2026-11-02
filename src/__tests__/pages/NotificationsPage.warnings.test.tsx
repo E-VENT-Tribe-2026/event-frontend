@@ -84,7 +84,7 @@ describe('NotificationsPage — warning cards (ticket #294 Part 4)', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('shows the amber card: label, title, two-line reason and "Tap to read"', () => {
+  it('shows the red card: label, title, two-line reason and "Tap to read"', () => {
     renderPage([WAITING]);
     const c = card('Repeated spam in event chats.');
 
@@ -95,7 +95,8 @@ describe('NotificationsPage — warning cards (ticket #294 Part 4)', () => {
     expect(within(c).getByText('Warning from an administrator')).toBeInTheDocument();
     expect(within(c).getByText('Repeated spam in event chats.')).toHaveClass('line-clamp-2');
     expect(within(c).getByText('Tap to read ›')).toBeInTheDocument();
-    expect(within(c).getByTestId('unread-dot')).toHaveStyle({ background: 'hsl(38 92% 52%)' });
+    expect(within(c).getByTestId('unread-dot')).toHaveStyle({ background: 'hsl(0 84% 60%)' });
+    expect(c).toHaveStyle({ border: '1px solid hsl(0 84% 60% / .6)' });
   });
 
   it('shows the reason as plain text, never as HTML', () => {

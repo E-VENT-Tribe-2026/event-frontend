@@ -121,7 +121,10 @@ export default function TopBar({
   };
 
   return (
-    <header className="sticky top-0 z-[1100] border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
+    <header
+      data-testid="user-top-bar"
+      className="sticky top-0 z-[1100] border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3"
+    >
       <div className="mx-auto flex max-w-7xl items-center gap-3">
         {/* Logo */}
         <AppLogo size="sm" linkTo="/home" className="shrink-0 hover:opacity-90 transition-opacity" />

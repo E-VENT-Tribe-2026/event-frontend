@@ -44,9 +44,11 @@ function SignedIn({ children }: { children: ReactNode }) {
 
 function AdminOnly({ children }: { children: ReactNode }) {
   return (
-    <SignedIn>
-      <AdminGuard>{children}</AdminGuard>
-    </SignedIn>
+    <RequireAuth>
+      <RequireUsername>
+        <AdminGuard>{children}</AdminGuard>
+      </RequireUsername>
+    </RequireAuth>
   );
 }
 

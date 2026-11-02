@@ -5,8 +5,6 @@ import AdminPanelPage from '@/pages/AdminPanelPage';
 import * as adminApi from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 
-vi.mock('@/components/BottomNav', () => ({ default: () => <nav /> }));
-
 const alex: adminApi.AdminUserDetails = {
   id: 'user-1',
   username: 'alex_smith',
