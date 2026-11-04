@@ -30,7 +30,6 @@ import {
   assignReport,
   dismissReport,
   actOnReport,
-  removeReportedContent,
   formatReportTime,
   personDisplayName,
   reportedItemLabel,
@@ -167,7 +166,8 @@ export default function AdminReportDetail({
     };
   }, [reportId]);
 
-  const needsReason = activeAction === 'warn' || activeAction === 'suspend' || activeAction === 'remove';
+  // The backend needs a reason to warn or suspend; removing content does not take one.
+  const needsReason = activeAction === 'warn' || activeAction === 'suspend';
 
   const handleConfirm = async () => {
     if (!report || acting || !activeAction) return;
@@ -177,9 +177,7 @@ export default function AdminReportDetail({
       const updated =
         activeAction === 'dismiss'
           ? await dismissReport(reportId)
-          : activeAction === 'remove'
-            ? await removeReportedContent(report, reason.trim() || warningReasonFromReport(report))
-            : await actOnReport(reportId, activeAction, needsReason ? reason.trim() : undefined);
+          : await actOnReport(reportId, activeAction, needsReason ? reason.trim() : undefined);
       const closed: AdminReportDetailData = {
         ...report,
         ...updated,
@@ -211,7 +209,7 @@ export default function AdminReportDetail({
 
   const openAction = (kind: ActionKind) => {
     setReason(
-      report && (kind === 'remove' || kind === 'warn') ? warningReasonFromReport(report) : '',
+      report && kind === 'warn' ? warningReasonFromReport(report) : '',
     );
     setActiveAction(kind);
   };
@@ -257,8 +255,15 @@ export default function AdminReportDetail({
   };
 
   // What the actions apply to, and why some are not offered.
-  const targetName = report ? name(report.target_user) : '';
   const isEventReport = report?.target_type === 'event';
+  // Warn and suspend apply to the reported user, or to the event's organizer for an event report.
+  const targetName = report?.target_user
+    ? name(report.target_user)
+    : isEventReport
+      ? "the event's organizer"
+      : 'the user';
+  const targetFull = isEventReport && report?.target_user ? `the event's organizer, ${targetName}` : targetName;
+  const capitalized = targetFull.charAt(0).toUpperCase() + targetFull.slice(1);
   const removeBlocked = report
     ? report.target_type === 'user'
       ? 'There is no content to remove: this report is about a user and was made from their profile.'
@@ -267,10 +272,10 @@ export default function AdminReportDetail({
         : null
     : null;
   const userActionsBlocked = report
-    ? !report.target_user
-      ? 'The user this report applies to no longer exists, so they cannot be warned or suspended.'
-      : report.target_user_is_admin
-        ? `${targetName} is now an administrator, so they cannot be warned or suspended.`
+    ? report.target_user_is_admin
+      ? `${capitalized} is now an administrator, so they cannot be warned or suspended.`
+      : !isEventReport && !report.target_user
+        ? 'The user this report applies to no longer exists, so they cannot be warned or suspended.'
         : null
     : null;
 
@@ -282,23 +287,19 @@ export default function AdminReportDetail({
     },
     warn: {
       title: `Warn ${targetName}?`,
-      body: isEventReport
-        ? `The event's organizer, ${targetName}, receives a warning. The report is then closed.`
-        : `${targetName} receives a warning. The report is then closed.`,
+      body: `${capitalized} receives a warning. The report is then closed.`,
       confirm: 'Warn',
     },
     remove: {
       title: isEventReport ? 'Remove the event?' : 'Remove the message?',
       body: isEventReport
-        ? `The event is marked as removed, not deleted. ${targetName} is warned about the removed content. The report is then resolved.`
-        : `The message is marked as removed, not deleted. ${targetName} is warned about the removed content. The report is then resolved.`,
+        ? `The event is marked as removed, not deleted. ${capitalized} is warned about the removed content. The report is then resolved.`
+        : `The message is marked as removed, not deleted. ${capitalized} is warned about the removed content. The report is then resolved.`,
       confirm: 'Remove',
     },
     suspend: {
       title: `Suspend ${targetName}?`,
-      body: isEventReport
-        ? `The event's organizer, ${targetName}, is suspended and loses access to the app. The report is then closed.`
-        : `${targetName} is suspended and loses access to the app. The report is then closed.`,
+      body: `${capitalized} is suspended and loses access to the app. The report is then closed.`,
       confirm: 'Suspend',
     },
   };
@@ -608,8 +609,8 @@ export default function AdminReportDetail({
                 </div>
                 {isEventReport && !userActionsBlocked && (
                   <Note>
-                    Warning, removing content, and suspending apply to the event&apos;s organizer, {targetName}.
-                    Removing content also warns them.
+                    Warning, removing content, and suspending apply to {targetFull}. Removing content also
+                    warns them.
                   </Note>
                 )}
                 {!isEventReport && !userActionsBlocked && !removeBlocked && (
