@@ -36,6 +36,7 @@ import {
   type ChatEvent,
   type ChatMessage,
   LOCAL_MESSAGE_PREFIX,
+  REMOVED_MESSAGE_NOTE,
   abortAfter,
   chatMessagesCacheKey,
   isAbortError,
@@ -70,6 +71,10 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [chatUnavailable, setChatUnavailable] = useState(false);
+  // The open chat belongs to an event an administrator removed (the server answers 410).
+  const [chatRemoved, setChatRemoved] = useState(false);
+  const chatRemovedRef = useRef(false);
+  chatRemovedRef.current = chatRemoved;
   const [toast, setToast] = useState({ show: false, message: '', type: 'error' as 'error' | 'success' });
   const [selectedEventFromUrl] = useState(() => new URLSearchParams(location.search).get('eventId'));
   const [handledSelectedParam, setHandledSelectedParam] = useState(false);
@@ -106,9 +111,11 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!activeChat || chatListLoading) return;
+    // A removed event is no longer in the list, but its chat stays open to show the note.
+    if (chatRemoved) return;
     if (chats.some((entry) => entry.id === activeChat)) return;
     setActiveChat(null);
-  }, [activeChat, chats, chatListLoading]);
+  }, [activeChat, chats, chatListLoading, chatRemoved]);
 
   useEffect(() => {
     pinToBottomRef.current = true;
@@ -135,6 +142,8 @@ export default function ChatPage() {
   const mapMessageRow = useCallback(
     (row: Record<string, unknown>): ChatMessage | null => {
       const rawContent = String(row.content || row.message || row.text || '').trim();
+      // An administrator removed it: the server blanks the text, but the message stays in the chat.
+      const isRemoved = row.is_removed === true;
       const parsed = rawContent ? parseChatPayload(rawContent) : null;
       const text = parsed
         ? String(
@@ -149,19 +158,20 @@ export default function ChatPage() {
                     : parsed.fileName || 'Attachment'),
           )
         : rawContent;
-      if (!text && parsed?.type !== 'poll') return null;
+      if (!text && parsed?.type !== 'poll' && !isRemoved) return null;
       const senderId = String(row.sender_id || row.user_id || row.created_by || '');
       const sentAtRaw = row.created_at || row.sent_at || row.timestamp;
       const sentAt = sentAtRaw ? new Date(String(sentAtRaw)) : new Date();
       const rawType = String(row.type || row.message_type || row.kind || '').toLowerCase();
       const isCheckin = parsed?.type === 'checkin';
       const isSystem =
+        !isRemoved && (
         isCheckin ||
         Boolean(row.is_system) ||
         rawType === 'system' || rawType === 'notification' ||
         rawType === 'join' || rawType === 'leave' ||
         rawType === 'participant_joined' || rawType === 'participant_left' ||
-        /\b(joined|left|was (added|removed|kicked)|has (joined|left)|added .+ to the chat|removed .+ from|is now (an admin|a member)|chat history|created (this|the) (group|chat)|changed the (subject|icon|description))\b/i.test(text);
+        /\b(joined|left|was (added|removed|kicked)|has (joined|left)|added .+ to the chat|removed .+ from|is now (an admin|a member)|chat history|created (this|the) (group|chat)|changed the (subject|icon|description))\b/i.test(text));
       const meId = resolveMeId();
       const isMe = !isSystem && Boolean(senderId) &&
         (sameAuthUserId(senderId, meId) || sameAuthUserId(senderId, signedInUserId));
@@ -176,11 +186,12 @@ export default function ChatPage() {
       return {
         id: messageRowId(row),
         from: isMe ? 'me' : 'them',
-        text: isCheckin ? `${senderName || 'Someone'} is here` : text,
+        text: isRemoved ? REMOVED_MESSAGE_NOTE : isCheckin ? `${senderName || 'Someone'} is here` : text,
         time: sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         dateKey: sentAt.toISOString().slice(0, 10),
         kind: isSystem ? 'system' : 'user',
-        messageType: parsed?.type || 'text',
+        isRemoved: isRemoved || undefined,
+        messageType: isRemoved ? 'text' : parsed?.type || 'text',
         fileName: parsed?.fileName,
         mimeType: parsed?.mimeType,
         dataUrl: parsed?.dataUrl,
@@ -270,7 +281,11 @@ export default function ChatPage() {
         });
 
       const mapped = Array.from(byId.values());
-      setChats(mapped);
+      // A removed event is not in the list any more: keep its open chat, so the note stays on screen.
+      setChats((prev) => {
+        const open = chatRemovedRef.current ? prev.find((c) => c.id === activeChatRef.current) : undefined;
+        return open && !mapped.some((c) => c.id === open.id) ? [open, ...mapped] : mapped;
+      });
 
       const openId = activeChatRef.current;
       if (!silent && openId && mapped.length > 0 && !mapped.some((entry) => entry.id === openId)) {
@@ -309,6 +324,23 @@ export default function ChatPage() {
                 organizerId: singleItem.organizerId || '',
               };
               setChats((prev) => [newChat, ...prev.filter((c) => c.id !== newChat.id)]);
+              setActiveChat(selectedEventFromUrl);
+            } else if (singleRes.status === 410) {
+              // Removed by an administrator: open its chat to show the note instead of an error.
+              const removedChat: ChatEvent = {
+                id: selectedEventFromUrl,
+                name: 'Removed event',
+                avatar: '',
+                lastMsg: '',
+                time: '',
+                unread: 0,
+                isPast: false,
+                isCancelled: false,
+                eventDate: '',
+                organizerId: '',
+              };
+              setChats((prev) => [removedChat, ...prev.filter((c) => c.id !== removedChat.id)]);
+              setChatRemoved(true);
               setActiveChat(selectedEventFromUrl);
             } else {
               setToast({ show: true, message: 'You no longer have access to this event chat.', type: 'error' });
@@ -352,6 +384,7 @@ export default function ChatPage() {
       };
 
       messagesInFlightRef.current = true;
+      if (!silent) setChatRemoved(false);
       // Show the saved copy at once (whatever its age), then always refresh from the server below.
       const saved = peekCache<Record<string, unknown>[]>(cacheKey);
       if (!silent) {
@@ -372,8 +405,16 @@ export default function ChatPage() {
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
         // Never keep messages from a chat you can no longer access, even if you have moved on.
-        if (res.status === 403) invalidate(cacheKey);
+        if (res.status === 403 || res.status === 410) invalidate(cacheKey);
         if (!isCurrent()) return;
+        if (res.status === 410) {
+          // An administrator removed the event: its chat shows a note and takes no new messages.
+          setChatRemoved(true);
+          setChatUnavailable(false);
+          setChatApiMissing(false);
+          setMessages([]);
+          return;
+        }
         if (res.status === 403) {
           setChatUnavailable(true);
           setMessages([]);
@@ -396,6 +437,7 @@ export default function ChatPage() {
         if (silent && !isCurrent()) return;
         showRows(rows);
         setChatUnavailable(false);
+        setChatRemoved(false);
         setChatApiMissing(false);
       } catch (err) {
         if (isAbortError(err) && !isCurrent()) return;
@@ -452,7 +494,15 @@ export default function ChatPage() {
         const mapped = row ? mapMessageRowRef.current(row) : null;
         if (mapped) {
           const live = { ...mapped, liveUntil: chatLiveHoldUntil() };
-          setMessages((prev) => (prev.some((m) => m.id === live.id || sameLiveMessage(m, live)) ? prev : [...prev, live]));
+          setMessages((prev) => {
+            // A message removed while the chat is open turns into the note, in its place.
+            if (live.isRemoved) {
+              return prev.some((m) => m.id === live.id)
+                ? prev.map((m) => (m.id === live.id ? live : m))
+                : [...prev, live];
+            }
+            return prev.some((m) => m.id === live.id || sameLiveMessage(m, live)) ? prev : [...prev, live];
+          });
           invalidate(chatMessagesCacheKey(openId, signedInUserId));
         } else {
           invalidate(chatMessagesCacheKey(openId, signedInUserId));
@@ -559,7 +609,7 @@ export default function ChatPage() {
 
   const sendMessage = async (explicitContent?: string) => {
     const chat = activeChatObj;
-    if (chat?.isCancelled || chat?.isPast) return; // Prevent sending on cancelled/past chats
+    if (chat?.isCancelled || chat?.isPast || chatRemoved) return; // Prevent sending on cancelled/past/removed chats
 
     const content = explicitContent ?? encodeChatPayload({ v: 1, type: 'text', text: input.trim() });
     const plainInput = input.trim();
@@ -601,6 +651,14 @@ export default function ChatPage() {
         body: JSON.stringify({ content }),
       });
 
+      if (res.status === 410) {
+        // The event was removed while the chat was open: nothing new is accepted.
+        setMessages((prev) => prev.filter((m) => m.id !== localId));
+        if (!explicitContent) setInput(plainInput);
+        setChatRemoved(true);
+        return;
+      }
+
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         setMessages((prev) => prev.filter((m) => m.id !== localId));
@@ -640,6 +698,7 @@ export default function ChatPage() {
         messages={messages}
         messagesLoading={messagesLoading}
         chatUnavailable={chatUnavailable}
+        chatRemoved={chatRemoved}
         chatApiMissing={chatApiMissing}
         sending={sending}
         input={input}

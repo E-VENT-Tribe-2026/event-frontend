@@ -20,6 +20,8 @@ export type ChatMessage = {
   time: string;
   dateKey: string;
   kind?: 'user' | 'system';
+  /** An administrator removed this message: it stays in the chat, replaced by a note. */
+  isRemoved?: boolean;
   messageType?: 'text' | 'file' | 'voice' | 'notification' | 'poll' | 'poll_vote' | 'checkin';
   fileName?: string;
   mimeType?: string;
@@ -42,6 +44,11 @@ export const CHAT_FETCH_TIMEOUT_MS = 12_000;
 export const CHAT_PEEK_LIMIT = 8;
 
 export const LOCAL_MESSAGE_PREFIX = 'local:';
+
+/** Shown in place of a message an administrator removed, to everyone in the chat. */
+export const REMOVED_MESSAGE_NOTE = 'This message was removed by an administrator';
+/** Shown for a removed event and in its chat. */
+export const REMOVED_EVENT_NOTE = 'This event was removed by an administrator';
 
 export function abortAfter(ms: number): { signal: AbortSignal; cancel: () => void } {
   const controller = new AbortController();
@@ -100,7 +107,10 @@ export function messageRowId(row: Record<string, unknown>): string {
 
 export function sameVisibleMessages(prev: ChatMessage[], next: ChatMessage[]): boolean {
   if (prev.length !== next.length) return false;
-  return prev.every((m, i) => m.id === next[i].id && m.text === next[i].text && m.from === next[i].from);
+  return prev.every(
+    (m, i) =>
+      m.id === next[i].id && m.text === next[i].text && m.from === next[i].from && Boolean(m.isRemoved) === Boolean(next[i].isRemoved),
+  );
 }
 
 export function isNearBottom(el: HTMLElement, threshold = 96): boolean {
