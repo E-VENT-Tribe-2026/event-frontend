@@ -49,9 +49,8 @@ export default function AdminPanelPage() {
   const [closedReports, setClosedReports] = useState<
     Record<string, { status: AdminReportStatus; outcome: AdminReportOutcome | null; content_removed?: boolean }>
   >({});
-  const locallyClosedCount = Object.values(closedReports).filter((row) => row.status !== 'open').length;
-  const openReportsBadge =
-    openReportCount == null ? null : Math.max(0, openReportCount - locallyClosedCount);
+  // The backend's count already leaves out closed reports; subtracting them again hid the number.
+  const openReportsBadge = openReportCount;
 
   const [showAccount, setShowAccount] = useState(false);
   const [adminId, setAdminId] = useState<string>('');
