@@ -5,7 +5,7 @@ import * as adminApi from '@/lib/adminApi';
 
 describe('AdminReportsTab', () => {
   beforeEach(() => {
-    vi.spyOn(adminApi, 'fetchAdminReports').mockResolvedValue({
+    vi.spyOn(adminApi, 'fetchAdminReportsList').mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
@@ -24,32 +24,32 @@ describe('AdminReportsTab', () => {
     );
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
+      expect(adminApi.fetchAdminReportsList).toHaveBeenCalledTimes(1);
     });
-    expect(adminApi.fetchAdminReports).toHaveBeenCalledWith(1, 20, 'open');
+    expect(adminApi.fetchAdminReportsList).toHaveBeenCalledWith(1, 20, 'open');
 
     rerender(<AdminReportsTab onOpenReport={() => {}} onErrorToast={() => {}} />);
     rerender(<AdminReportsTab onOpenReport={() => {}} onErrorToast={(msg) => void msg} />);
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
+      expect(adminApi.fetchAdminReportsList).toHaveBeenCalledTimes(1);
     });
   });
 
   it('does not refetch when the first load fails and the parent re-renders', async () => {
-    vi.mocked(adminApi.fetchAdminReports).mockRejectedValue(new Error('nope'));
+    vi.mocked(adminApi.fetchAdminReportsList).mockRejectedValue(new Error('nope'));
     const { rerender } = render(
       <AdminReportsTab onOpenReport={() => {}} onErrorToast={() => {}} />,
     );
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
+      expect(adminApi.fetchAdminReportsList).toHaveBeenCalledTimes(1);
     });
 
     rerender(<AdminReportsTab onOpenReport={() => {}} onErrorToast={() => {}} />);
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
+      expect(adminApi.fetchAdminReportsList).toHaveBeenCalledTimes(1);
     });
   });
 });

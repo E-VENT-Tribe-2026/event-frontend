@@ -49,6 +49,9 @@ export default function AdminPanelPage() {
   const [closedReports, setClosedReports] = useState<
     Record<string, { status: AdminReportStatus; outcome: AdminReportOutcome | null; content_removed?: boolean }>
   >({});
+  const locallyClosedCount = Object.values(closedReports).filter((row) => row.status !== 'open').length;
+  const openReportsBadge =
+    openReportCount == null ? null : Math.max(0, openReportCount - locallyClosedCount);
 
   const [showAccount, setShowAccount] = useState(false);
   const [adminId, setAdminId] = useState<string>('');
@@ -402,14 +405,14 @@ export default function AdminPanelPage() {
                   {tab.icon}
                   <span className="inline">{tab.label}</span>
                   {/* Number of open reports, in the mockup's red */}
-                  {tab.id === 'reports' && openReportCount !== null && openReportCount > 0 && (
+                  {tab.id === 'reports' && openReportsBadge !== null && openReportsBadge > 0 && (
                     <span
                       data-testid="open-reports-badge"
-                      aria-label={`${openReportCount} open reports`}
+                      aria-label={`${openReportsBadge} open reports`}
                       className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white leading-none"
                       style={{ background: 'var(--adm-danger)' }}
                     >
-                      {openReportCount > 99 ? '99+' : openReportCount}
+                      {openReportsBadge > 99 ? '99+' : openReportsBadge}
                     </span>
                   )}
                 </button>
@@ -429,7 +432,13 @@ export default function AdminPanelPage() {
       >
         {/* Priority 1: My Account view */}
         {showAccount ? (
-          <AdminMyAccount adminId={adminId} onClose={() => setShowAccount(false)} />
+          <AdminMyAccount
+            adminId={adminId}
+            onClose={() => setShowAccount(false)}
+            onOpenReport={pushReportDetail}
+            onOpenUser={pushUserDetail}
+            onOpenEvent={pushEventDetail}
+          />
         ) : userView.active ? (
           /* Priority 2: User view mode */
           <>

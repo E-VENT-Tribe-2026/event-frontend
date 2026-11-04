@@ -3,7 +3,7 @@ import { Loader2, ChevronRight, Calendar, MessageSquare, User as UserIcon, Users
 import ReportFlag from '@/components/ReportFlag';
 import { UserAvatar } from '@/components/UserAvatar';
 import {
-  fetchAdminReports,
+  fetchAdminReportsList,
   formatReportListTime,
   personDisplayName,
   reportedItemLabel,
@@ -27,12 +27,40 @@ interface AdminReportsTabProps {
 
 const PAGE_SIZE = 20;
 
-type StatusFilter = 'open' | 'closed';
+type StatusFilter = 'open' | 'dismissed' | 'closed';
 
-const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: 'open', label: 'Open' },
-  { id: 'closed', label: 'Closed' },
+const STATUS_FILTERS: { id: StatusFilter; label: string; title: string; hint: string; empty: string; region: string }[] = [
+  {
+    id: 'open',
+    label: 'Open',
+    title: 'Open reports',
+    hint: 'Reports not handled yet, newest first.',
+    empty: 'No open reports.',
+    region: 'open-reports',
+  },
+  {
+    id: 'dismissed',
+    label: 'Dismissed',
+    title: 'Dismissed reports',
+    hint: 'Reports dismissed without action.',
+    empty: 'No dismissed reports.',
+    region: 'dismissed-reports',
+  },
+  {
+    id: 'closed',
+    label: 'Closed',
+    title: 'Closed reports',
+    hint: 'Reports with action taken.',
+    empty: 'No closed reports.',
+    region: 'closed-reports',
+  },
 ];
+
+function matchesFilter(filter: StatusFilter, status: AdminReportStatus): boolean {
+  if (filter === 'open') return status === 'open';
+  if (filter === 'dismissed') return status === 'dismissed';
+  return status === 'resolved';
+}
 
 const MAGENTA_PILL: React.CSSProperties = {
   background: 'hsl(312 72% 46% / .22)',
@@ -47,7 +75,7 @@ const STATUS_STYLES: Record<AdminReportStatus, React.CSSProperties> = {
     color: 'var(--adm-muted-fg)',
     borderColor: 'var(--adm-border)',
   },
-  action_taken: {
+  resolved: {
     background: 'hsl(152 60% 42% / .15)',
     color: 'var(--adm-ok-text)',
     borderColor: 'hsl(152 60% 42% / .35)',
@@ -161,6 +189,11 @@ function ReportRow({ report, onOpen }: { report: AdminReportSummary; onOpen: (id
         <span className="tabular-nums text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
           {formatReportListTime(report.created_at)}
         </span>
+        {report.assigned_to && (
+          <span className="inline-flex max-w-[9rem] truncate text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
+            Assigned to {personDisplayName(report.assigned_to) || 'an administrator'}
+          </span>
+        )}
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
@@ -300,15 +333,12 @@ export default function AdminReportsTab({
     async (status: StatusFilter, targetPage: number, append: boolean, quiet = false) => {
       setList((s) => ({ ...s, loading: !append && !quiet ? true : s.loading, loadingMore: append }));
       try {
-        const res = await fetchAdminReports(targetPage, PAGE_SIZE, status);
+        const res = await fetchAdminReportsList(targetPage, PAGE_SIZE, status);
         const patched = res.items.map((row) => {
           const closed = closedReports[row.id];
           return closed ? { ...row, ...closed } : row;
         });
-        const items =
-          status === 'open'
-            ? patched.filter((row) => row.status === 'open')
-            : patched.filter((row) => row.status !== 'open');
+        const items = patched.filter((row) => matchesFilter(status, row.status));
         setList((s) => ({
           items: append ? [...s.items, ...items.filter((r) => !s.items.some((x) => x.id === r.id))] : items,
           total: items.length !== res.items.length ? items.length : res.total,
@@ -335,7 +365,7 @@ export default function AdminReportsTab({
     void load(filter, 1, false, true);
   }, [liveVersion, load, filter]);
 
-  const label = filter === 'open' ? 'open-reports' : 'closed-reports';
+  const activeFilter = STATUS_FILTERS.find((tab) => tab.id === filter) ?? STATUS_FILTERS[0];
 
   return (
     <div className="space-y-4">
@@ -368,13 +398,9 @@ export default function AdminReportsTab({
       </div>
 
       <ReportSection
-        label={label}
-        title={filter === 'open' ? 'Open reports' : 'Closed reports'}
-        hint={
-          filter === 'open'
-            ? 'Reports not handled yet, newest first.'
-            : 'Dismissed reports and reports with action taken.'
-        }
+        label={activeFilter.region}
+        title={activeFilter.title}
+        hint={activeFilter.hint}
         count={list.total}
         reports={list.items}
         loading={list.loading}
@@ -382,7 +408,7 @@ export default function AdminReportsTab({
         onLoadMore={() => void load(filter, list.page + 1, true)}
         loadingMore={list.loadingMore}
         onOpen={onOpenReport}
-        emptyMessage={filter === 'open' ? 'No open reports.' : 'No closed reports.'}
+        emptyMessage={activeFilter.empty}
       />
     </div>
   );

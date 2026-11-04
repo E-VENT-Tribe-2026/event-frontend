@@ -17,6 +17,7 @@ import {
   type AdminChatMessage,
   type AdminRemoveContentResponse,
 } from '@/lib/adminApi';
+import { displayChatContent } from '@/lib/chatPayload';
 
 interface AdminEventChatProps {
   eventId: string;
@@ -115,7 +116,7 @@ export default function AdminEventChat({
                       className="inline-block rounded-full px-4 py-1.5 text-xs"
                       style={{ background: 'hsl(213 50% 16% / .6)', color: 'var(--adm-muted-fg)', border: '1px solid var(--adm-border)' }}
                     >
-                      {m.content}
+                      {displayChatContent(m.content)}
                     </span>
                   </li>
                 );
@@ -146,7 +147,7 @@ export default function AdminEventChat({
                         className="text-sm leading-relaxed"
                         style={{ color: m.is_removed ? 'var(--adm-muted-fg)' : 'var(--adm-fg)', textDecoration: m.is_removed ? 'line-through' : undefined }}
                       >
-                        {m.content}
+                        {displayChatContent(m.content)}
                       </p>
                       <p className="text-[10px]" style={{ color: 'var(--adm-muted-fg)' }}>
                         {formatTime(m.created_at)}

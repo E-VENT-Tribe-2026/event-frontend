@@ -96,4 +96,36 @@ describe('AdminAuditTab filters', () => {
     expect(adminApi.fetchAdminAudit).toHaveBeenCalledTimes(2);
     expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument();
   });
+
+  it('shows names and titles, not guids', async () => {
+    const userId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    vi.mocked(adminApi.fetchAdminAudit).mockResolvedValue(
+      page([
+        entry({
+          id: 'a9',
+          action: 'remove',
+          admin_name: 'Ada Lovelace',
+          target_type: 'event',
+          target_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          target_title: 'Rooftop Jazz Night',
+          target_name: null,
+          reason: null,
+        }),
+        entry({
+          id: 'a10',
+          action: 'warn',
+          admin_name: 'Ada Lovelace',
+          target_type: 'user',
+          target_id: userId,
+          target_name: 'Bob Stone',
+          target_username: 'bob',
+        }),
+      ]),
+    );
+    render(<AdminAuditTab onErrorToast={() => {}} />);
+    expect(await screen.findAllByText('Rooftop Jazz Night')).not.toHaveLength(0);
+    expect(screen.getAllByText('Bob Stone').length).toBeGreaterThan(0);
+    expect(screen.queryByText(userId)).not.toBeInTheDocument();
+    expect(screen.queryByText('cccccccc-cccc-4ccc-8ccc-cccccccccccc')).not.toBeInTheDocument();
+  });
 });

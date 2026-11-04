@@ -322,19 +322,31 @@ export function matchesAuditFilters(entry: AdminAuditEntry, filters: AdminAuditF
   return true;
 }
 
+export function isOwnAuditEntry(
+  entry: AdminAuditEntry,
+  admin: { id?: string; username?: string | null; name?: string | null },
+): boolean {
+  const keys = [admin.id, admin.username, admin.name]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  return keys.some((key) => matchesAuditFilters(entry, { admin: key }));
+}
+
 // ---- Reports (#328) ----
 //
 // Backend contract (administrators only, never cached on the client):
 // - GET  /api/admin/reports?status=open&page&limit   newest first; `total` is the number of reports
-// - GET  /api/admin/reports/open-count               { count }
 // - GET  /api/admin/reports/{id}                     AdminReportDetail
+// - POST /api/admin/reports/{id}/assign              { admin_id }, caller or another administrator; 409 if taken
 // - POST /api/admin/reports/{id}/dismiss             closes it as Dismissed, returns AdminReportDetail
-// - POST /api/admin/reports/{id}/action              { action: warn | remove | suspend, reason? },
-//                                                    closes it as Action taken, returns AdminReportDetail
+// - POST /api/admin/reports/{id}/action              { action: warn | remove_content | suspend, reason? },
+//                                                    closes it as resolved, returns AdminReportDetail
+// - Dismiss is the only close that stays dismissed. Warn, suspend and remove_content resolve the report.
+// - Detail.content_removed is live target state (event/message gone), not the report status.
 // - Live updates: Supabase Realtime on the `reports` table for administrators; the panel only uses
 //   the signal and fetches the count and the open list again.
 
-export type AdminReportStatus = 'open' | 'dismissed' | 'action_taken';
+export type AdminReportStatus = 'open' | 'dismissed' | 'resolved';
 export type AdminReportTargetType = 'event' | 'user' | 'message';
 export type AdminReportOrigin = 'event_details' | 'profile' | 'event_chat';
 export type AdminReportOutcome = 'dismissed' | 'warned' | 'content_removed' | 'suspended';
@@ -363,6 +375,10 @@ export interface AdminReportSummary {
   event: AdminReportEventRef | null;
   reported_user: AdminEventPerson | null;
   message: AdminReportMessageRef | null;
+  /** Administrator this open report is assigned to, if any. */
+  assigned_to: AdminEventPerson | null;
+  /** Administrator who dismissed or resolved the report. */
+  closed_by: AdminEventPerson | null;
 }
 
 export interface AdminReportsResponse {
@@ -384,7 +400,7 @@ export interface AdminReportChatMessage {
 export interface AdminReportDetail extends AdminReportSummary {
   description: string | null;
   chat_context: AdminReportChatMessage[];
-  /** The reported event or message is already removed. */
+  /** Live: the reported event or message is gone. Not the report status. */
   content_removed: boolean;
   /** Who warning and suspending apply to: the reported user, the message's sender or the event's organizer. */
   target_user: AdminEventPerson | null;
@@ -419,8 +435,26 @@ export function reportReasonLabel(reason: string): string {
   return REPORT_REASON_LABELS[reason] ?? reason;
 }
 
+/** Warning text from what was reported, e.g. spam in chat → "User is spamming the group chat." */
+export function warningReasonFromReport(report: {
+  reason: string;
+  target_type: AdminReportTargetType;
+}): string {
+  const n = normalizeToken(report.reason);
+  if (n === 'spam') {
+    if (report.target_type === 'message') return 'User is spamming the group chat.';
+    if (report.target_type === 'event') return 'User is spamming events.';
+    return 'User is spamming.';
+  }
+  if (n === 'inappropriate_content') return 'Inappropriate content.';
+  if (n === 'harassment_or_hate' || n === 'harassment') return 'Harassment.';
+  if (n === 'scam_or_fraud') return 'Scam or fraud.';
+  if (n === 'misleading_event') return 'Misleading event.';
+  return reportReasonLabel(report.reason);
+}
+
 export function reportStatusLabel(status: AdminReportStatus): string {
-  return status === 'open' ? 'Open' : status === 'dismissed' ? 'Dismissed' : 'Action taken';
+  return status === 'open' ? 'Open' : status === 'dismissed' ? 'Dismissed' : 'Resolved';
 }
 
 export function reportOriginLabel(origin: AdminReportOrigin): string {
@@ -493,7 +527,11 @@ export function eventRefFromReportRow(
   row: Record<string, unknown>,
   targetType: AdminReportTargetType,
 ): AdminReportEventRef | null {
-  const nested = readEventRef(row.event) ?? (targetType === 'event' ? readEventRef(row.target) : null);
+  const reported = asObject(row.reported);
+  const nested =
+    readEventRef(row.event) ??
+    readEventRef(reported?.event) ??
+    (targetType === 'event' ? readEventRef(row.target) ?? readEventRef(reported) : null);
   if (nested) return nested;
   const id =
     asText(row.event_id) ||
@@ -535,27 +573,25 @@ function readOutcome(value: unknown): AdminReportOutcome | null {
 function readStatus(value: unknown, row: Record<string, unknown> = {}): AdminReportStatus {
   const outcome = readOutcome(row.outcome ?? row.resolution ?? row.result);
   const n = normalizeToken(value ?? row.state ?? row.report_status ?? row.current_status);
+  if (n === 'open' || n === 'pending' || n === 'new') return 'open';
   if (n === 'dismissed' || n === 'dismiss' || n === 'rejected') return 'dismissed';
   if (
+    n === 'resolved' ||
     n === 'action_taken' ||
     n === 'actioned' ||
     n === 'handled' ||
     n === 'processed' ||
-    n === 'content_removed' ||
-    n === 'removed' ||
-    n === 'warned' ||
-    n === 'suspended'
+    n === 'closed' ||
+    n === 'complete' ||
+    n === 'completed'
   ) {
-    return 'action_taken';
-  }
-  if (n === 'closed' || n === 'complete' || n === 'completed' || n === 'resolved') {
-    return outcome && outcome !== 'dismissed' ? 'action_taken' : 'dismissed';
+    return outcome === 'dismissed' ? 'dismissed' : 'resolved';
   }
   if (row.is_open === false || row.closed === true || row.is_closed === true || row.closed_at) {
-    return outcome && outcome !== 'dismissed' ? 'action_taken' : 'dismissed';
+    return outcome === 'dismissed' ? 'dismissed' : 'resolved';
   }
   if (outcome === 'dismissed') return 'dismissed';
-  if (outcome) return 'action_taken';
+  if (outcome) return 'resolved';
   return 'open';
 }
 
@@ -592,13 +628,15 @@ function readMessageRef(row: Record<string, unknown>): AdminReportMessageRef | n
       msg.body != null ||
       msg.sender != null ||
       msg.sender_name != null ||
-      msg.message_id != null;
+      msg.message_id != null ||
+      (msg.id != null && msg.event_id != null);
     if (!looksLikeMessage) continue;
     const content = displayChatContent(msg.content ?? msg.text ?? msg.body ?? msg.message);
     const sender =
       readPerson(msg.sender) ??
       readPerson(msg.user) ??
       readPerson(msg.author) ??
+      readPerson(reported?.user) ??
       personFromName(asText(msg.sender_name) || asText(msg.sender_full_name), asText(msg.sender_id));
     const id = asText(msg.id) || asText(msg.message_id);
     if (content || sender || id) return { id, content, sender };
@@ -638,6 +676,13 @@ function readReportSummary(value: unknown): AdminReportSummary {
     event: eventRefFromReportRow(row, targetType),
     reported_user: readPerson(row.reported_user) ?? readPerson(reported?.user),
     message: readMessageRef(row),
+    assigned_to: readAssignee(row),
+    closed_by:
+      readNestedPerson(row.closed_by) ??
+      readNestedPerson(row.resolved_by) ??
+      readNestedPerson(row.closed_by_admin) ??
+      readNestedPerson(row.handled_by) ??
+      readNestedPerson(row.acted_by),
   };
 }
 
@@ -661,7 +706,7 @@ function readReportDetail(value: unknown): AdminReportDetail {
     message,
     description: asText(row.description) || null,
     chat_context,
-    content_removed: row.content_removed === true,
+    content_removed: row.content_removed === true, // live target state, not status
     target_user: readPerson(row.target_user),
     target_user_is_admin: row.target_user_is_admin === true,
     outcome,
@@ -780,7 +825,7 @@ export function readChatMessages(value: unknown): AdminChatMessage[] {
     return {
       id: asText(row.id),
       sender,
-      content: asText(row.content) || asText(row.text),
+      content: displayChatContent(row.content ?? row.text ?? row.body ?? row.message),
       created_at: asText(row.created_at) || asText(row.time),
       is_system_message: row.is_system_message === true || row.type === 'notification',
       is_removed: row.is_removed === true,
@@ -981,6 +1026,37 @@ export async function fetchAdminUserDetails(userId: string): Promise<AdminUserDe
   };
 }
 
+function isAdminUserSummary(user: AdminUserSummary): boolean {
+  return isAdministratorRole(user.role) || (user.role ?? '').toLowerCase().includes('admin');
+}
+
+/** Administrators available to assign a report to. GET /api/admin/users, filtered. */
+export async function fetchAdministrators(): Promise<AdminEventPerson[]> {
+  const seen = new Set<string>();
+  const admins: AdminEventPerson[] = [];
+  let page = 1;
+  let totalPages = 1;
+  do {
+    const res = await fetchAdminUsers(page, 50);
+    totalPages = Math.max(1, res.total_pages || 1);
+    for (const user of res.items) {
+      if (!isAdminUserSummary(user) || !user.id || seen.has(user.id)) continue;
+      seen.add(user.id);
+      admins.push({
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name,
+        display_name: user.display_name,
+        avatar_url: user.avatar_url,
+        avatar_kind: user.avatar_kind,
+        icon_id: user.icon_id,
+      });
+    }
+    page += 1;
+  } while (page <= totalPages && page <= 10);
+  return admins;
+}
+
 /**
  * Promotes a user account to the administrator role.
  * Never cached client-side.
@@ -1173,24 +1249,139 @@ export function removeChatMessage(eventId: string, messageId: string): Promise<A
   return postRemoval(getApiUrl(API_ENDPOINTS.ADMIN_MESSAGE_REMOVE(eventId, messageId)));
 }
 
-/** GET /api/admin/account: the signed-in administrator, with the number of reports they closed. */
-export async function fetchAdminAccount(): Promise<{ reports_closed: number | null }> {
+function readAccountReportList(value: unknown): AdminReportSummary[] {
+  const rows = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object' && Array.isArray((value as { items?: unknown[] }).items)
+      ? ((value as { items: unknown[] }).items)
+      : [];
+  return rows.map(readReportSummary).filter((row) => Boolean(row.id));
+}
+
+export interface AdminAccount {
+  reports_closed: number | null;
+  assigned_reports: AdminReportSummary[];
+  closed_reports: AdminReportSummary[];
+}
+
+function sameAdmin(person: AdminEventPerson | null | undefined, adminId: string): boolean {
+  if (!person || !adminId.trim()) return false;
+  const wanted = adminId.trim().toLowerCase().replace(/^@/, '');
+  return [person.id, person.username, person.full_name, person.display_name]
+    .map((value) => value?.trim().toLowerCase().replace(/^@/, ''))
+    .some((value) => value === wanted);
+}
+
+async function collectAllReportsForTab(tab: AdminReportTab, maxPages = 20): Promise<AdminReportSummary[]> {
+  const first = await fetchAdminReportsList(1, 50, tab);
+  const items = [...first.items];
+  const pages = Math.min(Math.max(1, first.total_pages || 1), maxPages);
+  for (let page = 2; page <= pages; page++) {
+    const next = await fetchAdminReportsList(page, 50, tab);
+    for (const row of next.items) {
+      if (!items.some((item) => item.id === row.id)) items.push(row);
+    }
+  }
+  return items;
+}
+
+/** Open reports assigned to this administrator, and every report they closed. */
+export async function fetchAdminWorkReports(adminId: string): Promise<{
+  assigned: AdminReportSummary[];
+  closed: AdminReportSummary[];
+}> {
+  const id = adminId.trim();
+  if (!id) return { assigned: [], closed: [] };
+  const tabs = await Promise.all(
+    (['open', 'dismissed', 'closed'] as AdminReportTab[]).map(async (tab) => {
+      try {
+        return await collectAllReportsForTab(tab);
+      } catch {
+        return [] as AdminReportSummary[];
+      }
+    }),
+  );
+  const seenAssigned = new Set<string>();
+  const seenClosed = new Set<string>();
+  const assigned: AdminReportSummary[] = [];
+  const closed: AdminReportSummary[] = [];
+  for (const row of tabs.flat()) {
+    if (row.status === 'open' && sameAdmin(row.assigned_to, id) && !seenAssigned.has(row.id)) {
+      seenAssigned.add(row.id);
+      assigned.push(row);
+    }
+    const closedBySelf = sameAdmin(row.closed_by, id) || (!row.closed_by && sameAdmin(row.assigned_to, id));
+    if (row.status !== 'open' && closedBySelf && !seenClosed.has(row.id)) {
+      seenClosed.add(row.id);
+      closed.push(row);
+    }
+  }
+  return { assigned, closed };
+}
+
+/** GET /api/admin/account: the signed-in administrator, closed count, and report lists when present. */
+export async function fetchAdminAccount(): Promise<AdminAccount> {
   const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_ACCOUNT), {
     method: 'GET',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
   const body = await handleAdminResponse<Record<string, unknown>>(res);
-  return { reports_closed: typeof body.reports_closed === 'number' ? body.reports_closed : null };
+  const assigned_reports = readAccountReportList(
+    body.assigned_reports ?? body.reports_assigned ?? body.assigned,
+  );
+  const closedFromBody = readAccountReportList(
+    body.closed_reports ?? (Array.isArray(body.reports_closed) ? body.reports_closed : body.reports_closed_list),
+  );
+  const reports_closed =
+    typeof body.reports_closed === 'number'
+      ? body.reports_closed
+      : closedFromBody.length
+        ? closedFromBody.length
+        : null;
+  return { reports_closed, assigned_reports, closed_reports: closedFromBody };
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_COMPACT_RE = /^[0-9a-f]{32}$/i;
+
+export function looksLikeUuid(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  return UUID_RE.test(text) || UUID_COMPACT_RE.test(text);
+}
+
+/** Visible audit label: never a raw guid. */
+export function humanAuditLabel(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text || looksLikeUuid(text)) return null;
+  return text;
+}
+
+function readNestedPerson(value: unknown): AdminEventPerson | null {
+  const direct = readPerson(value);
+  if (direct) return direct;
+  const row = asObject(value);
+  if (!row) return null;
+  return (
+    readPerson(row.administrator) ??
+    readPerson(row.admin) ??
+    readPerson(row.user) ??
+    readPerson(row.person) ??
+    readPerson(row.profile)
+  );
 }
 
 function readPerson(value: unknown): AdminEventPerson | null {
   if (!value || typeof value !== 'object') return null;
   const row = value as Record<string, unknown>;
-  const id = typeof row.id === 'string' ? row.id : '';
-  const username = typeof row.username === 'string' ? row.username : null;
-  const full_name = typeof row.full_name === 'string' ? row.full_name : '';
-  const display_name = typeof row.display_name === 'string' ? row.display_name : undefined;
+  const id = asId(row.id) || asId(row.user_id) || asId(row.admin_id) || '';
+  const username = humanAuditLabel(row.username);
+  const full_name = humanAuditLabel(row.full_name) || humanAuditLabel(row.name) || '';
+  const display_name = humanAuditLabel(row.display_name) || undefined;
   if (!id && !full_name && !username && !display_name) return null;
   return {
     id,
@@ -1206,6 +1397,22 @@ function readPerson(value: unknown): AdminEventPerson | null {
     avatar_kind: typeof row.avatar_kind === 'string' ? row.avatar_kind : undefined,
     icon_id: typeof row.icon_id === 'string' ? row.icon_id : null,
   };
+}
+
+function readAssignee(row: Record<string, unknown>): AdminEventPerson | null {
+  const nested =
+    readNestedPerson(row.assigned_to) ??
+    readNestedPerson(row.assignee) ??
+    readNestedPerson(row.assigned_admin) ??
+    readNestedPerson(row.assigned_to_admin);
+  if (nested) return nested;
+  const id =
+    asText(row.assigned_to_id) ||
+    asText(row.assigned_admin_id) ||
+    asText(row.assignee_id) ||
+    (typeof row.assigned_to === 'string' ? row.assigned_to : '');
+  if (!id) return null;
+  return { id, full_name: asText(row.assigned_to_name), username: asText(row.assigned_to_username) || null };
 }
 
 export function personDisplayName(
@@ -1227,10 +1434,15 @@ function asId(value: unknown): string | null {
 }
 
 function readTitle(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'string') return humanAuditLabel(value);
   if (value && typeof value === 'object') {
     const row = value as Record<string, unknown>;
-    return readTitle(row.title) || readTitle(row.name);
+    return (
+      readTitle(row.title) ||
+      readTitle(row.event_title) ||
+      readTitle(row.name) ||
+      readTitle(row.event)
+    );
   }
   return null;
 }
@@ -1258,38 +1470,61 @@ function firstEmail(...chunks: unknown[]): string | null {
   return null;
 }
 
+function scrubAuditGuids(text: string): string {
+  if (!text) return '';
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  return text
+    .replace(new RegExp(`\\b[\\w-]+\\s*[:=]\\s*${uuid}`, 'gi'), ' ')
+    .replace(UUID_RE, ' ')
+    .replace(/\s*[·,;:]\s*$/g, '')
+    .replace(/^\s*[·,;:]\s*/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function labeledDetail(details: string[], keys: string[]): string | null {
+  for (const item of details) {
+    for (const key of keys) {
+      const match = item.match(new RegExp(`(?:^|[\\s,;])${key}\\s*[:=]\\s*(.+)$`, 'i'));
+      const value = humanAuditLabel(match?.[1]);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
 function mapAuditEntry(raw: unknown, index: number): AdminAuditEntry {
   const row = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const admin = readPerson(row.administrator ?? row.admin);
+  const admin = readPerson(row.administrator ?? row.admin ?? row.actor);
   const targetObj = row.target && typeof row.target === 'object' ? (row.target as Record<string, unknown>) : null;
-  const targetUser = readPerson(targetObj?.user);
+  const eventObj =
+    (targetObj?.event && typeof targetObj.event === 'object' ? (targetObj.event as Record<string, unknown>) : null) ||
+    (row.event && typeof row.event === 'object' ? (row.event as Record<string, unknown>) : null);
+  const targetUser =
+    readPerson(targetObj?.user) ??
+    readPerson(row.target_user) ??
+    readPerson(row.user) ??
+    readPerson(targetObj?.type === 'user' || !targetObj?.type ? targetObj : null);
 
-  const admin_id =
-    admin?.id || (typeof row.admin_id === 'string' ? row.admin_id : '');
-  const admin_name =
-    personDisplayName(admin) ||
-    (typeof row.admin_name === 'string' ? row.admin_name.trim() : '') ||
-    'Unknown administrator';
+  const admin_id = admin?.id || asId(row.admin_id) || '';
   const admin_username =
-    admin?.username?.trim() ||
-    (typeof row.admin_username === 'string' ? row.admin_username : null) ||
-    null;
+    humanAuditLabel(admin?.username) || humanAuditLabel(row.admin_username) || null;
+  const admin_name =
+    humanAuditLabel(personDisplayName(admin)) ||
+    humanAuditLabel(row.admin_name) ||
+    admin_username ||
+    'Unknown administrator';
 
-  const target_id = asId(targetObj?.id) || asId(row.target_id);
+  const target_id =
+    asId(targetObj?.id) ||
+    asId(targetUser?.id) ||
+    asId(eventObj?.id) ||
+    asId(row.target_id) ||
+    asId(row.event_id) ||
+    asId(row.user_id);
   const target_type =
     (typeof targetObj?.type === 'string' ? targetObj.type : null) ||
     (typeof row.target_type === 'string' ? row.target_type : null);
-  const target_name =
-    personDisplayName(targetUser) ||
-    (typeof row.target_name === 'string' ? row.target_name.trim() : '') ||
-    null;
-  const target_title =
-    readTitle(targetObj?.event) ||
-    readTitle(targetObj?.title) ||
-    readTitle(targetObj?.chat) ||
-    readTitle(row.target_title) ||
-    null;
-
   const description = typeof row.description === 'string' ? row.description.trim() : '';
   const reasonFlat = typeof row.reason === 'string' ? row.reason.trim() : '';
   const detailsList = Array.isArray(row.details)
@@ -1297,7 +1532,25 @@ function mapAuditEntry(raw: unknown, index: number): AdminAuditEntry {
     : typeof row.details === 'string' && row.details.trim()
       ? [row.details.trim()]
       : [];
-  const detailsJoined = detailsList.join(' · ');
+
+  const target_name =
+    humanAuditLabel(personDisplayName(targetUser)) ||
+    humanAuditLabel(row.target_name) ||
+    humanAuditLabel(row.user_name) ||
+    labeledDetail(detailsList, ['user', 'username', 'name']) ||
+    null;
+  const target_title =
+    readTitle(eventObj) ||
+    readTitle(targetObj?.chat) ||
+    readTitle(row.event) ||
+    humanAuditLabel(row.target_title) ||
+    humanAuditLabel(row.event_title) ||
+    labeledDetail(detailsList, ['title', 'event', 'event_title']) ||
+    (target_type === 'event' ? readTitle(targetObj) : null) ||
+    null;
+
+  const detailsJoined = scrubAuditGuids(detailsList.join(' · '));
+  const reasonText = scrubAuditGuids(reasonFlat || description);
   const target_email =
     firstEmail(
       targetObj,
@@ -1319,11 +1572,11 @@ function mapAuditEntry(raw: unknown, index: number): AdminAuditEntry {
     target_id,
     target_type,
     target_name,
-    target_username: targetUser?.username ?? null,
+    target_username: humanAuditLabel(targetUser?.username) || humanAuditLabel(row.target_username) || null,
     target_avatar_url: targetUser?.avatar_url ?? null,
     target_email,
     target_title,
-    reason: reasonFlat || description || null,
+    reason: reasonText || null,
     details: detailsJoined || null,
     created_at: typeof row.created_at === 'string' ? row.created_at : '',
   };
@@ -1370,10 +1623,10 @@ export async function fetchAdminAudit(
   };
 }
 
-export type AdminReportListStatus = 'open' | 'closed';
+export type AdminReportListStatus = 'open' | 'dismissed' | 'closed' | 'resolved';
 
 /**
- * One page of reports, newest first. `status` keeps open and closed lists apart;
+ * One page of reports, newest first. `status` keeps open, dismissed and closed lists apart;
  * the response's `total` is the number of reports in that list.
  * GET /api/admin/reports?status=&page=&limit=
  */
@@ -1407,6 +1660,102 @@ export async function fetchAdminReports(
   };
 }
 
+function mergeReportPages(pages: AdminReportsResponse[], page: number, limit: number): AdminReportsResponse {
+  const seen = new Set<string>();
+  const items: AdminReportSummary[] = [];
+  for (const part of pages) {
+    for (const row of part.items) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      items.push(row);
+    }
+  }
+  const total = pages.reduce((sum, part) => sum + part.total, 0);
+  const totalPages = Math.max(1, ...pages.map((part) => part.total_pages), page);
+  return { items, total, page, limit, total_pages: totalPages };
+}
+
+/** Closed tab: action taken (`closed`) and backend `resolved` reports. */
+export async function fetchClosedAdminReports(page = 1, limit = 20): Promise<AdminReportsResponse> {
+  const [closed, resolved] = await Promise.all([
+    fetchAdminReports(page, limit, 'closed'),
+    fetchAdminReports(page, limit, 'resolved'),
+  ]);
+  return mergeReportPages([closed, resolved], page, limit);
+}
+
+export type AdminReportTab = 'open' | 'dismissed' | 'closed';
+
+export function reportMatchesTab(status: AdminReportStatus, tab: AdminReportTab): boolean {
+  if (tab === 'open') return status === 'open';
+  if (tab === 'dismissed') return status === 'dismissed';
+  return status === 'resolved';
+}
+
+function paginateReportItems(
+  items: AdminReportSummary[],
+  page: number,
+  limit: number,
+): AdminReportsResponse {
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit) || 1);
+  const start = Math.max(0, (page - 1) * limit);
+  return {
+    items: items.slice(start, start + limit),
+    total,
+    page,
+    limit,
+    total_pages: totalPages,
+  };
+}
+
+async function collectRemainingReportPages(
+  first: AdminReportsResponse,
+  status?: AdminReportListStatus,
+): Promise<AdminReportSummary[]> {
+  const items = [...first.items];
+  const seen = new Set(items.map((row) => row.id));
+  for (let p = 2; p <= first.total_pages; p++) {
+    const next = await fetchAdminReports(p, first.limit, status);
+    for (const row of next.items) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      items.push(row);
+    }
+  }
+  return items;
+}
+
+/**
+ * One tab of the reports list. If GET ignores `status` and returns a mixed page,
+ * remaining pages are loaded and the tab is applied on the client.
+ */
+export async function fetchAdminReportsList(
+  page = 1,
+  limit = 20,
+  tab: AdminReportTab = 'open',
+): Promise<AdminReportsResponse> {
+  const first =
+    tab === 'closed' ? await fetchClosedAdminReports(page, limit) : await fetchAdminReports(page, limit, tab);
+  const mixed = first.items.some((row) => !reportMatchesTab(row.status, tab));
+  if (!mixed) {
+    const items = first.items.filter((row) => reportMatchesTab(row.status, tab));
+    return { ...first, items, page };
+  }
+  const seed =
+    page === 1
+      ? first
+      : tab === 'closed'
+        ? await fetchClosedAdminReports(1, limit)
+        : await fetchAdminReports(1, limit, tab);
+  const catalog = await collectRemainingReportPages(seed, tab === 'closed' ? 'closed' : tab);
+  return paginateReportItems(
+    catalog.filter((row) => reportMatchesTab(row.status, tab)),
+    page,
+    limit,
+  );
+}
+
 /** Reports this user filed. Uses GET /api/admin/reports?reporter_id= when user details omit reports_made. */
 export async function fetchReportsFiledByUser(userId: string): Promise<AdminUserReportRef[]> {
   const id = userId.trim().toLowerCase();
@@ -1421,15 +1770,10 @@ export async function fetchReportsFiledByUser(userId: string): Promise<AdminUser
   }
 }
 
-/** The number of open reports. GET /api/admin/reports/open-count */
+/** The number of open reports. Uses GET /api/admin/reports, counting only `open`. */
 export async function fetchOpenReportCount(): Promise<number> {
-  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORTS_OPEN_COUNT), {
-    method: 'GET',
-    headers: getAdminHeaders(),
-    cache: 'no-store',
-  });
-  const body = await handleAdminResponse<Record<string, unknown>>(res);
-  return typeof body.count === 'number' ? body.count : 0;
+  const page = await fetchAdminReportsList(1, 20, 'open');
+  return page.total;
 }
 
 /** A report's details. GET /api/admin/reports/{id} */
@@ -1479,7 +1823,7 @@ function closedReportFromAction(
   return {
     ...detail,
     id: detail.id || id,
-    status: 'action_taken',
+    status: 'resolved',
     outcome: detail.outcome ?? outcome,
     content_removed: action === 'remove' ? true : detail.content_removed,
   };
@@ -1498,9 +1842,10 @@ async function readClosedReportAction(
 }
 
 /**
- * Acts on an open report and closes it as Action taken: warn or suspend the user it applies to,
+ * Acts on an open report and closes it as resolved: warn or suspend the user it applies to,
  * or remove the reported content. Warning and suspending need a reason.
- * POST /api/admin/reports/{id}/action  { action, reason }
+ * POST /api/admin/reports/{id}/action  { action: warn | remove_content | suspend, reason? }
+ * Removing reported content then resolves with { action: "warn", reason }.
  */
 export async function actOnReport(
   reportId: string,
@@ -1508,15 +1853,35 @@ export async function actOnReport(
   reason?: string,
 ): Promise<AdminReportDetail> {
   const id = reportId.trim();
-  const payload = reason ? { action, reason } : { action };
-  let res = await postAdminReport(API_ENDPOINTS.ADMIN_REPORT_ACTION(id), payload);
-  if (action === 'remove' && (res.status === 400 || res.status === 422 || res.status >= 500)) {
-    res = await postAdminReport(
-      API_ENDPOINTS.ADMIN_REPORT_ACTION(id),
-      reason ? { action: 'remove_content', reason } : { action: 'remove_content' },
-    );
-  }
+  const apiAction = action === 'remove' ? 'remove_content' : action;
+  const payload = reason ? { action: apiAction, reason } : { action: apiAction };
+  const res = await postAdminReport(API_ENDPOINTS.ADMIN_REPORT_ACTION(id), payload);
   return readClosedReportAction(id, action, res);
+}
+
+/**
+ * Assigns an open report to an administrator (the caller or another admin).
+ * POST /api/admin/reports/{id}/assign  { admin_id }
+ * 409 when the report is already assigned to someone else.
+ */
+export async function assignReport(reportId: string, adminId: string): Promise<AdminReportDetail> {
+  const id = reportId.trim();
+  const admin_id = adminId.trim();
+  if (!admin_id) throw new Error('Choose an administrator to assign this report to.');
+  const res = await postAdminReport(API_ENDPOINTS.ADMIN_REPORT_ASSIGN(id), { admin_id });
+  const body = await handleAdminResponse<unknown>(res);
+  const detail = readReportDetail(body);
+  if (!detail.id) {
+    return {
+      ...detail,
+      id,
+      assigned_to: detail.assigned_to ?? { id: admin_id, full_name: '', username: null },
+    };
+  }
+  if (!detail.assigned_to) {
+    return { ...detail, assigned_to: { id: admin_id, full_name: '', username: null } };
+  }
+  return detail;
 }
 
 function isAlreadyRemovedError(err: unknown): boolean {
@@ -1525,11 +1890,15 @@ function isAlreadyRemovedError(err: unknown): boolean {
 }
 
 /**
- * Removes the reported event or message, then closes the report as Action taken.
- * Dedicated remove endpoints are used because `/reports/{id}/action` may close
- * the report without marking the content removed.
+ * Removes the reported event or message, then resolves the report by warning
+ * the user about that removed content.
+ * POST /api/admin/reports/{id}/action  { action: "warn", reason }
  */
-export async function removeReportedContent(report: AdminReportDetail): Promise<AdminReportDetail> {
+export async function removeReportedContent(
+  report: AdminReportDetail,
+  reason?: string,
+): Promise<AdminReportDetail> {
+  const warning = (reason ?? '').trim() || warningReasonFromReport(report);
   const id = report.id.trim();
   let removed = false;
   if (report.target_type === 'event') {
@@ -1555,24 +1924,28 @@ export async function removeReportedContent(report: AdminReportDetail): Promise<
   }
 
   try {
-    const closed = await actOnReport(id, 'remove');
+    const closed = await actOnReport(id, 'warn', warning);
     return {
       ...closed,
       content_removed: true,
-      status: closed.status === 'open' ? 'action_taken' : closed.status,
-      outcome: closed.outcome ?? 'content_removed',
+      status: closed.status === 'open' ? 'resolved' : closed.status,
+      outcome: closed.outcome ?? 'warned',
     };
   } catch (err) {
     if (!removed) throw err;
     try {
       const fresh = await fetchAdminReportDetail(id);
-      if (fresh.status !== 'open' || fresh.content_removed) {
-        return { ...fresh, content_removed: true, outcome: fresh.outcome ?? 'content_removed' };
+      if (fresh.status !== 'open') {
+        return {
+          ...fresh,
+          content_removed: true,
+          outcome: fresh.outcome ?? (fresh.status === 'dismissed' ? 'dismissed' : 'warned'),
+        };
       }
     } catch {
-      /* content was removed; keep the report closed in the UI */
+      /* content is gone; still need to warn to resolve */
     }
-    return closedReportFromAction(id, 'remove', report);
+    throw err;
   }
 }
 

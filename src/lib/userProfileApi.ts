@@ -52,6 +52,8 @@ export type UserProfile = {
   events?: { organized?: ProfileEventGroup; joined?: ProfileEventGroup } | null;
   /** First page of this user's friends; left out when the viewer may not see them. */
   friends?: UserSummary[];
+  /** True when more visible friends exist beyond the embedded first page. */
+  friends_has_more?: boolean;
   friends_count?: number;
   organized_events_count?: number;
   joined_events_count?: number;
@@ -182,6 +184,8 @@ export function normalizeUserProfile(raw: Record<string, unknown>): UserProfile 
     (Array.isArray(friends) ? friends.length : undefined) ??
     0;
 
+  const friends_has_more = typeof raw.friends_has_more === 'boolean' ? raw.friends_has_more : undefined;
+
   return {
     ...(raw as UserProfile),
     visibility: visibility ?? (is_private ? 'private' : undefined),
@@ -189,6 +193,7 @@ export function normalizeUserProfile(raw: Record<string, unknown>): UserProfile 
     organized_events_count,
     joined_events_count,
     friends_count,
+    friends_has_more,
   };
 }
 

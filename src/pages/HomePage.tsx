@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { getCurrentUser, getEvents as getLocalEvents, type EventItem, updateUser } from '@/lib/storage';
 import BottomNav from '@/components/BottomNav';
 import { useTopBarSearch } from '@/app/AppChrome';

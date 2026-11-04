@@ -131,16 +131,26 @@ function matchesCategory(e: ApiEvent, selected: string): boolean {
   return normalizeCategory(e.category) === selected.toLowerCase();
 }
 
+function isCancelledEvent(e: ApiEvent): boolean {
+  if (e.is_cancelled) return true;
+  const status = (e.status ?? '').trim().toLowerCase();
+  return status === 'cancelled' || status === 'canceled';
+}
+
 /**
- * The status of one event. When the server already filtered by sub-tab,
- * that tab IS the status. In the "All" tab we work it out: cancelled wins,
- * then an event counts as upcoming until it has ended.
+ * Cancelled wins. Otherwise the event is upcoming until it has ended
+ * (end time, or start when there is no end).
  */
-function getEventStatus(e: ApiEvent, tab: SubTab, now: number): EventStatus {
-  if (e.is_cancelled || e.status === 'cancelled') return 'cancelled';
-  if (tab === 'upcoming' || tab === 'past') return tab;
-  const endOrStart = new Date(e.end_datetime ?? e.start_datetime).getTime();
-  return !isNaN(endOrStart) && endOrStart > now ? 'upcoming' : 'past';
+function getEventStatus(e: ApiEvent, now: number): EventStatus {
+  if (isCancelledEvent(e)) return 'cancelled';
+  const start = new Date(e.start_datetime).getTime();
+  const end = e.end_datetime ? new Date(e.end_datetime).getTime() : start;
+  const close = Number.isNaN(end) ? start : end;
+  return !Number.isNaN(close) && close > now ? 'upcoming' : 'past';
+}
+
+function matchesSubTab(status: EventStatus, tab: SubTab): boolean {
+  return tab === 'all' || status === tab;
 }
 
 function organizerName(o: Organizer | null): string {
@@ -341,7 +351,9 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
 
   const subTabItems = useMemo(() => {
     const now = Date.now();
-    return tabEvents.map((event) => ({ event, status: getEventStatus(event, activeSubTab, now) }));
+    return tabEvents
+      .map((event) => ({ event, status: getEventStatus(event, now) }))
+      .filter(({ status }) => matchesSubTab(status, activeSubTab));
   }, [tabEvents, activeSubTab]);
 
   // Pill counts always describe the current sub-tab.

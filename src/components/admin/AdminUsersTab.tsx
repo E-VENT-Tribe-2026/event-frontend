@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import {
   Search,
   Users,
@@ -43,6 +43,61 @@ const FILTER_ICONS: Partial<Record<FilterChip, typeof Shield>> = {
   administrators: Shield,
   suspended: Ban,
   with_warnings: AlertTriangle,
+};
+
+const FILTER_STYLES: Record<FilterChip, { idle: CSSProperties; active: CSSProperties }> = {
+  all: {
+    idle: {
+      background: 'hsl(210 80% 52% / .12)',
+      borderColor: 'hsl(210 80% 52% / .4)',
+      color: 'hsl(210 90% 82%)',
+    },
+    active: {
+      background: 'hsl(210 80% 52%)',
+      borderColor: 'hsl(210 80% 52%)',
+      color: 'white',
+      boxShadow: '0 0 14px hsl(210 80% 52% / .45)',
+    },
+  },
+  administrators: {
+    idle: {
+      background: 'hsl(271 76% 53% / .14)',
+      borderColor: 'hsl(271 76% 53% / .4)',
+      color: 'hsl(271 85% 82%)',
+    },
+    active: {
+      background: 'hsl(271 76% 53%)',
+      borderColor: 'hsl(271 76% 53%)',
+      color: 'white',
+      boxShadow: '0 0 14px hsl(271 76% 53% / .45)',
+    },
+  },
+  suspended: {
+    idle: {
+      background: 'hsl(0 84% 60% / .12)',
+      borderColor: 'hsl(0 84% 60% / .4)',
+      color: 'var(--adm-danger-text)',
+    },
+    active: {
+      background: 'hsl(0 84% 60%)',
+      borderColor: 'hsl(0 84% 60%)',
+      color: 'white',
+      boxShadow: '0 0 14px hsl(0 84% 60% / .45)',
+    },
+  },
+  with_warnings: {
+    idle: {
+      background: 'hsl(38 92% 52% / .14)',
+      borderColor: 'hsl(38 92% 52% / .45)',
+      color: 'var(--adm-warn-text)',
+    },
+    active: {
+      background: 'hsl(38 92% 52%)',
+      borderColor: 'hsl(38 92% 52%)',
+      color: 'hsl(30 20% 8%)',
+      boxShadow: '0 0 14px hsl(38 92% 52% / .45)',
+    },
+  },
 };
 
 const isAdminUser = (u: UserRow) => (u.role ?? '').toLowerCase().includes('admin');
@@ -212,20 +267,7 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast, onSuccessToast
               onClick={() => setActiveFilter(chip)}
               aria-pressed={isActive}
               className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all"
-              style={
-                isActive
-                  ? {
-                      background: 'hsl(271 76% 53%)',
-                      borderColor: 'hsl(271 76% 53%)',
-                      color: 'white',
-                      boxShadow: '0 0 14px hsl(271 76% 53% / .45)',
-                    }
-                  : {
-                      background: 'var(--adm-card)',
-                      borderColor: 'var(--adm-border)',
-                      color: 'var(--adm-fg)',
-                    }
-              }
+              style={isActive ? FILTER_STYLES[chip].active : FILTER_STYLES[chip].idle}
             >
               {Icon && <Icon className="h-3.5 w-3.5" />}
               <span>{FILTER_LABELS[chip]}</span>

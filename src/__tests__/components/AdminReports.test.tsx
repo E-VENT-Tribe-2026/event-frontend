@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { setAuthToken, clearAuthToken } from '@/lib/auth';
+import { setCurrentUserFromOAuth, logout } from '@/lib/storage';
 import AdminReportsTab from '@/components/admin/AdminReportsTab';
 import AdminReportDetail from '@/components/admin/AdminReportDetail';
 import AdminEventChat from '@/components/admin/AdminEventChat';
@@ -106,7 +107,8 @@ const messageReport = {
   message: { id: 501, content: 'Buy cheap followers now!!!', sender: BOB },
 };
 
-const closedReport = { ...userReport, id: 14, status: 'dismissed', created_at: '2026-10-20T08:00:00Z' };
+const dismissedReport = { ...userReport, id: 14, status: 'dismissed', created_at: '2026-10-20T08:00:00Z' };
+const actionTakenReport = { ...userReport, id: 16, status: 'action_taken', created_at: '2026-10-18T09:00:00Z' };
 
 function detail(summary: Record<string, unknown>, extra: Record<string, unknown> = {}) {
   return {
@@ -134,6 +136,7 @@ beforeEach(() => {
 
 afterEach(() => {
   clearAuthToken();
+  logout();
   vi.unstubAllGlobals();
 });
 
@@ -155,7 +158,7 @@ describe('Reports tab', () => {
       on('GET', '/api/admin/reports', (c) =>
         c.search.get('status') === 'open'
           ? page([eventReport, userReport], 1, 1, 2)
-          : page([closedReport], 1, 1, 1),
+          : page([dismissedReport], 1, 1, 1),
       ),
     );
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
@@ -171,18 +174,47 @@ describe('Reports tab', () => {
     expect(row).toHaveTextContent('From event page');
     expect(row).toHaveTextContent('2026-10-25');
     expect(row).toHaveTextContent('Open');
-    expect(screen.queryByText('Dismissed')).not.toBeInTheDocument();
+    expect(within(open).queryByText('Dismissed')).not.toBeInTheDocument();
     expect(calls.some((c) => c.search.get('status') === 'open')).toBe(true);
     expect(calls.every((c) => c.cache === 'no-store')).toBe(true);
   });
 
-  it('filters to closed reports', async () => {
+  it('filters to dismissed reports', async () => {
     routes.push(
       on('GET', '/api/admin/reports', (c) =>
-        c.search.get('status') === 'closed'
-          ? page([closedReport], 1, 1, 1)
+        c.search.get('status') === 'dismissed'
+          ? page([dismissedReport], 1, 1, 1)
           : page([eventReport, userReport], 1, 1, 2),
       ),
+    );
+    render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
+    await screen.findByRole('region', { name: 'open-reports' });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Dismissed' }));
+
+    const dismissed = await screen.findByRole('region', { name: 'dismissed-reports' });
+    expect(within(dismissed).getByTestId('dismissed-reports-count')).toHaveTextContent('Dismissed reports · 1');
+    expect(within(dismissed).getByText('Dismissed')).toBeInTheDocument();
+    expect(within(dismissed).queryByText('Rooftop Jazz Night')).not.toBeInTheDocument();
+    expect(calls.some((c) => c.search.get('status') === 'dismissed')).toBe(true);
+  });
+
+  it('filters to closed reports, including action taken', async () => {
+    const closedStatusReport = { ...actionTakenReport, id: 17, status: 'closed', outcome: 'content_removed' };
+    routes.push(
+      on('GET', '/api/admin/reports', (c) => {
+        const status = c.search.get('status');
+        if (status === 'closed') return page([actionTakenReport, closedStatusReport], 1, 1, 2);
+        if (status === 'resolved') {
+          return page(
+            [{ ...actionTakenReport, id: 18, status: 'resolved', created_at: '2026-10-17T09:00:00Z' }],
+            1,
+            1,
+            1,
+          );
+        }
+        return page([eventReport, userReport], 1, 1, 2);
+      }),
     );
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
     await screen.findByRole('region', { name: 'open-reports' });
@@ -190,18 +222,21 @@ describe('Reports tab', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Closed' }));
 
     const closed = await screen.findByRole('region', { name: 'closed-reports' });
-    expect(within(closed).getByTestId('closed-reports-count')).toHaveTextContent('Closed reports · 1');
-    expect(within(closed).getByText('Dismissed')).toBeInTheDocument();
+    expect(within(closed).getByTestId('closed-reports-count')).toHaveTextContent('Closed reports · 3');
+    expect(within(closed).getAllByText('Resolved').length).toBeGreaterThanOrEqual(2);
     expect(within(closed).queryByText('Rooftop Jazz Night')).not.toBeInTheDocument();
     expect(calls.some((c) => c.search.get('status') === 'closed')).toBe(true);
+    expect(calls.some((c) => c.search.get('status') === 'resolved')).toBe(true);
   });
 
   it('loads more closed reports on request', async () => {
-    const closedPage2 = { ...closedReport, id: 15, created_at: '2026-10-19T08:00:00Z' };
+    const closedPage2 = { ...actionTakenReport, id: 15, created_at: '2026-10-19T08:00:00Z' };
     routes.push(
       on('GET', '/api/admin/reports', (c) => {
-        if (c.search.get('status') !== 'closed') return page([], 1, 1, 0);
-        return c.search.get('page') === '2' ? page([closedPage2], 2, 2, 2) : page([closedReport], 1, 2, 2);
+        const status = c.search.get('status');
+        if (status !== 'closed' && status !== 'resolved') return page([], 1, 1, 0);
+        if (status === 'resolved') return page([], 1, 1, 0);
+        return c.search.get('page') === '2' ? page([closedPage2], 2, 2, 2) : page([actionTakenReport], 1, 2, 2);
       }),
     );
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
@@ -243,6 +278,24 @@ describe('Reports tab', () => {
     expect(row).toHaveTextContent('Message');
     expect(row).toHaveTextContent('Bob Stone');
     expect(row).toHaveTextContent('Buy cheap followers now!!!');
+  });
+
+  it('shows who an open report is assigned to', async () => {
+    routes.push(
+      on('GET', '/api/admin/reports', (c) =>
+        c.search.get('status') === 'open'
+          ? page(
+              [{ ...eventReport, assigned_to: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' } }],
+              1,
+              1,
+              1,
+            )
+          : page([], 1, 1, 0),
+      ),
+    );
+    render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
+    const open = await screen.findByRole('region', { name: 'open-reports' });
+    expect(within(open).getByText(/Assigned to Ada Admin/)).toBeInTheDocument();
   });
 
   it('opens a report when its row is pressed', async () => {
@@ -327,6 +380,7 @@ describe('Report details', () => {
       expect(await screen.findByRole('button', { name: label })).toBeInTheDocument();
     }
     expect(screen.getByText(/apply to the event's organizer, Olga Organizer/)).toBeInTheDocument();
+    expect(screen.getByText(/Removing content also warns them/)).toBeInTheDocument();
   });
 
   it('does not offer removal for a profile report, and says why', async () => {
@@ -341,6 +395,8 @@ describe('Report details', () => {
     await screen.findByRole('button', { name: 'Dismiss' });
     expect(screen.queryByRole('button', { name: 'Remove the reported content' })).not.toBeInTheDocument();
     expect(screen.getByText('The reported message is already removed.')).toBeInTheDocument();
+    expect(screen.getByText('Content is removed')).toBeInTheDocument();
+    expect(screen.getByText('Open')).toBeInTheDocument();
   });
 
   it('does not offer Warn or Suspend when the reported user is now an administrator, and says so', async () => {
@@ -353,7 +409,7 @@ describe('Report details', () => {
 
   it('shows the outcome of a closed report and no actions', async () => {
     renderDetail(
-      detail(closedReport, { outcome: 'dismissed', closed_at: '2026-10-21T12:00:00Z', closed_by: ADMIN }),
+      detail(dismissedReport, { outcome: 'dismissed', closed_at: '2026-10-21T12:00:00Z', closed_by: ADMIN }),
     );
     const outcome = await screen.findByLabelText('Outcome');
     expect(outcome).toHaveTextContent('Outcome: Dismissed');
@@ -394,24 +450,21 @@ describe('Report details', () => {
   it('warns with a required reason', async () => {
     routes.push(
       on('POST', '/api/admin/reports/12/action', () =>
-        detail(userReport, { status: 'action_taken', outcome: 'warned' }),
+        detail(userReport, { status: 'resolved', outcome: 'warned' }),
       ),
     );
     renderDetail(detail(userReport));
     fireEvent.click(await screen.findByRole('button', { name: 'Warn the user' }));
     const dialog = await screen.findByRole('alertdialog');
-    const confirm = within(dialog).getByRole('button', { name: 'Warn' });
-    expect(confirm).toBeDisabled();
-
-    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Insults in messages' } });
-    fireEvent.click(confirm);
+    expect(within(dialog).getByLabelText('Reason')).toHaveValue('Harassment.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Warn' }));
 
     expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The user was warned');
     const post = calls.find((c) => c.path === '/api/admin/reports/12/action');
-    expect(post?.body).toEqual({ action: 'warn', reason: 'Insults in messages' });
+    expect(post?.body).toEqual({ action: 'warn', reason: 'Harassment.' });
   });
 
-  it('removes the reported event, then closes the report', async () => {
+  it('removes the reported event, then resolves the report by warning the user', async () => {
     routes.push(
       on('POST', '/api/admin/events/ev-1/remove', () => ({
         event_id: 'ev-1',
@@ -420,17 +473,26 @@ describe('Report details', () => {
         removed_by: ADMIN,
       })),
       on('POST', '/api/admin/reports/11/action', () =>
-        detail(eventReport, { status: 'action_taken', outcome: 'content_removed', content_removed: true }),
+        detail(eventReport, { status: 'resolved', outcome: 'warned', content_removed: true }),
       ),
     );
     const h = renderDetail(detail(eventReport));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    const dialog = await screen.findByRole('alertdialog');
+    const confirm = within(dialog).getByRole('button', { name: 'Remove' });
+    expect(within(dialog).getByLabelText('Reason')).toHaveValue('Misleading event.');
+    fireEvent.click(confirm);
 
-    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The user was warned');
+    expect(screen.getByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
+    expect(screen.getByText('Resolved')).toBeInTheDocument();
+    expect(screen.getByText('Content is removed')).toBeInTheDocument();
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-1/remove')).toBe(true);
     const action = calls.find((c) => c.path === '/api/admin/reports/11/action');
-    expect(action?.body).toEqual({ action: 'remove' });
+    expect(action?.body).toEqual({
+      action: 'warn',
+      reason: 'Misleading event.',
+    });
     expect(h.onReportClosed).toHaveBeenCalled();
   });
 
@@ -442,19 +504,103 @@ describe('Report details', () => {
         is_removed: true,
       })),
       on('POST', '/api/admin/reports/13/action', () =>
-        detail(messageReport, { status: 'action_taken', outcome: 'content_removed', content_removed: true }),
+        detail(messageReport, { status: 'resolved', outcome: 'warned', content_removed: true }),
       ),
     );
     renderDetail(detail(messageReport));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByLabelText('Reason')).toHaveValue('User is spamming the group chat.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
 
-    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The user was warned');
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-2/messages/501/remove')).toBe(true);
+  });
+
+  it('assigns an open report to the signed-in administrator', async () => {
+    setCurrentUserFromOAuth({
+      id: 'u-admin',
+      email: 'ada@example.com',
+      name: 'Ada Admin',
+      username: 'ada',
+      role: 'administrator',
+    });
+    routes.push(
+      on('POST', '/api/admin/reports/11/assign', () =>
+        detail(eventReport, {
+          assigned_to: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' },
+        }),
+      ),
+    );
+    const h = renderDetail(detail(eventReport));
+    fireEvent.click(await screen.findByRole('button', { name: 'Assign to me' }));
+    expect(await screen.findByLabelText('Assigned administrator')).toHaveTextContent('Ada Admin');
+    const post = calls.find((c) => c.path === '/api/admin/reports/11/assign');
+    expect(post?.body).toEqual({ admin_id: 'u-admin' });
+    expect(h.onSuccessToast).toHaveBeenCalledWith('Report assigned to you.');
+    expect(screen.queryByRole('button', { name: 'Assign to me' })).not.toBeInTheDocument();
+  });
+
+  it('assigns an open report to another administrator', async () => {
+    setCurrentUserFromOAuth({
+      id: 'u-admin',
+      email: 'ada@example.com',
+      name: 'Ada Admin',
+      username: 'ada',
+      role: 'administrator',
+    });
+    routes.push(
+      on('GET', '/api/admin/users', () => ({
+        items: [
+          { id: 'u-admin', username: 'ada', full_name: 'Ada Admin', role: 'administrator', created_at: '2026-01-01T00:00:00Z' },
+          { id: 'u-alex', username: 'alex', full_name: 'Alex Morgan', role: 'administrator', created_at: '2026-01-01T00:00:00Z' },
+        ],
+        total: 2,
+        page: 1,
+        limit: 50,
+        total_pages: 1,
+      })),
+      on('POST', '/api/admin/reports/11/assign', () =>
+        detail(eventReport, {
+          assigned_to: { id: 'u-alex', full_name: 'Alex Morgan', username: 'alex' },
+        }),
+      ),
+    );
+    renderDetail(detail(eventReport));
+    fireEvent.click(await screen.findByRole('button', { name: 'Assign to another' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Alex Morgan/ }));
+    expect(await screen.findByLabelText('Assigned administrator')).toHaveTextContent('Alex Morgan');
+    const post = calls.find((c) => c.path === '/api/admin/reports/11/assign');
+    expect(post?.body).toEqual({ admin_id: 'u-alex' });
+  });
+
+  it('shows the 409 when the report is already assigned to someone else', async () => {
+    setCurrentUserFromOAuth({
+      id: 'u-admin',
+      email: 'ada@example.com',
+      name: 'Ada Admin',
+      username: 'ada',
+      role: 'administrator',
+    });
+    routes.push(
+      on(
+        'POST',
+        '/api/admin/reports/11/assign',
+        () => ({ detail: 'This report is already assigned to someone else.' }),
+        409,
+      ),
+    );
+    const h = renderDetail(detail(eventReport));
+    fireEvent.click(await screen.findByRole('button', { name: 'Assign to me' }));
+    await waitFor(() =>
+      expect(h.onErrorToast).toHaveBeenCalledWith('This report is already assigned to someone else.'),
+    );
+    expect(screen.getByRole('button', { name: 'Assign to me' })).toBeInTheDocument();
   });
 
   it('shows the reason when the backend refuses an action', async () => {
     routes.push(
+      on('POST', '/api/admin/events/ev-1/remove', () => ({ is_removed: true })),
       on(
         'POST',
         '/api/admin/reports/11/action',
@@ -525,6 +671,28 @@ describe('Remove event', () => {
 });
 
 describe('Remove message', () => {
+  it('opens the event chat with the message text, not the stored JSON', async () => {
+    routes.push(
+      on('GET', '/api/admin/events/ev-1', () => ({
+        ...eventDetailBody,
+        chats: [
+          {
+            id: 900,
+            sender: BOB,
+            content: '{"v":1,"type":"text","text":"See you at 8"}',
+            created_at: '2026-10-26T10:00:00Z',
+            is_removed: false,
+          },
+        ],
+      })),
+    );
+    render(<AdminEventDetail eventId="ev-1" onBack={vi.fn()} onErrorToast={vi.fn()} onSuccessToast={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Open event chat/i }));
+    const chat = await screen.findByLabelText('Event chat');
+    expect(within(chat).getByText('See you at 8')).toBeInTheDocument();
+    expect(within(chat).queryByText(/"type":"text"/)).not.toBeInTheDocument();
+  });
+
   it('removes a message through the backend after confirmation and shows it as removed by an administrator', async () => {
     routes.push(
       on('POST', '/api/admin/events/ev-1/messages/900/remove', () => ({
@@ -618,7 +786,7 @@ describe('Report history in user details', () => {
     const about = await screen.findByLabelText('Reports about this user');
     expect(within(about).getByText('Event: Bob Party')).toBeInTheDocument();
     expect(within(about).getByText('Open')).toBeInTheDocument();
-    expect(within(about).getByText('Action taken')).toBeInTheDocument();
+    expect(within(about).getByText('Resolved')).toBeInTheDocument();
     expect(within(about).getByText('2026-10-25')).toBeInTheDocument();
 
     const made = screen.getByLabelText('Reports made by this user');
@@ -688,6 +856,122 @@ describe('My account', () => {
     render(<AdminMyAccount adminId="u-admin" onClose={vi.fn()} />);
     expect(await screen.findByTestId('reports-closed-count')).toHaveTextContent('7');
   });
+
+  it('lists assigned reports and every report this administrator closed', async () => {
+    const ada = { id: 'u-admin', full_name: 'Ada Admin' };
+    routes.push(
+      on('GET', '/api/admin/users/u-admin', () => userBody({ id: 'u-admin', full_name: 'Ada Admin', is_admin: true, role: 'administrator' })),
+      on('GET', '/api/admin/account', () => ({
+        id: 'u-admin',
+        reports_closed: 2,
+        assigned_reports: [
+          {
+            id: 11,
+            status: 'open',
+            reason: 'spam',
+            target_type: 'event',
+            origin: 'event_details',
+            created_at: '2026-10-25T10:00:00Z',
+            assigned_to: ada,
+            event: { id: 'ev-1', title: 'Rooftop Jazz Night' },
+          },
+        ],
+        closed_reports: [
+          {
+            id: 14,
+            status: 'dismissed',
+            reason: 'other',
+            target_type: 'user',
+            origin: 'profile',
+            created_at: '2026-10-20T08:00:00Z',
+            closed_by: ada,
+            reported_user: BOB,
+          },
+          {
+            id: 13,
+            status: 'resolved',
+            reason: 'spam',
+            target_type: 'message',
+            origin: 'event_chat',
+            created_at: '2026-10-19T10:00:00Z',
+            closed_by: ada,
+            event: { id: 'ev-2', title: 'Board Games Evening' },
+          },
+        ],
+      })),
+    );
+    const onOpenReport = vi.fn();
+    render(<AdminMyAccount adminId="u-admin" onClose={vi.fn()} onOpenReport={onOpenReport} />);
+    expect(await screen.findByTestId('reports-assigned-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('reports-closed-count')).toHaveTextContent('2');
+    const assigned = screen.getByLabelText('Assigned to you');
+    expect(within(assigned).getByText(/Rooftop Jazz Night/)).toBeInTheDocument();
+    const closed = screen.getByLabelText('Closed by you');
+    expect(within(closed).getByText('Dismissed')).toBeInTheDocument();
+    expect(within(closed).getByText('Resolved')).toBeInTheDocument();
+    fireEvent.click(within(assigned).getByRole('button', { name: /Open report: Spam/ }));
+    expect(onOpenReport).toHaveBeenCalledWith('11');
+  });
+
+  it('shows this administrator’s audit activity', async () => {
+    routes.push(
+      on('GET', '/api/admin/users/u-admin', () => userBody({ id: 'u-admin', full_name: 'Ada Admin', username: 'ada', is_admin: true, role: 'administrator' })),
+      on('GET', '/api/admin/account', () => ({ id: 'u-admin', reports_closed: 0, assigned_reports: [], closed_reports: [] })),
+      on('GET', '/api/admin/audit-log', () => ({
+        items: [
+          {
+            id: 'a1',
+            action: 'warn',
+            created_at: '2026-10-25T12:00:00Z',
+            administrator: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' },
+            target: { type: 'user', id: 'u-bob', user: { id: 'u-bob', full_name: 'Bob Stone', username: 'bob' } },
+            description: 'Harassment.',
+          },
+          {
+            id: 'a2',
+            action: 'suspend',
+            created_at: '2026-10-24T12:00:00Z',
+            administrator: { id: 'u-other', full_name: 'Other Admin', username: 'other' },
+            target: { type: 'user', id: 'u-bob', user: { id: 'u-bob', full_name: 'Bob Stone' } },
+          },
+        ],
+        has_more: false,
+        next_before: null,
+      })),
+    );
+    render(<AdminMyAccount adminId="u-admin" onClose={vi.fn()} />);
+    const activity = await screen.findByLabelText('Your activity');
+    expect(within(activity).getByText('Warned')).toBeInTheDocument();
+    expect(within(activity).getByText('Bob Stone')).toBeInTheDocument();
+    expect(within(activity).getByText('Harassment.')).toBeInTheDocument();
+    expect(within(activity).queryByText('Suspended')).not.toBeInTheDocument();
+    expect(within(activity).queryByRole('button', { name: /see more/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Assigned to you')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Closed by you')).not.toBeInTheDocument();
+  });
+
+  it('keeps activity to five rows until See more', async () => {
+    const own = Array.from({ length: 6 }, (_, index) => ({
+      id: `a${index + 1}`,
+      action: 'warn',
+      created_at: `2026-10-${25 - index}T12:00:00Z`,
+      administrator: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' },
+      target: { type: 'user', id: 'u-bob', user: { id: 'u-bob', full_name: `User ${index + 1}`, username: 'bob' } },
+    }));
+    routes.push(
+      on('GET', '/api/admin/users/u-admin', () => userBody({ id: 'u-admin', full_name: 'Ada Admin', username: 'ada', is_admin: true, role: 'administrator' })),
+      on('GET', '/api/admin/account', () => ({ id: 'u-admin', reports_closed: 0, assigned_reports: [], closed_reports: [] })),
+      on('GET', '/api/admin/audit-log', () => ({ items: own, has_more: false, next_before: null })),
+    );
+    render(<AdminMyAccount adminId="u-admin" onClose={vi.fn()} />);
+    const activity = await screen.findByLabelText('Your activity');
+    expect(within(activity).getByText('User 1')).toBeInTheDocument();
+    expect(within(activity).queryByText('User 6')).not.toBeInTheDocument();
+    fireEvent.click(within(activity).getByRole('button', { name: /see more/i }));
+    expect(within(activity).getByText('User 6')).toBeInTheDocument();
+    fireEvent.click(within(activity).getByRole('button', { name: /see less/i }));
+    expect(within(activity).queryByText('User 6')).not.toBeInTheDocument();
+  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -700,7 +984,13 @@ describe('Open reports number next to the Reports tab', () => {
     let openCount = 2;
     routes.push(
       on('GET', '/api/profile/me', () => ({ id: 'u-admin', full_name: 'Ada Admin' })),
-      on('GET', '/api/admin/reports/open-count', () => ({ count: openCount })),
+      on('GET', '/api/admin/reports', () => ({
+        items: [],
+        total: openCount,
+        page: 1,
+        limit: 1,
+        total_pages: 1,
+      })),
       on('GET', '/api/admin/users', () => ({ items: [], total: 0, page: 1, limit: 20, total_pages: 1 })),
       on('GET', '/api/admin/users/counters', () => ({ administrators: 1, suspended: 0, with_warnings: 0 })),
       on('GET', '/api/admin/counts', () => ({ total_users: 1, events: { total: 0, upcoming: 0, past: 0, cancelled: 0 } })),

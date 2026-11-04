@@ -140,6 +140,34 @@ describe('AdminEventsTab (ticket #249)', () => {
     expect(normal).not.toHaveTextContent('Cancelled');
   });
 
+  it('Upcoming keeps events that have not ended and hides past and cancelled ones', async () => {
+    const futureSummit = {
+      ...summit,
+      title: 'Future Tech Summit',
+      start_datetime: '2099-11-20T09:00:00Z',
+      end_datetime: '2099-11-20T17:00:00Z',
+    };
+    const pastMeetup = {
+      ...summit,
+      id: 'e3',
+      title: 'Old Meetup',
+      status: 'active',
+      is_cancelled: false,
+      start_datetime: '2000-01-01T09:00:00Z',
+      end_datetime: '2000-01-01T11:00:00Z',
+    };
+    fetchMock.mockImplementation(async () => jsonResponse({ data: [futureSummit, hackathon, pastMeetup] }));
+    renderTab();
+    expect(await screen.findByText('Future Tech Summit')).toBeInTheDocument();
+    expect(screen.getByText('Cancelled Hackathon')).toBeInTheDocument();
+    expect(screen.getByText('Old Meetup')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Upcoming' }));
+    expect(await screen.findByText('Future Tech Summit')).toBeInTheDocument();
+    expect(screen.queryByText('Cancelled Hackathon')).not.toBeInTheDocument();
+    expect(screen.queryByText('Old Meetup')).not.toBeInTheDocument();
+  });
+
   it('starts on All and asks the backend for each tab when it is chosen', async () => {
     renderTab();
     await screen.findByText('Community Tech Summit');

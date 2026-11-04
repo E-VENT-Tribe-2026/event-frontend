@@ -61,6 +61,19 @@ describe('fetchUserProfile blocking', () => {
     });
   });
 
+  it('reads friends_has_more from the profile payload', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      id: 'u4',
+      username: 'alex',
+      friends: Array.from({ length: 10 }, (_, i) => ({ id: `f-${i}` })),
+      friends_count: 14,
+      friends_has_more: true,
+    }));
+    const profile = await fetchUserProfile('u4');
+    expect(profile.friends_has_more).toBe(true);
+    expect(profile.friends_count).toBe(14);
+  });
+
   it('reads visibility and activity counts from a private profile payload', async () => {
     fetchMock.mockResolvedValue(jsonResponse({
       id: 'u3',
