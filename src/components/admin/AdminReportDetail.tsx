@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Calendar,
   User as UserIcon,
+  UserPlus,
   MessageSquare,
   Info,
   ExternalLink,
@@ -25,6 +26,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   fetchAdminReportDetail,
+  fetchAdministrators,
+  assignReport,
   dismissReport,
   actOnReport,
   removeReportedContent,
@@ -34,9 +37,11 @@ import {
   reportOriginLabel,
   reportOutcomeLabel,
   reportReasonLabel,
+  warningReasonFromReport,
   type AdminEventPerson,
   type AdminReportDetail as AdminReportDetailData,
 } from '@/lib/adminApi';
+import { getCurrentUser } from '@/lib/storage';
 import { ReportStatusPill } from '@/components/admin/AdminReportsTab';
 
 interface AdminReportDetailProps {
@@ -49,6 +54,7 @@ interface AdminReportDetailProps {
   onErrorToast: (message: string) => void;
   onSuccessToast: (message: string) => void;
   closedState?: { status: AdminReportDetailData['status']; outcome: AdminReportDetailData['outcome']; content_removed?: boolean };
+  currentAdminId?: string;
 }
 
 type ActionKind = 'dismiss' | 'warn' | 'remove' | 'suspend';
@@ -117,6 +123,7 @@ export default function AdminReportDetail({
   onErrorToast,
   onSuccessToast,
   closedState,
+  currentAdminId,
 }: AdminReportDetailProps) {
   const [report, setReport] = useState<AdminReportDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -124,6 +131,10 @@ export default function AdminReportDetail({
   const [activeAction, setActiveAction] = useState<ActionKind | null>(null);
   const [reason, setReason] = useState('');
   const [acting, setActing] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [pickAdminOpen, setPickAdminOpen] = useState(false);
+  const [admins, setAdmins] = useState<AdminEventPerson[]>([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,7 +145,12 @@ export default function AdminReportDetail({
         if (!cancelled) {
           setReport(
             closedState && closedState.status !== 'open' && data.status === 'open'
-              ? { ...data, ...closedState }
+              ? {
+                  ...data,
+                  status: closedState.status,
+                  outcome: closedState.outcome,
+                  content_removed: data.content_removed || Boolean(closedState.content_removed),
+                }
               : data,
           );
           setLoading(false);
@@ -151,7 +167,7 @@ export default function AdminReportDetail({
     };
   }, [reportId]);
 
-  const needsReason = activeAction === 'warn' || activeAction === 'suspend';
+  const needsReason = activeAction === 'warn' || activeAction === 'suspend' || activeAction === 'remove';
 
   const handleConfirm = async () => {
     if (!report || acting || !activeAction) return;
@@ -162,7 +178,7 @@ export default function AdminReportDetail({
         activeAction === 'dismiss'
           ? await dismissReport(reportId)
           : activeAction === 'remove'
-            ? await removeReportedContent(report)
+            ? await removeReportedContent(report, reason.trim() || warningReasonFromReport(report))
             : await actOnReport(reportId, activeAction, needsReason ? reason.trim() : undefined);
       const closed: AdminReportDetailData = {
         ...report,
@@ -172,16 +188,14 @@ export default function AdminReportDetail({
             ? updated.status
             : activeAction === 'dismiss'
               ? 'dismissed'
-              : 'action_taken',
+              : 'resolved',
         outcome:
           updated.outcome ??
           (activeAction === 'dismiss'
             ? 'dismissed'
-            : activeAction === 'warn'
-              ? 'warned'
-              : activeAction === 'remove'
-                ? 'content_removed'
-                : 'suspended'),
+            : activeAction === 'suspend'
+              ? 'suspended'
+              : 'warned'),
         content_removed: activeAction === 'remove' ? true : updated.content_removed,
       };
       setReport(closed);
@@ -196,8 +210,50 @@ export default function AdminReportDetail({
   };
 
   const openAction = (kind: ActionKind) => {
-    setReason('');
+    setReason(
+      report && (kind === 'remove' || kind === 'warn') ? warningReasonFromReport(report) : '',
+    );
     setActiveAction(kind);
+  };
+
+  const callerAdminId = (currentAdminId || getCurrentUser()?.id || '').trim();
+
+  const handleAssign = async (admin: { id: string; full_name?: string; username?: string | null }) => {
+    if (!report || assigning) return;
+    const id = admin.id.trim();
+    if (!id) {
+      onErrorToast('Choose an administrator to assign this report to.');
+      return;
+    }
+    setAssigning(true);
+    try {
+      const updated = await assignReport(reportId, id);
+      const assigned: AdminEventPerson = {
+        id,
+        full_name: updated.assigned_to?.full_name || admin.full_name || '',
+        username: updated.assigned_to?.username ?? admin.username ?? null,
+        avatar_url: updated.assigned_to?.avatar_url,
+      };
+      setReport({ ...report, ...updated, assigned_to: assigned });
+      setPickAdminOpen(false);
+      onSuccessToast(
+        id === callerAdminId ? 'Report assigned to you.' : `Report assigned to ${personDisplayName(assigned) || 'an administrator'}.`,
+      );
+    } catch (err) {
+      onErrorToast(err instanceof Error ? err.message : 'This report is already assigned to someone else.');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const openAssignPicker = () => {
+    setPickAdminOpen(true);
+    if (admins.length || loadingAdmins) return;
+    setLoadingAdmins(true);
+    fetchAdministrators()
+      .then(setAdmins)
+      .catch((err) => onErrorToast(err instanceof Error ? err.message : 'Could not load administrators.'))
+      .finally(() => setLoadingAdmins(false));
   };
 
   // What the actions apply to, and why some are not offered.
@@ -234,8 +290,8 @@ export default function AdminReportDetail({
     remove: {
       title: isEventReport ? 'Remove the event?' : 'Remove the message?',
       body: isEventReport
-        ? 'The event is marked as removed, not deleted. Users no longer see it. The report is then closed.'
-        : 'The message is marked as removed, not deleted. The chat shows it as removed. The report is then closed.',
+        ? `The event is marked as removed, not deleted. ${targetName} is warned about the removed content. The report is then resolved.`
+        : `The message is marked as removed, not deleted. ${targetName} is warned about the removed content. The report is then resolved.`,
       confirm: 'Remove',
     },
     suspend: {
@@ -335,6 +391,58 @@ export default function AdminReportDetail({
                     )}
                   </dd>
                 </div>
+                <div className="sm:col-span-2">
+                  <dt className={LABEL_CLASS} style={{ color: 'var(--adm-muted-fg)' }}>Assigned to</dt>
+                  <dd
+                    aria-label="Assigned administrator"
+                    className="flex flex-wrap items-center gap-2 font-semibold"
+                    style={{ color: 'var(--adm-fg)' }}
+                  >
+                    {report.assigned_to
+                      ? personDisplayName(report.assigned_to) ||
+                        (report.assigned_to.id === callerAdminId ? 'You' : 'An administrator')
+                      : 'Unassigned'}
+                    {report.status === 'open' && !report.assigned_to && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={assigning || !callerAdminId}
+                          onClick={() =>
+                            void handleAssign({
+                              id: callerAdminId,
+                              full_name: getCurrentUser()?.name || 'You',
+                              username: getCurrentUser()?.username || null,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold active:scale-95 transition-all disabled:opacity-50"
+                          style={{
+                            borderColor: 'hsl(191 90% 48%)',
+                            background: 'hsl(191 90% 48%)',
+                            color: 'hsl(210 40% 8%)',
+                            boxShadow: '0 0 12px hsl(191 90% 48% / .45)',
+                          }}
+                        >
+                          {assigning ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserPlus className="h-3 w-3" />}
+                          Assign to me
+                        </button>
+                        <button
+                          type="button"
+                          disabled={assigning}
+                          onClick={openAssignPicker}
+                          className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold active:scale-95 transition-all disabled:opacity-50"
+                          style={{
+                            borderColor: 'hsl(271 86% 62%)',
+                            background: 'hsl(271 86% 62%)',
+                            color: 'white',
+                            boxShadow: '0 0 12px hsl(271 86% 62% / .45)',
+                          }}
+                        >
+                          Assign to another
+                        </button>
+                      </>
+                    )}
+                  </dd>
+                </div>
               </dl>
 
               <div>
@@ -350,7 +458,21 @@ export default function AdminReportDetail({
 
             {/* ===== Reported item ===== */}
             <div className="rounded-[16px] border p-5 space-y-3" style={CARD_STYLE} aria-label="Reported item">
-              <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>Reported item</h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>Reported item</h3>
+                {report.content_removed && report.target_type !== 'user' && (
+                  <span
+                    className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      background: 'hsl(0 84% 60% / .12)',
+                      color: 'var(--adm-danger-text)',
+                      borderColor: 'hsl(0 84% 60% / .35)',
+                    }}
+                  >
+                    Content is removed
+                  </span>
+                )}
+              </div>
               {report.target_type === 'event' ? (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--adm-fg)' }}>
@@ -485,7 +607,13 @@ export default function AdminReportDetail({
                     ))}
                 </div>
                 {isEventReport && !userActionsBlocked && (
-                  <Note>Warning and suspending apply to the event&apos;s organizer, {targetName}.</Note>
+                  <Note>
+                    Warning, removing content, and suspending apply to the event&apos;s organizer, {targetName}.
+                    Removing content also warns them.
+                  </Note>
+                )}
+                {!isEventReport && !userActionsBlocked && !removeBlocked && (
+                  <Note>Removing the reported content also warns {targetName}.</Note>
                 )}
                 {userActionsBlocked && <Note>{userActionsBlocked}</Note>}
                 {removeBlocked && <Note>{removeBlocked}</Note>}
@@ -500,6 +628,9 @@ export default function AdminReportDetail({
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
                   Outcome: {reportOutcomeLabel(report.outcome)}
                 </p>
+                {report.content_removed && report.outcome === 'warned' && (
+                  <p style={{ color: 'var(--adm-muted-fg)' }}>The reported content was removed.</p>
+                )}
                 {(report.closed_at || report.closed_by) && (
                   <p style={{ color: 'var(--adm-muted-fg)' }}>
                     Closed
@@ -559,6 +690,56 @@ export default function AdminReportDetail({
                 'Confirm'
               )}
             </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={pickAdminOpen} onOpenChange={(open) => !open && !assigning && setPickAdminOpen(false)}>
+        <AlertDialogContent className="rounded-2xl max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base font-bold">Assign to another administrator</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground">
+              This report can only be assigned if it is not already taken.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {loadingAdmins ? (
+            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading administrators...
+            </div>
+          ) : (
+            <ul className="max-h-56 space-y-1 overflow-y-auto">
+              {admins
+                .filter((admin) => admin.id && admin.id !== callerAdminId)
+                .map((admin) => (
+                  <li key={admin.id}>
+                    <button
+                      type="button"
+                      disabled={assigning}
+                      onClick={() => void handleAssign(admin)}
+                      className="flex w-full items-center rounded-lg border px-3 py-2 text-left text-xs font-semibold disabled:opacity-50"
+                      style={{ borderColor: 'var(--adm-border)', background: 'var(--adm-secondary)', color: 'var(--adm-fg)' }}
+                    >
+                      {personDisplayName(admin) || admin.id}
+                      {admin.username ? (
+                        <span className="ml-1 font-normal" style={{ color: 'var(--adm-muted-fg)' }}>
+                          @{admin.username}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
+          {!loadingAdmins && admins.filter((admin) => admin.id && admin.id !== callerAdminId).length === 0 && (
+            <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+              No other administrators were found.
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={assigning} className="rounded-lg text-xs mt-0">
+              Cancel
+            </AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -18,11 +18,20 @@ import {
   userReportListsFromDetails,
   readUserReportRefs,
   fetchAdminReports,
+  fetchAdminReportsList,
+  fetchClosedAdminReports,
   fetchOpenReportCount,
   fetchAdminReportDetail,
   dismissReport,
   actOnReport,
   removeReportedContent,
+  warningReasonFromReport,
+  assignReport,
+  fetchAdministrators,
+  fetchAdminAccount,
+  fetchAdminWorkReports,
+  isOwnAuditEntry,
+  readChatMessages,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 import * as storageModule from '@/lib/storage';
@@ -288,6 +297,8 @@ describe('adminApi service', () => {
     expect(matchesAuditFilters(entry, { action: 'warn' })).toBe(false);
     expect(matchesAuditFilters(entry, { date: '2026-10-25' })).toBe(true);
     expect(matchesAuditFilters(entry, { date: '2026-10-24' })).toBe(false);
+    expect(isOwnAuditEntry(entry, { id: 'ada', username: 'ada.admin' })).toBe(true);
+    expect(isOwnAuditEntry(entry, { id: 'bob' })).toBe(false);
   });
 
   it('maps nested administrator onto admin_name', async () => {
@@ -367,6 +378,44 @@ describe('adminApi service', () => {
     expect(data.items[0].target_type).toBe('report');
     expect(data.items[0].target_id).toBe('1033');
     expect(data.items[0].target_title).toBe('Pasta Workshop');
+  });
+
+  it('maps audit names and titles instead of guids', async () => {
+    const adminId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const userId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const eventId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [
+            {
+              id: 'a6',
+              action: 'warn',
+              created_at: '2026-11-04T12:00:00Z',
+              admin_id: adminId,
+              admin_name: adminId,
+              administrator: { id: adminId, username: 'ada.admin', name: 'Ada Lovelace' },
+              target: { type: 'user', id: userId, name: 'Bob Stone', username: 'bob' },
+              details: [userId],
+            },
+            {
+              id: 'a7',
+              action: 'remove_event',
+              created_at: '2026-11-04T12:01:00Z',
+              administrator: { id: adminId, full_name: 'Ada Lovelace' },
+              target: { type: 'event', id: eventId, event: { id: eventId, title: 'Rooftop Jazz Night' } },
+              details: [`event_id:${eventId}`],
+            },
+          ],
+        }),
+      );
+    const data = await fetchAdminAudit();
+    expect(data.items[0].admin_name).toBe('Ada Lovelace');
+    expect(data.items[0].target_name).toBe('Bob Stone');
+    expect(data.items[0].target_username).toBe('bob');
+    expect(data.items[0].details).toBeNull();
+    expect(data.items[1].target_title).toBe('Rooftop Jazz Night');
+    expect(data.items[1].details).toBeNull();
   });
 
   it('treats status "suspended" as a suspended account', () => {
@@ -504,15 +553,162 @@ describe('adminApi service', () => {
     expect(page.items[0].event?.title).toBe('Jazz');
   });
 
+  it('requests dismissed and closed report lists by status', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ items: [], total: 0, page: 1, limit: 20, total_pages: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [], total: 0, page: 1, limit: 20, total_pages: 1 }));
+    await fetchAdminReports(1, 20, 'dismissed');
+    await fetchAdminReports(1, 20, 'closed');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('status=dismissed');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('status=closed');
+  });
+
+  it('merges closed and resolved lists for the Closed tab', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [
+            {
+              id: 16,
+              status: 'action_taken',
+              target_type: 'user',
+              reason: 'spam',
+              origin: 'profile',
+              created_at: '2026-10-18T09:00:00Z',
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 20,
+          total_pages: 1,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [
+            {
+              id: 18,
+              status: 'resolved',
+              target_type: 'user',
+              reason: 'spam',
+              origin: 'profile',
+              created_at: '2026-10-17T09:00:00Z',
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 20,
+          total_pages: 1,
+        }),
+      );
+    const page = await fetchClosedAdminReports(1, 20);
+    expect(page.items.map((row) => row.id)).toEqual(['16', '18']);
+    expect(page.items[0].status).toBe('resolved');
+    expect(page.items[1].status).toBe('resolved');
+    expect(page.total).toBe(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('status=closed');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('status=resolved');
+  });
+
   it('reads the open-reports number from GET /api/admin/reports?status=open total', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({ items: [], total: 4, page: 1, limit: 1, total_pages: 4 }),
+      jsonResponse({ items: [], total: 4, page: 1, limit: 20, total_pages: 1 }),
     );
     await expect(fetchOpenReportCount()).resolves.toBe(4);
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain('/api/admin/reports');
     expect(url).toContain('status=open');
     expect(url).not.toContain('open-count');
+  });
+
+  it('reads event, user and message from a nested reported envelope', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          {
+            id: 29,
+            status: 'dismissed',
+            reason: 'scam_or_fraud',
+            created_at: '2026-11-03T09:18:19.751433+00:00',
+            target_type: 'message',
+            origin: 'event_chat',
+            reporter: { id: 'u-alice', username: 'josephe', full_name: 'joseph' },
+            reported: {
+              type: 'message',
+              event: { id: 'ev-b', title: 'testB', name: 'testB' },
+              user: { id: 'u-bob', username: 'jossy', full_name: 'Yosef' },
+              message: { id: 514, event_id: 'ev-b' },
+            },
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        total_pages: 1,
+      }),
+    );
+    const page = await fetchAdminReports(1, 20);
+    expect(page.items[0].event).toEqual({ id: 'ev-b', title: 'testB' });
+    expect(page.items[0].reported_user?.full_name).toBe('Yosef');
+    expect(page.items[0].message?.id).toBe('514');
+    expect(page.items[0].message?.sender?.username).toBe('jossy');
+  });
+
+  it('filters a mixed reports page onto the requested tab and counts only those rows', async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({
+        items: [
+          { id: 29, status: 'dismissed', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-11-03T09:18:19Z' },
+          { id: 26, status: 'open', target_type: 'user', reason: 'spam', origin: 'profile', created_at: '2026-11-03T08:56:13Z' },
+          { id: 25, status: 'open', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-11-03T08:55:55Z' },
+        ],
+        total: 29,
+        page: 1,
+        limit: 20,
+        total_pages: 1,
+      }),
+    );
+    const open = await fetchAdminReportsList(1, 20, 'open');
+    expect(open.items.map((row) => row.id)).toEqual(['26', '25']);
+    expect(open.total).toBe(2);
+    const dismissed = await fetchAdminReportsList(1, 20, 'dismissed');
+    expect(dismissed.items.map((row) => row.id)).toEqual(['29']);
+    expect(dismissed.total).toBe(1);
+    await expect(fetchOpenReportCount()).resolves.toBe(2);
+  });
+
+  it('does not count closed reports in the open-reports number', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          { id: 1, status: 'open', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-10-25T10:00:00Z' },
+          { id: 2, status: 'closed', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-10-24T10:00:00Z' },
+        ],
+        total: 2,
+        page: 1,
+        limit: 20,
+        total_pages: 1,
+      }),
+    );
+    await expect(fetchOpenReportCount()).resolves.toBe(1);
+  });
+
+  it('shows only the words of an event chat message, not the stored JSON payload', () => {
+    const messages = readChatMessages([
+      {
+        id: 900,
+        sender: { id: 'u-bob', full_name: 'Bob Stone', username: 'bob' },
+        content: '{"v":1,"type":"text","text":"See you at 8"}',
+        created_at: '2026-10-26T10:00:00Z',
+      },
+      {
+        id: 901,
+        sender: { id: 'u-alice', full_name: 'Alice Martin', username: 'alice' },
+        content: { v: 1, type: 'text', text: 'On my way' },
+        created_at: '2026-10-26T10:01:00Z',
+      },
+    ]);
+    expect(messages.map((row) => row.content)).toEqual(['See you at 8', 'On my way']);
   });
 
   it('reads a reported chat message’s text and sender from nested reported.message', async () => {
@@ -535,9 +731,67 @@ describe('adminApi service', () => {
       }),
     );
     const detail = await fetchAdminReportDetail('13');
+    expect(detail.status).toBe('open');
     expect(detail.target_type).toBe('message');
     expect(detail.message?.content).toBe('Buy cheap followers now!!!');
     expect(detail.message?.sender?.full_name).toBe('Bob Stone');
+  });
+
+  it('keeps an open report open when content_removed is live target state', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 11,
+        status: 'open',
+        target_type: 'event',
+        reason: 'spam',
+        origin: 'event_details',
+        created_at: '2026-10-25T10:00:00Z',
+        content_removed: true,
+        outcome: null,
+      }),
+    );
+    const detail = await fetchAdminReportDetail('11');
+    expect(detail.status).toBe('open');
+    expect(detail.outcome).toBeNull();
+    expect(detail.content_removed).toBe(true);
+  });
+
+  it('reads a remove action as resolved with outcome content_removed', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 11,
+        status: 'resolved',
+        outcome: 'content_removed',
+        content_removed: true,
+        target_type: 'event',
+        reason: 'spam',
+        origin: 'event_details',
+        created_at: '2026-10-25T10:00:00Z',
+      }),
+    );
+    const closed = await actOnReport('11', 'remove');
+    expect(closed.status).toBe('resolved');
+    expect(closed.outcome).toBe('content_removed');
+    expect(closed.content_removed).toBe(true);
+  });
+
+  it('keeps dismissed when the target content is also gone', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 11,
+        status: 'dismissed',
+        outcome: 'dismissed',
+        content_removed: true,
+        target_type: 'event',
+        reason: 'spam',
+        origin: 'event_details',
+        created_at: '2026-10-25T10:00:00Z',
+      }),
+    );
+    const detail = await fetchAdminReportDetail('11');
+    expect(detail.status).toBe('dismissed');
+    expect(detail.outcome).toBe('dismissed');
+    expect(detail.content_removed).toBe(true);
   });
 
   it('dismisses a report with POST /dismiss and no body, and reads a nested Dismissed status', async () => {
@@ -603,43 +857,225 @@ describe('adminApi service', () => {
     expect(closed.status).toBe('dismissed');
   });
 
+  it('builds a warning reason from what was reported', () => {
+    expect(warningReasonFromReport({ reason: 'spam', target_type: 'message' })).toBe(
+      'User is spamming the group chat.',
+    );
+    expect(warningReasonFromReport({ reason: 'inappropriate_content', target_type: 'event' })).toBe(
+      'Inappropriate content.',
+    );
+    expect(warningReasonFromReport({ reason: 'harassment_or_hate', target_type: 'user' })).toBe(
+      'Harassment.',
+    );
+  });
+
   it('closes a report as content removed even when the action body has no status', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Removed.' }));
     const closed = await actOnReport('11', 'remove');
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ action: 'remove' });
-    expect(closed.status).toBe('action_taken');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ action: 'remove_content' });
+    expect(closed.status).toBe('resolved');
     expect(closed.outcome).toBe('content_removed');
     expect(closed.content_removed).toBe(true);
   });
 
-  it('removes the event then closes the report', async () => {
+  it('removes the event then resolves the report by warning the user', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ is_removed: true, removed_at: '2026-10-27T15:00:00Z' }))
-      .mockResolvedValueOnce(jsonResponse({ message: 'Closed.' }));
-    const closed = await removeReportedContent({
-      id: '11',
-      status: 'open',
-      target_type: 'event',
-      reason: 'spam',
-      origin: 'event_details',
-      created_at: '2026-10-25T10:00:00Z',
-      reporter: null,
-      event: { id: 'ev-1', title: 'Jazz' },
-      reported_user: null,
-      message: null,
-      description: null,
-      chat_context: [],
-      content_removed: false,
-      target_user: null,
-      target_user_is_admin: false,
-      outcome: null,
-      closed_at: null,
-      closed_by: null,
-    });
+      .mockResolvedValueOnce(jsonResponse({ status: 'resolved', outcome: 'warned' }));
+    const closed = await removeReportedContent(
+      {
+        id: '11',
+        status: 'open',
+        target_type: 'event',
+        reason: 'spam',
+        origin: 'event_details',
+        created_at: '2026-10-25T10:00:00Z',
+        reporter: null,
+        event: { id: 'ev-1', title: 'Jazz' },
+        reported_user: null,
+        message: null,
+        description: null,
+        chat_context: [],
+        content_removed: false,
+        target_user: null,
+        target_user_is_admin: false,
+        outcome: null,
+        closed_at: null,
+        closed_by: null,
+        assigned_to: null,
+      },
+    );
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/events/ev-1/remove');
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/admin/reports/11/action');
-    expect(closed.status).toBe('action_taken');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      action: 'warn',
+      reason: 'User is spamming events.',
+    });
+    expect(closed.status).toBe('resolved');
+    expect(closed.outcome).toBe('warned');
     expect(closed.content_removed).toBe(true);
+  });
+
+  it('assigns a report with POST /assign { admin_id }', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 11,
+        status: 'open',
+        assigned_to: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' },
+        target_type: 'event',
+        reason: 'spam',
+        origin: 'event_details',
+        created_at: '2026-10-25T10:00:00Z',
+      }),
+    );
+    const assigned = await assignReport('11', 'u-admin');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/reports/11/assign');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ admin_id: 'u-admin' });
+    expect(assigned.assigned_to?.id).toBe('u-admin');
+    expect(assigned.status).toBe('open');
+  });
+
+  it('throws when assign returns 409 because the report is already taken', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: 'This report is already assigned to someone else.' }, { status: 409 }),
+    );
+    await expect(assignReport('11', 'u-admin')).rejects.toThrow(
+      'This report is already assigned to someone else.',
+    );
+  });
+
+  it('lists administrators from GET /api/admin/users', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          { id: 'u-admin', username: 'ada', full_name: 'Ada Admin', role: 'administrator', created_at: '2026-01-01T00:00:00Z' },
+          { id: 'u-bob', username: 'bob', full_name: 'Bob Stone', role: 'participant', created_at: '2026-01-01T00:00:00Z' },
+        ],
+        total: 2,
+        page: 1,
+        limit: 50,
+        total_pages: 1,
+      }),
+    );
+    const admins = await fetchAdministrators();
+    expect(admins.map((row) => row.id)).toEqual(['u-admin']);
+  });
+
+  it('reads assigned and closed reports from GET /api/admin/account', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 'u-admin',
+        reports_closed: 2,
+        assigned_reports: [
+          {
+            id: 11,
+            status: 'open',
+            reason: 'spam',
+            target_type: 'event',
+            origin: 'event_details',
+            created_at: '2026-10-25T10:00:00Z',
+            assigned_to: { id: 'u-admin', full_name: 'Ada Admin' },
+            event: { id: 'ev-1', title: 'Jazz' },
+          },
+        ],
+        closed_reports: [
+          {
+            id: 12,
+            status: 'dismissed',
+            reason: 'other',
+            target_type: 'user',
+            origin: 'profile',
+            created_at: '2026-10-20T10:00:00Z',
+            closed_by: { id: 'u-admin', full_name: 'Ada Admin' },
+          },
+          {
+            id: 13,
+            status: 'resolved',
+            reason: 'spam',
+            target_type: 'message',
+            origin: 'event_chat',
+            created_at: '2026-10-19T10:00:00Z',
+            closed_by: { id: 'u-admin', full_name: 'Ada Admin' },
+          },
+        ],
+      }),
+    );
+    const account = await fetchAdminAccount();
+    expect(account.reports_closed).toBe(2);
+    expect(account.assigned_reports.map((row) => row.id)).toEqual(['11']);
+    expect(account.closed_reports.map((row) => row.id)).toEqual(['12', '13']);
+  });
+
+  it('collects this administrator’s assigned and closed reports from the report lists', async () => {
+    const ada = { id: 'u-admin', full_name: 'Ada Admin' };
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      const status = new URL(url, 'http://localhost').searchParams.get('status');
+      const items =
+        status === 'open'
+          ? [
+              {
+                id: 11,
+                status: 'open',
+                reason: 'spam',
+                target_type: 'event',
+                origin: 'event_details',
+                created_at: '2026-10-25T10:00:00Z',
+                assigned_to: ada,
+                event: { id: 'ev-1', title: 'Jazz' },
+              },
+            ]
+          : status === 'dismissed'
+            ? [
+                {
+                  id: 12,
+                  status: 'dismissed',
+                  reason: 'other',
+                  target_type: 'user',
+                  origin: 'profile',
+                  created_at: '2026-10-20T10:00:00Z',
+                  closed_by: ada,
+                },
+              ]
+            : [
+                {
+                  id: 13,
+                  status: 'resolved',
+                  reason: 'spam',
+                  target_type: 'message',
+                  origin: 'event_chat',
+                  created_at: '2026-10-19T10:00:00Z',
+                  closed_by: ada,
+                },
+              ];
+      return jsonResponse({ items, total: items.length, page: 1, limit: 50, total_pages: 1 });
+    });
+    const work = await fetchAdminWorkReports('u-admin');
+    expect(work.assigned.map((row) => row.id)).toEqual(['11']);
+    expect(work.closed.map((row) => row.id).sort()).toEqual(['12', '13']);
+  });
+
+  it('treats a closed report assigned to this administrator as theirs when closed_by is missing', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const status = new URL(String(input), 'http://localhost').searchParams.get('status');
+      const items =
+        status === 'closed' || status === 'resolved'
+          ? [
+              {
+                id: 21,
+                status: 'resolved',
+                reason: 'spam',
+                target_type: 'event',
+                origin: 'event_details',
+                created_at: '2026-10-19T10:00:00Z',
+                assigned_to: { administrator: { id: 'u-admin', full_name: 'Ada Admin' } },
+              },
+            ]
+          : [];
+      return jsonResponse({ items, total: items.length, page: 1, limit: 50, total_pages: 1 });
+    });
+    const work = await fetchAdminWorkReports('u-admin');
+    expect(work.closed.map((row) => row.id)).toEqual(['21']);
   });
 
 });

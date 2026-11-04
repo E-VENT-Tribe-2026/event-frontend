@@ -28,6 +28,7 @@ export const API_ENDPOINTS = {
   ADMIN_REPORT_DETAIL: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}`,
   ADMIN_REPORT_DISMISS: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/dismiss`,
   ADMIN_REPORT_ACTION: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/action`,
+  ADMIN_REPORT_ASSIGN: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/assign`,
   MFA_STATUS: '/api/auth/mfa/status',
   ASSISTANT_CHAT: '/api/assistant/chat',
   ASSISTANT_TOOL_SEARCH: '/api/assistant/tools/search-events',

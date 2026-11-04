@@ -5,6 +5,7 @@ import { UserAvatar } from '@/components/UserAvatar';
 import {
   auditActionFilterKey,
   fetchAdminAudit,
+  humanAuditLabel,
   matchesAuditFilters,
   type AdminAuditEntry,
 } from '@/lib/adminApi';
@@ -92,7 +93,7 @@ function getActionStyle(action: string): ActionStyle {
   };
 }
 
-function ActionPill({ action }: { action: string }) {
+export function ActionPill({ action }: { action: string }) {
   const s = getActionStyle(action);
   return (
     <span
@@ -113,7 +114,7 @@ function auditDetails(entry: AdminAuditEntry): string | null {
   return reason || extra || null;
 }
 
-function formatWhen(isoString: string): string {
+export function formatWhen(isoString: string): string {
   try {
     const d = new Date(isoString);
     if (Number.isNaN(d.getTime())) return isoString;
@@ -134,8 +135,8 @@ function handleOf(username?: string | null): string | null {
 }
 
 function reportLabel(id?: string | null): string {
-  if (!id) return 'Report';
-  const trimmed = id.trim();
+  const trimmed = humanAuditLabel(id);
+  if (!trimmed) return 'Report';
   if (/^r[-_]?\d+$/i.test(trimmed)) {
     return `Report ${trimmed.replace(/_/g, '-').replace(/^r/i, 'R')}`;
   }
@@ -169,7 +170,7 @@ function AuditPersonCell({
       />
       <span className="min-w-0">
         <span className="block break-words text-[13px] font-semibold leading-tight" style={{ color: 'var(--adm-fg)' }}>
-          {name}
+          {humanAuditLabel(name) || handle || 'Unknown'}
         </span>
         {handle && (
           <span className="block break-all text-[11px] leading-tight" style={{ color: 'var(--adm-muted-fg)' }}>
@@ -231,7 +232,7 @@ function TargetIconBadge({
   );
 }
 
-function TargetCell({
+export function TargetCell({
   entry,
   onNavigateToUser,
   onNavigateToEvent,
@@ -245,6 +246,8 @@ function TargetCell({
   const isUser = type === 'user';
   const isEvent = type === 'event';
   const chat = looksLikeChat(entry);
+  const targetName = humanAuditLabel(entry.target_name);
+  const targetTitle = humanAuditLabel(entry.target_title);
 
   if (isRegistrationInvite(entry.action) && entry.target_email) {
     return (
@@ -267,7 +270,7 @@ function TargetCell({
         </TargetIconBadge>
         <span className="min-w-0">
           <span className="block break-words text-[13px] font-medium" style={{ color: 'var(--adm-fg)' }}>
-            {entry.target_title || (isReport ? 'Reported chat' : 'Chat')}
+            {targetTitle || (isReport ? 'Reported chat' : 'Chat')}
           </span>
           {isReport && (
             <span className="block break-words text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
@@ -287,9 +290,9 @@ function TargetCell({
         </TargetIconBadge>
         <span className="min-w-0">
           <span className="block break-words text-[13px] font-medium" style={{ color: 'var(--adm-fg)' }}>
-            {entry.target_title || entry.target_name || reportLabel(entry.target_id)}
+            {targetTitle || targetName || reportLabel(entry.target_id)}
           </span>
-          {(entry.target_title || entry.target_name) && (
+          {(targetTitle || targetName) && (
             <span className="block break-words text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
               {reportLabel(entry.target_id)}
             </span>
@@ -299,12 +302,12 @@ function TargetCell({
     );
   }
 
-  if (isUser && (entry.target_name || entry.target_id)) {
+  if (isUser && (targetName || entry.target_username || entry.target_id)) {
     const go = onNavigateToUser && entry.target_id ? () => onNavigateToUser(entry.target_id!) : undefined;
     return (
       <AuditPersonCell
-        id={entry.target_id || entry.target_name || 'user'}
-        name={entry.target_name || 'User'}
+        id={entry.target_id || targetName || 'user'}
+        name={targetName || humanAuditLabel(entry.target_username) || 'User'}
         username={entry.target_username}
         avatarUrl={entry.target_avatar_url}
         onClick={go}
@@ -313,7 +316,7 @@ function TargetCell({
   }
 
   if (isEvent) {
-    const label = entry.target_title || entry.target_name || 'Event';
+    const label = targetTitle || targetName || 'Event';
     const inner = (
       <div className="flex min-w-0 items-start gap-2.5">
         <TargetIconBadge tone="event">
@@ -334,10 +337,10 @@ function TargetCell({
     return inner;
   }
 
-  if (entry.target_name || entry.target_title) {
+  if (targetName || targetTitle) {
     return (
       <span className="min-w-0 break-words text-[13px]" style={{ color: 'var(--adm-fg)' }}>
-        {entry.target_name || entry.target_title}
+        {targetName || targetTitle}
       </span>
     );
   }
