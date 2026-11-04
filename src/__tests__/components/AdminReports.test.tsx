@@ -150,12 +150,12 @@ describe('Reports tab', () => {
     total_pages: totalPages,
   });
 
-  it('shows the open reports with their number on top and all reports below, each with reporter, item, reason, time and status', async () => {
+  it('shows open reports by default, each with reporter, item, reason, time and status', async () => {
     routes.push(
       on('GET', '/api/admin/reports', (c) =>
         c.search.get('status') === 'open'
           ? page([eventReport, userReport], 1, 1, 2)
-          : page([eventReport, userReport, closedReport], 1, 1, 3),
+          : page([closedReport], 1, 1, 1),
       ),
     );
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
@@ -171,26 +171,46 @@ describe('Reports tab', () => {
     expect(row).toHaveTextContent('From event page');
     expect(row).toHaveTextContent('2026-10-25');
     expect(row).toHaveTextContent('Open');
-
-    const all = screen.getByRole('region', { name: 'all-reports' });
-    expect(within(all).getByTestId('all-reports-count')).toHaveTextContent('All reports · 3');
-    expect(within(all).getByText('Dismissed')).toBeInTheDocument();
+    expect(screen.queryByText('Dismissed')).not.toBeInTheDocument();
+    expect(calls.some((c) => c.search.get('status') === 'open')).toBe(true);
     expect(calls.every((c) => c.cache === 'no-store')).toBe(true);
   });
 
-  it('loads more of all reports on request', async () => {
+  it('filters to closed reports', async () => {
+    routes.push(
+      on('GET', '/api/admin/reports', (c) =>
+        c.search.get('status') === 'closed'
+          ? page([closedReport], 1, 1, 1)
+          : page([eventReport, userReport], 1, 1, 2),
+      ),
+    );
+    render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
+    await screen.findByRole('region', { name: 'open-reports' });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Closed' }));
+
+    const closed = await screen.findByRole('region', { name: 'closed-reports' });
+    expect(within(closed).getByTestId('closed-reports-count')).toHaveTextContent('Closed reports · 1');
+    expect(within(closed).getByText('Dismissed')).toBeInTheDocument();
+    expect(within(closed).queryByText('Rooftop Jazz Night')).not.toBeInTheDocument();
+    expect(calls.some((c) => c.search.get('status') === 'closed')).toBe(true);
+  });
+
+  it('loads more closed reports on request', async () => {
+    const closedPage2 = { ...closedReport, id: 15, created_at: '2026-10-19T08:00:00Z' };
     routes.push(
       on('GET', '/api/admin/reports', (c) => {
-        if (c.search.get('status') === 'open') return page([], 1, 1, 0);
-        return c.search.get('page') === '2' ? page([closedReport], 2, 2, 2) : page([userReport], 1, 2, 2);
+        if (c.search.get('status') !== 'closed') return page([], 1, 1, 0);
+        return c.search.get('page') === '2' ? page([closedPage2], 2, 2, 2) : page([closedReport], 1, 2, 2);
       }),
     );
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Closed' }));
 
-    const all = await screen.findByRole('region', { name: 'all-reports' });
-    fireEvent.click(await within(all).findByRole('button', { name: 'Load more' }));
-    expect(await within(all).findByText('Dismissed')).toBeInTheDocument();
-    expect(within(all).queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    const closed = await screen.findByRole('region', { name: 'closed-reports' });
+    fireEvent.click(await within(closed).findByRole('button', { name: 'Load more' }));
+    expect(await within(closed).findByText(/2026-10-19/)).toBeInTheDocument();
+    expect(within(closed).queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 
   it('fetches the open reports again on a live update', async () => {
@@ -342,6 +362,19 @@ describe('Report details', () => {
     expect(screen.queryByRole('button', { name: 'Warn the user' })).not.toBeInTheDocument();
   });
 
+  it('shows dismissed even when the backend still returns the report as open', async () => {
+    routes.push(
+      on('POST', '/api/admin/reports/11/dismiss', () => detail(eventReport)),
+    );
+    renderDetail(detail(eventReport));
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Dismiss' }));
+
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('Dismissed');
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
+    expect(screen.getByText('Dismissed')).toBeInTheDocument();
+  });
+
   it('dismisses after confirmation and then shows the outcome', async () => {
     routes.push(
       on('POST', '/api/admin/reports/11/dismiss', () =>
@@ -376,6 +409,48 @@ describe('Report details', () => {
     expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The user was warned');
     const post = calls.find((c) => c.path === '/api/admin/reports/12/action');
     expect(post?.body).toEqual({ action: 'warn', reason: 'Insults in messages' });
+  });
+
+  it('removes the reported event, then closes the report', async () => {
+    routes.push(
+      on('POST', '/api/admin/events/ev-1/remove', () => ({
+        event_id: 'ev-1',
+        is_removed: true,
+        removed_at: '2026-10-27T15:00:00Z',
+        removed_by: ADMIN,
+      })),
+      on('POST', '/api/admin/reports/11/action', () =>
+        detail(eventReport, { status: 'action_taken', outcome: 'content_removed', content_removed: true }),
+      ),
+    );
+    const h = renderDetail(detail(eventReport));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-1/remove')).toBe(true);
+    const action = calls.find((c) => c.path === '/api/admin/reports/11/action');
+    expect(action?.body).toEqual({ action: 'remove' });
+    expect(h.onReportClosed).toHaveBeenCalled();
+  });
+
+  it('removes the reported chat message, then closes the report', async () => {
+    routes.push(
+      on('POST', '/api/admin/events/ev-2/messages/501/remove', () => ({
+        event_id: 'ev-2',
+        message_id: 501,
+        is_removed: true,
+      })),
+      on('POST', '/api/admin/reports/13/action', () =>
+        detail(messageReport, { status: 'action_taken', outcome: 'content_removed', content_removed: true }),
+      ),
+    );
+    renderDetail(detail(messageReport));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-2/messages/501/remove')).toBe(true);
   });
 
   it('shows the reason when the backend refuses an action', async () => {

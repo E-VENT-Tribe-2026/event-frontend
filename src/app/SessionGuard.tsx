@@ -4,6 +4,7 @@ import AccountRefusalGate, { type SignOutOptions } from '@/components/AccountRef
 import SessionTimeoutModal from '@/components/SessionTimeoutModal';
 import WarningsGate from '@/components/WarningsGate';
 import { announceAccountRefusal } from '@/lib/accountRefusal';
+import { isAdministratorSession } from '@/lib/adminAuth';
 import { isSuspendedAccount } from '@/lib/adminApi';
 import { AUTH_EXPIRED_EVENT, AUTH_TOKEN_EVENT, clearAuthToken, getAuthToken } from '@/lib/auth';
 import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
@@ -25,7 +26,7 @@ export default function SessionGuard({ children }: { children: ReactNode }) {
 
   const loadSignedInProfile = useCallback(() => {
     const token = getAuthToken();
-    if (!token) return;
+    if (!token || isAdministratorSession()) return;
     void syncSupabaseSession(token);
     void fetchMyProfile(token)
       .then((body) => {

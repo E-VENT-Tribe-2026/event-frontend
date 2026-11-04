@@ -533,17 +533,29 @@ function readOutcome(value: unknown): AdminReportOutcome | null {
 }
 
 function readStatus(value: unknown, row: Record<string, unknown> = {}): AdminReportStatus {
-  const n = normalizeToken(value);
+  const outcome = readOutcome(row.outcome ?? row.resolution ?? row.result);
+  const n = normalizeToken(value ?? row.state ?? row.report_status ?? row.current_status);
   if (n === 'dismissed' || n === 'dismiss' || n === 'rejected') return 'dismissed';
-  if (n === 'action_taken' || n === 'actioned') return 'action_taken';
+  if (
+    n === 'action_taken' ||
+    n === 'actioned' ||
+    n === 'handled' ||
+    n === 'processed' ||
+    n === 'content_removed' ||
+    n === 'removed' ||
+    n === 'warned' ||
+    n === 'suspended'
+  ) {
+    return 'action_taken';
+  }
   if (n === 'closed' || n === 'complete' || n === 'completed' || n === 'resolved') {
-    const outcome = readOutcome(row.outcome);
     return outcome && outcome !== 'dismissed' ? 'action_taken' : 'dismissed';
   }
-  if (row.is_open === false || row.closed === true) {
-    const outcome = readOutcome(row.outcome);
+  if (row.is_open === false || row.closed === true || row.is_closed === true || row.closed_at) {
     return outcome && outcome !== 'dismissed' ? 'action_taken' : 'dismissed';
   }
+  if (outcome === 'dismissed') return 'dismissed';
+  if (outcome) return 'action_taken';
   return 'open';
 }
 
@@ -1358,15 +1370,17 @@ export async function fetchAdminAudit(
   };
 }
 
+export type AdminReportListStatus = 'open' | 'closed';
+
 /**
- * One page of reports, newest first. `status: 'open'` lists the open reports only;
- * the response's `total` is then the number of open reports.
+ * One page of reports, newest first. `status` keeps open and closed lists apart;
+ * the response's `total` is the number of reports in that list.
  * GET /api/admin/reports?status=&page=&limit=
  */
 export async function fetchAdminReports(
   page = 1,
   limit = 20,
-  status?: 'open',
+  status?: AdminReportListStatus,
   filters?: { reporterId?: string },
 ): Promise<AdminReportsResponse> {
   const params = new URLSearchParams();
@@ -1451,16 +1465,36 @@ export async function dismissReport(reportId: string): Promise<AdminReportDetail
   const body = await handleAdminResponse<unknown>(res);
   let detail = readReportDetail(body);
   if (!detail.id) detail = { ...detail, id };
-  if (detail.status === 'open') {
-    try {
-      const fresh = await fetchAdminReportDetail(id);
-      if (fresh.status !== 'open') return fresh;
-    } catch {
-      /* POST already succeeded with a message-only body. */
-    }
-    return { ...detail, id, status: 'dismissed', outcome: detail.outcome ?? 'dismissed' };
-  }
-  return detail;
+  if (detail.status !== 'open') return detail;
+  return { ...detail, id, status: 'dismissed', outcome: detail.outcome ?? 'dismissed' };
+}
+
+function closedReportFromAction(
+  id: string,
+  action: AdminReportAction,
+  detail: AdminReportDetail,
+): AdminReportDetail {
+  const outcome =
+    action === 'remove' ? 'content_removed' : action === 'warn' ? 'warned' : 'suspended';
+  return {
+    ...detail,
+    id: detail.id || id,
+    status: 'action_taken',
+    outcome: detail.outcome ?? outcome,
+    content_removed: action === 'remove' ? true : detail.content_removed,
+  };
+}
+
+async function readClosedReportAction(
+  id: string,
+  action: AdminReportAction,
+  res: Response,
+): Promise<AdminReportDetail> {
+  const body = await handleAdminResponse<unknown>(res);
+  let detail = readReportDetail(body);
+  if (!detail.id) detail = { ...detail, id };
+  if (detail.status !== 'open') return detail;
+  return closedReportFromAction(id, action, detail);
 }
 
 /**
@@ -1473,11 +1507,73 @@ export async function actOnReport(
   action: AdminReportAction,
   reason?: string,
 ): Promise<AdminReportDetail> {
-  const res = await postAdminReport(
-    API_ENDPOINTS.ADMIN_REPORT_ACTION(reportId.trim()),
-    reason ? { action, reason } : { action },
-  );
-  return readReportDetail(await handleAdminResponse<unknown>(res));
+  const id = reportId.trim();
+  const payload = reason ? { action, reason } : { action };
+  let res = await postAdminReport(API_ENDPOINTS.ADMIN_REPORT_ACTION(id), payload);
+  if (action === 'remove' && (res.status === 400 || res.status === 422 || res.status >= 500)) {
+    res = await postAdminReport(
+      API_ENDPOINTS.ADMIN_REPORT_ACTION(id),
+      reason ? { action: 'remove_content', reason } : { action: 'remove_content' },
+    );
+  }
+  return readClosedReportAction(id, action, res);
+}
+
+function isAlreadyRemovedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /already removed|already_removed|content_removed/i.test(message);
+}
+
+/**
+ * Removes the reported event or message, then closes the report as Action taken.
+ * Dedicated remove endpoints are used because `/reports/{id}/action` may close
+ * the report without marking the content removed.
+ */
+export async function removeReportedContent(report: AdminReportDetail): Promise<AdminReportDetail> {
+  const id = report.id.trim();
+  let removed = false;
+  if (report.target_type === 'event') {
+    if (!report.event?.id) throw new Error('This report has no event to remove.');
+    try {
+      await removeEvent(report.event.id);
+      removed = true;
+    } catch (err) {
+      if (isAlreadyRemovedError(err)) removed = true;
+    }
+  } else if (report.target_type === 'message') {
+    if (!report.event?.id || !report.message?.id) {
+      throw new Error('This report has no message to remove.');
+    }
+    try {
+      await removeChatMessage(report.event.id, report.message.id);
+      removed = true;
+    } catch (err) {
+      if (isAlreadyRemovedError(err)) removed = true;
+    }
+  } else {
+    throw new Error('There is no content to remove.');
+  }
+
+  try {
+    const closed = await actOnReport(id, 'remove');
+    return {
+      ...closed,
+      content_removed: true,
+      status: closed.status === 'open' ? 'action_taken' : closed.status,
+      outcome: closed.outcome ?? 'content_removed',
+    };
+  } catch (err) {
+    if (!removed) throw err;
+    try {
+      const fresh = await fetchAdminReportDetail(id);
+      if (fresh.status !== 'open' || fresh.content_removed) {
+        return { ...fresh, content_removed: true, outcome: fresh.outcome ?? 'content_removed' };
+      }
+    } catch {
+      /* content was removed; keep the report closed in the UI */
+    }
+    return closedReportFromAction(id, 'remove', report);
+  }
 }
 
 export interface SignupInviteSendResult {

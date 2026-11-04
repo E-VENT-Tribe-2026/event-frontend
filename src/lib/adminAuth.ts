@@ -1,5 +1,6 @@
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/storage';
 
 /**
  * Admin sign-in verification (TOTP / authenticator app). */
@@ -12,9 +13,28 @@ export type AdminAuthStatus = {
   factor_id?: string;
 };
 
+function isAdministratorRoleName(role?: string | null): boolean {
+  const normalized = String(role || '').trim().toLowerCase();
+  return normalized === 'administrator' || normalized === 'admin';
+}
+
+export function isAdministratorAuthStatus(status: AdminAuthStatus | null | undefined): boolean {
+  if (!status) return false;
+  return Boolean(status.is_admin) || isAdministratorRoleName(status.role);
+}
+
 /** True exactly when the account must complete the verification step before continuing. */
 export function needsAdminVerification(status: AdminAuthStatus): boolean {
-  return Boolean(status.is_admin) && status.is_verified !== true;
+  return isAdministratorAuthStatus(status) && status.is_verified !== true;
+}
+
+/**
+ * User-only endpoints 403 administrators. Skip them while MFA is pending
+ * or the stored session is already an administrator.
+ */
+export function isAdministratorSession(): boolean {
+  if (getPendingAdminVerification()) return true;
+  return isAdministratorRoleName(getCurrentUser()?.role);
 }
 
 export type PendingAdminVerification = {

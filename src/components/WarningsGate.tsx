@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import WarningDialog from '@/components/WarningDialog';
+import { isAdministratorSession } from '@/lib/adminAuth';
 import { AUTH_TOKEN_EVENT, getAuthToken } from '@/lib/auth';
 import { acknowledgeWarning, fetchPendingWarnings, type UserWarning } from '@/lib/warningsApi';
 import { NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationsApi';
@@ -59,7 +60,7 @@ export default function WarningsGate({ yieldFocus = false }: WarningsGateProps) 
 
   const load = useCallback(async () => {
     const token = getAuthToken();
-    if (!token || showingRef.current) return;
+    if (!token || showingRef.current || isAdministratorSession()) return;
     // One request per token: a check for the same token is already on its way;
     // a request for an older token is replaced so the new session is checked.
     if (requestRef.current?.token === token) return;

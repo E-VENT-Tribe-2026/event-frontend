@@ -18,20 +18,21 @@ describe('AdminReportsTab', () => {
     vi.restoreAllMocks();
   });
 
-  it('loads open and all reports once, even when the toast callback is a new function', async () => {
+  it('loads the open list once, even when the toast callback is a new function', async () => {
     const { rerender } = render(
       <AdminReportsTab onOpenReport={() => {}} onErrorToast={() => {}} />,
     );
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(2);
+      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
     });
+    expect(adminApi.fetchAdminReports).toHaveBeenCalledWith(1, 20, 'open');
 
     rerender(<AdminReportsTab onOpenReport={() => {}} onErrorToast={() => {}} />);
     rerender(<AdminReportsTab onOpenReport={() => {}} onErrorToast={(msg) => void msg} />);
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(2);
+      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -42,13 +43,13 @@ describe('AdminReportsTab', () => {
     );
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(2);
+      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
     });
 
     rerender(<AdminReportsTab onOpenReport={() => {}} onErrorToast={() => {}} />);
 
     await waitFor(() => {
-      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(2);
+      expect(adminApi.fetchAdminReports).toHaveBeenCalledTimes(1);
     });
   });
 });

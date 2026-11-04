@@ -82,10 +82,10 @@ export default function AdminVerifyPage() {
       return;
     }
 
-    // Verified — this is now an upgraded aal2 token. Continue exactly like a normal sign-in would
+    // Verified — upgraded aal2 token. Store the administrator role before
+    // dropping the pending flag so user-only 403s do not sign this session out.
     setAuthToken(result.accessToken);
     await syncSupabaseSession(result.accessToken, '');
-    clearPendingAdminVerification();
 
     const me = await fetchAuthUserFromToken(result.accessToken);
     let avatarUrl = '';
@@ -105,22 +105,21 @@ export default function AdminVerifyPage() {
       interests = Array.isArray(p.interests) ? (p.interests as string[]) : [];
       username = typeof p.username === 'string' ? p.username : undefined;
     } catch {
-      /* use defaults */
+      /* administrators are refused on /api/profile/me; defaults are fine */
     }
 
-    if (me?.id) {
-      setCurrentUserFromOAuth({
-        id: me.id,
-        email: me.email || '',
-        name: fullName,
-        username: username ?? '',
-        avatar: avatarUrl,
-        bio,
-        interests,
-        role: 'administrator',
-      });
-      window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
-    }
+    setCurrentUserFromOAuth({
+      id: me?.id || pending.current.accessToken.slice(-12),
+      email: me?.email || '',
+      name: fullName,
+      username: username ?? '',
+      avatar: avatarUrl,
+      bio,
+      interests,
+      role: 'administrator',
+    });
+    window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
+    clearPendingAdminVerification();
     const destination = destinationAfterSignIn(username, 'administrator');
     navigate(destination, { replace: true });
   };
