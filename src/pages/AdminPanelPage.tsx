@@ -17,7 +17,7 @@ import { logout } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getAuthToken } from '@/lib/auth';
-import { fetchOpenReportCount } from '@/lib/adminApi';
+import { fetchOpenReportCount, type AdminReportOutcome, type AdminReportStatus } from '@/lib/adminApi';
 import { useRealtimeTable } from '@/hooks/useRealtimeTable';
 
 type AdminTab = 'users' | 'events' | 'audit' | 'reports';
@@ -46,6 +46,9 @@ export default function AdminPanelPage() {
   const [openReportCount, setOpenReportCount] = useState<number | null>(null);
   // Bumped on every live update of the reports, so the Reports tab fetches its open list again.
   const [reportsLiveVersion, setReportsLiveVersion] = useState(0);
+  const [closedReports, setClosedReports] = useState<
+    Record<string, { status: AdminReportStatus; outcome: AdminReportOutcome | null; content_removed?: boolean }>
+  >({});
 
   const [showAccount, setShowAccount] = useState(false);
   const [adminId, setAdminId] = useState<string>('');
@@ -476,10 +479,21 @@ export default function AdminPanelPage() {
         ) : topOfStack?.type === 'report-detail' ? (
           <AdminReportDetail
             reportId={topOfStack.reportId}
+            closedState={closedReports[topOfStack.reportId]}
             onBack={popStack}
             onOpenEvent={pushEventDetail}
             onOpenUser={pushUserDetail}
-            onReportClosed={onReportsChanged}
+            onReportClosed={(closed) => {
+              setClosedReports((prev) => ({
+                ...prev,
+                [closed.id]: {
+                  status: closed.status,
+                  outcome: closed.outcome,
+                  content_removed: closed.content_removed,
+                },
+              }));
+              onReportsChanged();
+            }}
             onErrorToast={(msg) => showToast(msg, 'error')}
             onSuccessToast={(msg) => showToast(msg, 'success')}
           />
@@ -514,6 +528,7 @@ export default function AdminPanelPage() {
               <AdminReportsTab
                 onOpenReport={pushReportDetail}
                 liveVersion={reportsLiveVersion}
+                closedReports={closedReports}
                 onErrorToast={(msg) => showToast(msg, 'error')}
               />
             )}

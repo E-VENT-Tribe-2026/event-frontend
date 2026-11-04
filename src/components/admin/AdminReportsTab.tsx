@@ -11,6 +11,7 @@ import {
   reportStatusLabel,
   type AdminEventPerson,
   type AdminReportOrigin,
+  type AdminReportOutcome,
   type AdminReportStatus,
   type AdminReportSummary,
 } from '@/lib/adminApi';
@@ -20,10 +21,18 @@ interface AdminReportsTabProps {
   onErrorToast: (msg: string) => void;
   /** Changes whenever the open reports change (live update); the open list is then fetched again. */
   liveVersion?: number;
+  /** Reports closed in this session, so the lists update even if GET still returns them as open. */
+  closedReports?: Record<string, { status: AdminReportStatus; outcome: AdminReportOutcome | null; content_removed?: boolean }>;
 }
 
 const PAGE_SIZE = 20;
-const OPEN_PAGE_SIZE = 50;
+
+type StatusFilter = 'open' | 'closed';
+
+const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: 'open', label: 'Open' },
+  { id: 'closed', label: 'Closed' },
+];
 
 const MAGENTA_PILL: React.CSSProperties = {
   background: 'hsl(312 72% 46% / .22)',
@@ -272,29 +281,37 @@ type ListState = {
 };
 
 const EMPTY_LIST: ListState = { items: [], total: 0, page: 1, totalPages: 1, loading: true, loadingMore: false };
+const NO_CLOSED_REPORTS: NonNullable<AdminReportsTabProps['closedReports']> = {};
 
-export default function AdminReportsTab({ onOpenReport, onErrorToast, liveVersion = 0 }: AdminReportsTabProps) {
-  const [open, setOpen] = useState<ListState>(EMPTY_LIST);
-  const [all, setAll] = useState<ListState>(EMPTY_LIST);
+export default function AdminReportsTab({
+  onOpenReport,
+  onErrorToast,
+  liveVersion = 0,
+  closedReports = NO_CLOSED_REPORTS,
+}: AdminReportsTabProps) {
+  const [filter, setFilter] = useState<StatusFilter>('open');
+  const [list, setList] = useState<ListState>(EMPTY_LIST);
 
   // Inline toast from the parent must not restart the fetch (that looped forever).
   const onErrorToastRef = useRef(onErrorToast);
   onErrorToastRef.current = onErrorToast;
 
   const load = useCallback(
-    async (
-      setList: React.Dispatch<React.SetStateAction<ListState>>,
-      status: 'open' | undefined,
-      targetPage: number,
-      append: boolean,
-      quiet = false,
-    ) => {
+    async (status: StatusFilter, targetPage: number, append: boolean, quiet = false) => {
       setList((s) => ({ ...s, loading: !append && !quiet ? true : s.loading, loadingMore: append }));
       try {
-        const res = await fetchAdminReports(targetPage, status ? OPEN_PAGE_SIZE : PAGE_SIZE, status);
+        const res = await fetchAdminReports(targetPage, PAGE_SIZE, status);
+        const patched = res.items.map((row) => {
+          const closed = closedReports[row.id];
+          return closed ? { ...row, ...closed } : row;
+        });
+        const items =
+          status === 'open'
+            ? patched.filter((row) => row.status === 'open')
+            : patched.filter((row) => row.status !== 'open');
         setList((s) => ({
-          items: append ? [...s.items, ...res.items.filter((r) => !s.items.some((x) => x.id === r.id))] : res.items,
-          total: res.total,
+          items: append ? [...s.items, ...items.filter((r) => !s.items.some((x) => x.id === r.id))] : items,
+          total: items.length !== res.items.length ? items.length : res.total,
           page: res.page,
           totalPages: res.total_pages,
           loading: false,
@@ -305,49 +322,67 @@ export default function AdminReportsTab({ onOpenReport, onErrorToast, liveVersio
         setList((s) => ({ ...s, loading: false, loadingMore: false }));
       }
     },
-    [],
+    [closedReports],
   );
 
   useEffect(() => {
-    void load(setOpen, 'open', 1, false);
-    void load(setAll, undefined, 1, false);
-  }, [load]);
+    void load(filter, 1, false);
+  }, [load, filter]);
 
-  // Live update: the open reports changed, so fetch them (and the first page of all reports) again.
   const firstLive = useRef(liveVersion);
   useEffect(() => {
     if (liveVersion === firstLive.current) return;
-    void load(setOpen, 'open', 1, false, true);
-    void load(setAll, undefined, 1, false, true);
-  }, [liveVersion, load]);
+    void load(filter, 1, false, true);
+  }, [liveVersion, load, filter]);
+
+  const label = filter === 'open' ? 'open-reports' : 'closed-reports';
 
   return (
-    <div className="space-y-8">
-      <ReportSection
-        label="open-reports"
-        title="Open reports"
-        hint="Reports not handled yet, newest first. Handling one moves it out of this list."
-        count={open.total}
-        reports={open.items}
-        loading={open.loading}
-        hasMore={open.page < open.totalPages}
-        onLoadMore={() => void load(setOpen, 'open', open.page + 1, true)}
-        loadingMore={open.loadingMore}
-        onOpen={onOpenReport}
-        emptyMessage="No open reports."
-      />
+    <div className="space-y-4">
+      <div
+        role="tablist"
+        aria-label="Report status filter"
+        className="flex gap-1.5 rounded-[14px] border p-1"
+        style={{ background: 'var(--adm-card)', borderColor: 'var(--adm-border)' }}
+      >
+        {STATUS_FILTERS.map((tab) => {
+          const active = filter === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setFilter(tab.id)}
+              className="flex-1 rounded-xl py-2 text-xs font-semibold transition-all"
+              style={
+                active
+                  ? { background: 'var(--adm-grad)', color: 'white', boxShadow: 'var(--adm-shadow-glow)' }
+                  : { background: 'transparent', color: 'var(--adm-muted-fg)' }
+              }
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
 
       <ReportSection
-        label="all-reports"
-        title="All reports"
-        count={all.total}
-        reports={all.items}
-        loading={all.loading}
-        hasMore={all.page < all.totalPages}
-        onLoadMore={() => void load(setAll, undefined, all.page + 1, true)}
-        loadingMore={all.loadingMore}
+        label={label}
+        title={filter === 'open' ? 'Open reports' : 'Closed reports'}
+        hint={
+          filter === 'open'
+            ? 'Reports not handled yet, newest first.'
+            : 'Dismissed reports and reports with action taken.'
+        }
+        count={list.total}
+        reports={list.items}
+        loading={list.loading}
+        hasMore={list.page < list.totalPages}
+        onLoadMore={() => void load(filter, list.page + 1, true)}
+        loadingMore={list.loadingMore}
         onOpen={onOpenReport}
-        emptyMessage="No reports yet."
+        emptyMessage={filter === 'open' ? 'No open reports.' : 'No closed reports.'}
       />
     </div>
   );

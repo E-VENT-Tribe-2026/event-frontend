@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom';
 import AuthCallbackPage from '@/pages/AuthCallbackPage';
 import { ACCOUNT_REFUSED_EVENT } from '@/lib/accountRefusal';
 import { clearAuthToken, getAuthToken } from '@/lib/auth';
+import { getPendingAdminVerification } from '@/lib/adminAuth';
+import { getCurrentUser, logout } from '@/lib/storage';
 
 const { mockNavigate, getSessionMock } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -98,8 +100,7 @@ describe('AuthCallbackPage — suspended Google account (ticket #294 Part 5)', (
     });
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(getAuthToken()).toBe('google-token');
-    // It stops there: no admin check, no profile load.
-    expect(calledUrls().some((u) => u.includes('/api/auth/mfa/status'))).toBe(false);
+    expect(calledUrls().some((u) => u.includes('/api/auth/mfa/status'))).toBe(true);
     expect(calledUrls().some((u) => u.includes('/api/profile/me'))).toBe(false);
     window.removeEventListener(ACCOUNT_REFUSED_EVENT, listener);
   });
@@ -144,5 +145,70 @@ describe('AuthCallbackPage — suspended Google account (ticket #294 Part 5)', (
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true }));
     expect(getAuthToken()).toBe('google-token');
+  });
+});
+
+describe('AuthCallbackPage — administrator Google sign-in (Scenario F)', () => {
+  beforeEach(() => {
+    mockNavigate.mockClear();
+    getSessionMock.mockReset();
+    getSessionMock.mockResolvedValue({ data: { session }, error: null });
+    clearAuthToken();
+    sessionStorage.clear();
+    logout();
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    logout();
+    vi.unstubAllGlobals();
+  });
+
+  it('sends an unverified administrator to /admin-verify without calling user-only APIs', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = urlOf(input);
+      if (url.includes('/api/auth/mfa/status')) {
+        return jsonResponse({
+          role: 'administrator',
+          is_admin: true,
+          has_mfa_linked: true,
+          is_verified: false,
+          factor_id: 'factor-1',
+        }, 200);
+      }
+      if (url.includes('/api/auth/me')) {
+        return jsonResponse({ detail: 'Administrator accounts cannot perform user actions.' }, 403);
+      }
+      if (url.includes('/api/profile/me') || url.includes('/api/warnings/pending')) {
+        return jsonResponse({ detail: 'Invalid or expired token' }, 401);
+      }
+      return new Response('not mocked', { status: 500 });
+    });
+    renderPage();
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/admin-verify', { replace: true }));
+    expect(getAuthToken()).toBe('google-token');
+    expect(getPendingAdminVerification()).toEqual({
+      accessToken: 'google-token',
+      hasMfaLinked: true,
+      factorId: 'factor-1',
+    });
+    expect(calledUrls().some((u) => u.includes('/api/auth/me'))).toBe(false);
+    expect(calledUrls().some((u) => u.includes('/api/profile/me'))).toBe(false);
+  });
+
+  it('sends a verified administrator to /admin without loading the user profile', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = urlOf(input);
+      if (url.includes('/api/auth/mfa/status')) {
+        return jsonResponse({ role: 'administrator', is_admin: true, is_verified: true }, 200);
+      }
+      return jsonResponse({ detail: 'Administrator accounts cannot perform user actions.' }, 403);
+    });
+    renderPage();
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/admin', { replace: true }));
+    expect(getCurrentUser()?.role).toBe('administrator');
+    expect(calledUrls().some((u) => u.includes('/api/profile/me'))).toBe(false);
   });
 });

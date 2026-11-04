@@ -10,7 +10,12 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { destinationAfterSignIn, hasChosenUsername } from '@/lib/username';
 import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
-import { fetchMfaStatus, needsAdminVerification, setPendingAdminVerification } from '@/lib/adminAuth';
+import {
+  fetchMfaStatus,
+  isAdministratorAuthStatus,
+  needsAdminVerification,
+  setPendingAdminVerification,
+} from '@/lib/adminAuth';
 import { consumeOAuthNextPath } from '@/lib/oauthRedirect';
 import { isPasswordResetAuthType, readAuthLinkType } from '@/lib/authLink';
 
@@ -100,6 +105,38 @@ export default function AuthCallbackPage() {
         return;
       }
 
+      const googleName = String(
+        session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+      ).trim();
+      rememberGoogleName(googleName);
+
+      // Scenario F: Google sign-in never calls /api/auth/login.
+      // Check MFA before installing the token so SessionGuard / WarningsGate
+      // do not hit user-only endpoints (those 403 administrators and 401 aal1 tokens).
+      const mfaStatus = await fetchMfaStatus(session.access_token);
+      if (mfaStatus && needsAdminVerification(mfaStatus)) {
+        setPendingAdminVerification({
+          accessToken: session.access_token,
+          hasMfaLinked: Boolean(mfaStatus.has_mfa_linked),
+          factorId: mfaStatus.factor_id,
+        });
+        setAuthToken(session.access_token);
+        navigate('/admin-verify', { replace: true });
+        return;
+      }
+      if (isAdministratorAuthStatus(mfaStatus)) {
+        setCurrentUserFromOAuth({
+          id: session.user.id,
+          email: session.user.email || '',
+          name: googleName || session.user.email?.split('@')[0] || 'Administrator',
+          avatar: String(session.user.user_metadata?.avatar_url || ''),
+          role: 'administrator',
+        });
+        setAuthToken(session.access_token);
+        navigate('/admin', { replace: true });
+        return;
+      }
+
       setAuthToken(session.access_token);
 
       const suspension = await fetchSuspension(session.access_token);
@@ -109,24 +146,6 @@ export default function AuthCallbackPage() {
         announceAccountRefusal({ kind: 'suspended', reason: suspension.reason });
         return;
       }
-
-      // Scenario F: Google sign-in never calls /api/auth/login,
-      // so an administrator's status is checked separately here.
-      const mfaStatus = await fetchMfaStatus(session.access_token);
-      if (mfaStatus && needsAdminVerification(mfaStatus)) {
-        setPendingAdminVerification({
-          accessToken: session.access_token,
-          hasMfaLinked: Boolean(mfaStatus.has_mfa_linked),
-          factorId: mfaStatus.factor_id,
-        });
-        navigate('/admin-verify', { replace: true });
-        return;
-      }
-
-      const googleName = String(
-        session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
-      ).trim();
-      rememberGoogleName(googleName);
 
       let avatarUrl = String(session.user.user_metadata?.avatar_url || '');
       let fullName = googleName || session.user.email?.split('@')[0] || '';

@@ -79,12 +79,8 @@ export default function LoginPage() {
         return;
       }
 
-      setAuthToken(accessToken);
-      await syncSupabaseSession(accessToken, refreshToken);
-
-      // An administrator whose current sign-in isn't verified
-      // yet goes straight to the verification step — before any profile
-      // fetch or normal post-login setup.
+      // Mark MFA pending before the token is installed so user-only fetches
+      // started by SessionGuard are ignored for this administrator.
       const authStatus = data as unknown as AdminAuthStatus;
       if (needsAdminVerification(authStatus)) {
         setPendingAdminVerification({
@@ -92,11 +88,16 @@ export default function LoginPage() {
           hasMfaLinked: Boolean(authStatus.has_mfa_linked),
           factorId: typeof authStatus.factor_id === 'string' ? authStatus.factor_id : undefined,
         });
+        setAuthToken(accessToken);
+        await syncSupabaseSession(accessToken, refreshToken);
         setIsSubmitting(false);
         navigate('/admin-verify');
         return;
       }
       clearPendingAdminVerification();
+
+      setAuthToken(accessToken);
+      await syncSupabaseSession(accessToken, refreshToken);
 
       const me = await fetchAuthUserFromToken(accessToken);
       if (!me?.id) {

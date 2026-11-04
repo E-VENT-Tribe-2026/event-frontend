@@ -27,6 +27,7 @@ import {
   fetchAdminReportDetail,
   dismissReport,
   actOnReport,
+  removeReportedContent,
   formatReportTime,
   personDisplayName,
   reportedItemLabel,
@@ -44,9 +45,10 @@ interface AdminReportDetailProps {
   onOpenEvent?: (eventId: string) => void;
   onOpenUser?: (userId: string) => void;
   /** Called after the report was closed here, so the open count and lists refresh. */
-  onReportClosed?: () => void;
+  onReportClosed?: (report: AdminReportDetailData) => void;
   onErrorToast: (message: string) => void;
   onSuccessToast: (message: string) => void;
+  closedState?: { status: AdminReportDetailData['status']; outcome: AdminReportDetailData['outcome']; content_removed?: boolean };
 }
 
 type ActionKind = 'dismiss' | 'warn' | 'remove' | 'suspend';
@@ -114,6 +116,7 @@ export default function AdminReportDetail({
   onReportClosed,
   onErrorToast,
   onSuccessToast,
+  closedState,
 }: AdminReportDetailProps) {
   const [report, setReport] = useState<AdminReportDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -129,7 +132,11 @@ export default function AdminReportDetail({
     fetchAdminReportDetail(reportId)
       .then((data) => {
         if (!cancelled) {
-          setReport(data);
+          setReport(
+            closedState && closedState.status !== 'open' && data.status === 'open'
+              ? { ...data, ...closedState }
+              : data,
+          );
           setLoading(false);
         }
       })
@@ -154,11 +161,33 @@ export default function AdminReportDetail({
       const updated =
         activeAction === 'dismiss'
           ? await dismissReport(reportId)
-          : await actOnReport(reportId, activeAction, needsReason ? reason.trim() : undefined);
-      setReport(updated);
+          : activeAction === 'remove'
+            ? await removeReportedContent(report)
+            : await actOnReport(reportId, activeAction, needsReason ? reason.trim() : undefined);
+      const closed: AdminReportDetailData = {
+        ...report,
+        ...updated,
+        status:
+          updated.status !== 'open'
+            ? updated.status
+            : activeAction === 'dismiss'
+              ? 'dismissed'
+              : 'action_taken',
+        outcome:
+          updated.outcome ??
+          (activeAction === 'dismiss'
+            ? 'dismissed'
+            : activeAction === 'warn'
+              ? 'warned'
+              : activeAction === 'remove'
+                ? 'content_removed'
+                : 'suspended'),
+        content_removed: activeAction === 'remove' ? true : updated.content_removed,
+      };
+      setReport(closed);
       setActiveAction(null);
       onSuccessToast(activeAction === 'dismiss' ? 'Report dismissed.' : 'Action taken. The report is closed.');
-      onReportClosed?.();
+      onReportClosed?.(closed);
     } catch (err) {
       onErrorToast(err instanceof Error ? err.message : 'Action failed.');
     } finally {

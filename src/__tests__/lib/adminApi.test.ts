@@ -20,6 +20,8 @@ import {
   fetchAdminReports,
   fetchAdminReportDetail,
   dismissReport,
+  actOnReport,
+  removeReportedContent,
 } from '@/lib/adminApi';
 import * as authModule from '@/lib/auth';
 import * as storageModule from '@/lib/storage';
@@ -495,8 +497,9 @@ describe('adminApi service', () => {
         total_pages: 1,
       }),
     );
-    const page = await fetchAdminReports(1, 50, undefined, { reporterId: 'u-alice' });
+    const page = await fetchAdminReports(1, 50, 'open', { reporterId: 'u-alice' });
     expect(String(fetchMock.mock.calls[0][0])).toContain('reporter_id=u-alice');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('status=open');
     expect(page.items[0].event?.title).toBe('Jazz');
   });
 
@@ -586,6 +589,45 @@ describe('adminApi service', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/admin/reports/11/action');
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ action: 'dismiss' });
     expect(closed.status).toBe('dismissed');
+  });
+
+  it('closes a report as content removed even when the action body has no status', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Removed.' }));
+    const closed = await actOnReport('11', 'remove');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ action: 'remove' });
+    expect(closed.status).toBe('action_taken');
+    expect(closed.outcome).toBe('content_removed');
+    expect(closed.content_removed).toBe(true);
+  });
+
+  it('removes the event then closes the report', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ is_removed: true, removed_at: '2026-10-27T15:00:00Z' }))
+      .mockResolvedValueOnce(jsonResponse({ message: 'Closed.' }));
+    const closed = await removeReportedContent({
+      id: '11',
+      status: 'open',
+      target_type: 'event',
+      reason: 'spam',
+      origin: 'event_details',
+      created_at: '2026-10-25T10:00:00Z',
+      reporter: null,
+      event: { id: 'ev-1', title: 'Jazz' },
+      reported_user: null,
+      message: null,
+      description: null,
+      chat_context: [],
+      content_removed: false,
+      target_user: null,
+      target_user_is_admin: false,
+      outcome: null,
+      closed_at: null,
+      closed_by: null,
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/events/ev-1/remove');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/admin/reports/11/action');
+    expect(closed.status).toBe('action_taken');
+    expect(closed.content_removed).toBe(true);
   });
 
 });
