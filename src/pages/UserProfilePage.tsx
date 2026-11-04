@@ -233,12 +233,18 @@ export default function UserProfilePage() {
 
   // A new first page (other user, refetch after an action) restarts the friends list.
   const firstFriendsPage = profile?.friends;
+  const friendsHasMoreFromProfile = profile?.friends_has_more;
   useEffect(() => {
     setMoreFriends([]);
     setFriendsPage(1);
-    // A full first page may have more behind it; an empty next page then hides "Load more".
-    setFriendsHasMore((firstFriendsPage?.length ?? 0) >= FRIENDS_PAGE_SIZE);
-  }, [firstFriendsPage]);
+    // Blocked friends are removed before the first page is cut, so length can be
+    // a full 10 even when more remain. `friends_has_more` is the reliable signal.
+    setFriendsHasMore(
+      typeof friendsHasMoreFromProfile === 'boolean'
+        ? friendsHasMoreFromProfile
+        : (firstFriendsPage?.length ?? 0) >= FRIENDS_PAGE_SIZE,
+    );
+  }, [firstFriendsPage, friendsHasMoreFromProfile]);
 
   const refreshProfile = async () => {
     invalidateUserProfile(userId);

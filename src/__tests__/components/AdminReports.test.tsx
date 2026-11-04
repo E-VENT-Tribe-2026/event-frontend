@@ -700,7 +700,13 @@ describe('Open reports number next to the Reports tab', () => {
     let openCount = 2;
     routes.push(
       on('GET', '/api/profile/me', () => ({ id: 'u-admin', full_name: 'Ada Admin' })),
-      on('GET', '/api/admin/reports/open-count', () => ({ count: openCount })),
+      on('GET', '/api/admin/reports', () => ({
+        items: [],
+        total: openCount,
+        page: 1,
+        limit: 1,
+        total_pages: 1,
+      })),
       on('GET', '/api/admin/users', () => ({ items: [], total: 0, page: 1, limit: 20, total_pages: 1 })),
       on('GET', '/api/admin/users/counters', () => ({ administrators: 1, suspended: 0, with_warnings: 0 })),
       on('GET', '/api/admin/counts', () => ({ total_users: 1, events: { total: 0, upcoming: 0, past: 0, cancelled: 0 } })),

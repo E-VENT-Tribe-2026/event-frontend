@@ -326,7 +326,6 @@ export function matchesAuditFilters(entry: AdminAuditEntry, filters: AdminAuditF
 //
 // Backend contract (administrators only, never cached on the client):
 // - GET  /api/admin/reports?status=open&page&limit   newest first; `total` is the number of reports
-// - GET  /api/admin/reports/open-count               { count }
 // - GET  /api/admin/reports/{id}                     AdminReportDetail
 // - POST /api/admin/reports/{id}/dismiss             closes it as Dismissed, returns AdminReportDetail
 // - POST /api/admin/reports/{id}/action              { action: warn | remove | suspend, reason? },
@@ -1421,15 +1420,10 @@ export async function fetchReportsFiledByUser(userId: string): Promise<AdminUser
   }
 }
 
-/** The number of open reports. GET /api/admin/reports/open-count */
+/** The number of open reports. Uses GET /api/admin/reports?status=open (`total`). */
 export async function fetchOpenReportCount(): Promise<number> {
-  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORTS_OPEN_COUNT), {
-    method: 'GET',
-    headers: getAdminHeaders(),
-    cache: 'no-store',
-  });
-  const body = await handleAdminResponse<Record<string, unknown>>(res);
-  return typeof body.count === 'number' ? body.count : 0;
+  const page = await fetchAdminReports(1, 1, 'open');
+  return page.total;
 }
 
 /** A report's details. GET /api/admin/reports/{id} */

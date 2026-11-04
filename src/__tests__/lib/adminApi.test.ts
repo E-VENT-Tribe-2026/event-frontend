@@ -18,6 +18,7 @@ import {
   userReportListsFromDetails,
   readUserReportRefs,
   fetchAdminReports,
+  fetchOpenReportCount,
   fetchAdminReportDetail,
   dismissReport,
   actOnReport,
@@ -501,6 +502,17 @@ describe('adminApi service', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('reporter_id=u-alice');
     expect(String(fetchMock.mock.calls[0][0])).toContain('status=open');
     expect(page.items[0].event?.title).toBe('Jazz');
+  });
+
+  it('reads the open-reports number from GET /api/admin/reports?status=open total', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ items: [], total: 4, page: 1, limit: 1, total_pages: 4 }),
+    );
+    await expect(fetchOpenReportCount()).resolves.toBe(4);
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain('/api/admin/reports');
+    expect(url).toContain('status=open');
+    expect(url).not.toContain('open-count');
   });
 
   it('reads a reported chat message’s text and sender from nested reported.message', async () => {

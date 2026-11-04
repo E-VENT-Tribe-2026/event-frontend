@@ -46,6 +46,7 @@ const baseProfile = {
     },
   },
   friends: FIRST_FRIENDS,
+  friends_has_more: true,
   friendship: { status: 'none', request_id: null },
 };
 
@@ -483,12 +484,30 @@ describe('UserProfilePage', () => {
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith(`/api/blocks/${OTHER_ID}`))).toBe(true);
   });
 
-  it('hides "Load more" when the first page of friends is not full', async () => {
-    mockBackend({ status: 'none', request_id: null }, { profile: { friends: [friend('f-1', 'amira', 'Amira Ben Ali')] } });
+  it('hides "Load more" when friends_has_more is false', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      { profile: { friends: [friend('f-1', 'amira', 'Amira Ben Ali')], friends_has_more: false } },
+    );
     renderPage();
     fireEvent.click(await screen.findByTestId('user-main-tab-friends'));
     expect(screen.getByText('Amira Ben Ali')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  it('shows "Load more" from friends_has_more even when the first page is not full', async () => {
+    mockBackend(
+      { status: 'none', request_id: null },
+      {
+        profile: {
+          friends: Array.from({ length: 9 }, (_, i) => friend(`f-${i}`, `friend_${i}`, `Friend ${i}`)),
+          friends_has_more: true,
+        },
+      },
+    );
+    renderPage();
+    fireEvent.click(await screen.findByTestId('user-main-tab-friends'));
+    expect(screen.getByRole('button', { name: /load more/i })).toBeInTheDocument();
   });
 
   it('shows the rate limiter message when it answers with an error field', async () => {
