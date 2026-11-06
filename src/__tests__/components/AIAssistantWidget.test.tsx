@@ -5,7 +5,7 @@ import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import * as authModule from '@/lib/auth';
 import * as assistantApiModule from '@/lib/assistantApi';
 import * as storageModule from '@/lib/storage';
-import { ASSISTANT_QUOTA_DISABLED, BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
+import { BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
 
 describe('AIAssistantWidget — Ticket #196', () => {
   beforeEach(() => {
@@ -102,13 +102,7 @@ describe('AIAssistantWidget — Ticket #196', () => {
     const drawer = await screen.findByTestId('ai-assistant-drawer');
     expect(drawer).toBeInTheDocument();
     expect(screen.getByText('E-VENT Assistant')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        ASSISTANT_QUOTA_DISABLED
-          ? 'Unlimited asks'
-          : `${BASIC_ASSISTANT_ASKS_PER_DAY} of ${BASIC_ASSISTANT_ASKS_PER_DAY} asks left today`,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(`${BASIC_ASSISTANT_ASKS_PER_DAY} of ${BASIC_ASSISTANT_ASKS_PER_DAY} asks left today`)).toBeInTheDocument();
 
     // Close button
     const closeBtn = screen.getByLabelText('Close');
@@ -352,7 +346,7 @@ describe('AIAssistantWidget — Ticket #196', () => {
 
     fireEvent.click(screen.getByTestId('ai-assistant-fab'));
     await screen.findByTestId('ai-assistant-drawer');
-    expect(screen.getByText(ASSISTANT_QUOTA_DISABLED ? 'Unlimited asks' : '1 of 5 asks left today')).toBeInTheDocument();
+    expect(screen.getByText('1 of 5 asks left today')).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: 'Fifth ask' } });
     fireEvent.click(screen.getByTestId('ai-chat-send'));
@@ -361,15 +355,6 @@ describe('AIAssistantWidget — Ticket #196', () => {
       expect(screen.getByText('This is ask number five.')).toBeInTheDocument();
     });
     expect(sendChatSpy).toHaveBeenCalledTimes(1);
-    if (ASSISTANT_QUOTA_DISABLED) {
-      expect(screen.getByText('Unlimited asks')).toBeInTheDocument();
-      fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: 'Sixth ask' } });
-      fireEvent.click(screen.getByTestId('ai-chat-send'));
-      await waitFor(() => {
-        expect(sendChatSpy).toHaveBeenCalledTimes(2);
-      });
-      return;
-    }
     expect(screen.getByText('0 of 5 asks left today')).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: 'Sixth ask' } });

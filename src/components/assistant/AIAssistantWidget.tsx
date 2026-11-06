@@ -18,7 +18,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { getAuthToken } from '@/lib/auth';
 import { isAdministratorRole } from '@/lib/adminApi';
 import { getCurrentUser } from '@/lib/storage';
-import { assistantQuota, consumeAssistantAsk, ASSISTANT_QUOTA_DISABLED, BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
+import { assistantQuota, consumeAssistantAsk, BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
 import {
   sendAssistantChat,
   extractCardsFromReply,
@@ -446,9 +446,7 @@ export const AIAssistantWidget: React.FC = () => {
                     <span>
                       {isLoading
                         ? 'Thinking...'
-                        : ASSISTANT_QUOTA_DISABLED
-                          ? 'Unlimited asks'
-                          : `${quota.remaining} of ${quota.limit} asks left today`}
+                        : `${quota.remaining} of ${quota.limit} asks left today`}
                     </span>
                   </p>
                 </div>

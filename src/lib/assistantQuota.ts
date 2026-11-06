@@ -1,6 +1,4 @@
 export const BASIC_ASSISTANT_ASKS_PER_DAY = 5;
-/** Temporary: the daily ask cap is not enforced. Set this back to false to restore it. */
-export const ASSISTANT_QUOTA_DISABLED = true;
 const STORAGE_PREFIX = 'event_assistant_quota:';
 
 function todayStamp(): string {
@@ -44,9 +42,6 @@ export type AssistantQuota = {
 };
 
 export function assistantQuota(userId: string | undefined): AssistantQuota {
-  if (ASSISTANT_QUOTA_DISABLED) {
-    return { remaining: 1, used: 0, limit: BASIC_ASSISTANT_ASKS_PER_DAY };
-  }
   const { used } = readRecord(userId);
   const capped = Math.min(BASIC_ASSISTANT_ASKS_PER_DAY, Math.max(0, used));
   return {
@@ -58,7 +53,6 @@ export function assistantQuota(userId: string | undefined): AssistantQuota {
 
 /** Spend one ask. Returns false when the daily limit is hit. */
 export function consumeAssistantAsk(userId: string | undefined): boolean {
-  if (ASSISTANT_QUOTA_DISABLED) return true;
   const current = assistantQuota(userId);
   if (current.remaining <= 0) return false;
   writeRecord(userId, { date: todayStamp(), used: current.used + 1 });
