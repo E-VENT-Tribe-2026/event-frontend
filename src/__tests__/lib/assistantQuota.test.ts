@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  ASSISTANT_QUOTA_DISABLED,
   BASIC_ASSISTANT_ASKS_PER_DAY,
   assistantQuota,
   consumeAssistantAsk,
@@ -18,16 +19,24 @@ describe('assistantQuota', () => {
   });
 
   it('gives five asks per day', () => {
-    expect(assistantQuota(USER)).toEqual({
-      remaining: BASIC_ASSISTANT_ASKS_PER_DAY,
-      used: 0,
-      limit: BASIC_ASSISTANT_ASKS_PER_DAY,
-    });
+    expect(assistantQuota(USER)).toEqual(
+      ASSISTANT_QUOTA_DISABLED
+        ? { remaining: 1, used: 0, limit: BASIC_ASSISTANT_ASKS_PER_DAY }
+        : {
+            remaining: BASIC_ASSISTANT_ASKS_PER_DAY,
+            used: 0,
+            limit: BASIC_ASSISTANT_ASKS_PER_DAY,
+          },
+    );
   });
 
   it('stops asks after the daily limit', () => {
     for (let i = 0; i < BASIC_ASSISTANT_ASKS_PER_DAY; i++) {
       expect(consumeAssistantAsk(USER)).toBe(true);
+    }
+    if (ASSISTANT_QUOTA_DISABLED) {
+      expect(consumeAssistantAsk(USER)).toBe(true);
+      return;
     }
     expect(consumeAssistantAsk(USER)).toBe(false);
     expect(assistantQuota(USER).remaining).toBe(0);

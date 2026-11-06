@@ -137,8 +137,30 @@ Ready to publish?`;
 
       const body = JSON.parse(options.body);
       expect(body.messages).toHaveLength(3);
+      expect(body.draft).toBeUndefined();
       expect(body.messages[0]).toEqual({ role: 'user', content: 'What is E-VENT?' });
       expect(body.messages[2]).toEqual({ role: 'user', content: 'How do I create an event?' });
+    });
+
+    it('sends the current draft so a clarification can update it', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ reply: 'Updated.', draft: { title: 'Jazz Night', location_name: 'Prague' } }),
+      });
+      global.fetch = fetchMock;
+
+      const draft = {
+        title: 'Jazz Night',
+        start_datetime: '2026-11-20T18:00:00Z',
+        end_datetime: '2026-11-20T21:00:00Z',
+        location_name: 'Berlin',
+      };
+      const res = await sendAssistantChat([{ role: 'user', content: 'Move it to Prague' }], undefined, draft);
+
+      expect(res.draft?.location_name).toBe('Prague');
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.draft).toEqual(draft);
     });
 
     it('handles 401 Unauthorized and notifies auth expired', async () => {
@@ -173,6 +195,20 @@ Ready to publish?`;
         expect(apiErr.canRetry).toBe(true);
         expect(apiErr.message).toContain('503');
       }
+    });
+
+    it('shows the validation message from a 422 detail list', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: async () => ({
+          detail: [{ msg: 'String should have at most 2000 characters', type: 'string_too_long' }],
+        }),
+      });
+
+      await expect(sendAssistantChat([{ role: 'user', content: 'again' }])).rejects.toThrow(
+        /at most 2000 characters/,
+      );
     });
 
     it('handles 422 Unprocessable Entity error', async () => {

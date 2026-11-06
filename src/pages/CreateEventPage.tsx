@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Type, Calendar, MapPin, Users, Euro, Clock } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -118,6 +118,40 @@ export default function CreateEventPage() {
   const [repeat, setRepeat] = useState<RepeatFreq>('none');
   const [repeatCount, setRepeatCount] = useState('4');
 
+  const applyAssistantDraft = useCallback((draftData: Record<string, unknown>) => {
+    let dateVal = '';
+    let timeVal = '';
+    if (typeof draftData.start_datetime === 'string') {
+      try {
+        const d = new Date(draftData.start_datetime);
+        if (!isNaN(d.getTime())) {
+          dateVal = d.toISOString().slice(0, 10);
+          timeVal = d.toTimeString().slice(0, 5);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      title: typeof draftData.title === 'string' ? draftData.title : prev.title,
+      description: typeof draftData.description === 'string' ? draftData.description : prev.description,
+      category: typeof draftData.category === 'string' ? draftData.category : prev.category,
+      date: dateVal || prev.date,
+      time: timeVal || prev.time,
+      location: typeof draftData.location_name === 'string' ? draftData.location_name : prev.location,
+      budget: draftData.cost !== undefined ? String(draftData.cost) : prev.budget,
+      limit: draftData.max_capacity !== undefined ? String(draftData.max_capacity) : prev.limit,
+    }));
+
+    if (typeof draftData.latitude === 'number' && typeof draftData.longitude === 'number') {
+      setPickedLat(draftData.latitude);
+      setPickedLng(draftData.longitude);
+      setMapCenter({ lat: draftData.latitude, lng: draftData.longitude });
+    }
+  }, []);
+
   // Pre-fill form if an AI Assistant draft payload is provided via state or sessionStorage
   useEffect(() => {
     let draftData = (location.state as { draft?: Record<string, unknown> } | undefined)?.draft;
@@ -133,40 +167,17 @@ export default function CreateEventPage() {
       }
     }
 
-    if (draftData) {
-      let dateVal = '';
-      let timeVal = '';
-      if (typeof draftData.start_datetime === 'string') {
-        try {
-          const d = new Date(draftData.start_datetime);
-          if (!isNaN(d.getTime())) {
-            dateVal = d.toISOString().slice(0, 10);
-            timeVal = d.toTimeString().slice(0, 5);
-          }
-        } catch {
-          // ignore
-        }
-      }
+    if (draftData) applyAssistantDraft(draftData);
+  }, [location.state, applyAssistantDraft]);
 
-      setForm((prev) => ({
-        ...prev,
-        title: typeof draftData.title === 'string' ? draftData.title : prev.title,
-        description: typeof draftData.description === 'string' ? draftData.description : prev.description,
-        category: typeof draftData.category === 'string' ? draftData.category : prev.category,
-        date: dateVal || prev.date,
-        time: timeVal || prev.time,
-        location: typeof draftData.location_name === 'string' ? draftData.location_name : prev.location,
-        budget: draftData.cost !== undefined ? String(draftData.cost) : prev.budget,
-        limit: draftData.max_capacity !== undefined ? String(draftData.max_capacity) : prev.limit,
-      }));
-
-      if (typeof draftData.latitude === 'number' && typeof draftData.longitude === 'number') {
-        setPickedLat(draftData.latitude);
-        setPickedLng(draftData.longitude);
-        setMapCenter({ lat: draftData.latitude, lng: draftData.longitude });
-      }
-    }
-  }, [location.state]);
+  useEffect(() => {
+    const onDraft = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail;
+      if (detail && typeof detail === 'object') applyAssistantDraft(detail);
+    };
+    window.addEventListener('assistant-draft-updated', onDraft);
+    return () => window.removeEventListener('assistant-draft-updated', onDraft);
+  }, [applyAssistantDraft]);
 
   const update = (key: string, value: string | boolean) => {
     setForm(f => ({ ...f, [key]: value }));
