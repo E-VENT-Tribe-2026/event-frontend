@@ -233,7 +233,9 @@ export const AIAssistantWidget: React.FC = () => {
       // Standard multi-turn chat API. The latest draft goes with the turn so a
       // clarification is merged onto it and comes back on this same reply.
       const currentDraft = [...nextMessages].reverse().find((message) => message.draft)?.draft;
-      const res = await sendAssistantChat(apiHistory, undefined, currentDraft);
+      const res = currentDraft
+        ? await sendAssistantChat(apiHistory, undefined, currentDraft)
+        : await sendAssistantChat(apiHistory);
       const parsed = extractCardsFromReply(res.reply || '', res);
       if (parsed.draft) {
         try {
