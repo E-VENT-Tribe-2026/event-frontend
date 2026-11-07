@@ -62,11 +62,17 @@ export type ApiNotification = {
   warning_withdrawn?: boolean | null;
 };
 
-/** Warning fields for rows with `is_warning === true`; nothing for any other row. */
+/**
+ * Warning fields for a warning row (`is_warning === true`) and for a "Your content was removed" row,
+ * which is not a warning card (`is_warning` stays false) but counts as a warning and carries its
+ * `warning_id`, so the warning can be read again from it. Nothing for any other row.
+ */
 function warningFields(row: Record<string, unknown>): Partial<ApiNotification> {
-  if (row.is_warning !== true) return {};
+  const isWarning = row.is_warning === true;
+  const countsAsWarning = row.type === 'content_removed' && row.warning_id != null;
+  if (!isWarning && !countsAsWarning) return {};
   return {
-    is_warning: true,
+    is_warning: isWarning,
     warning_id: row.warning_id == null ? null : String(row.warning_id),
     warning_acknowledged: typeof row.warning_acknowledged === 'boolean' ? row.warning_acknowledged : null,
     warning_withdrawn: typeof row.warning_withdrawn === 'boolean' ? row.warning_withdrawn : null,

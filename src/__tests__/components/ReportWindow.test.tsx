@@ -106,14 +106,33 @@ describe('ReportContentDialog (#327)', () => {
     expect(screen.queryByTestId('report-quote')).not.toBeInTheDocument();
   });
 
-  it('tells the user the report was sent', async () => {
+  it('tells the user the report was sent, in the window, until they close it', async () => {
     mockReportApi(201, { id: 17, message: 'Report sent. Thank you, an administrator will review it.' });
     const { onSuccess, onOpenChange } = open();
+    expect(screen.queryByTestId('report-sent')).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
     await waitFor(() =>
       expect(onSuccess).toHaveBeenCalledWith('Report sent. Thank you, an administrator will review it.'),
     );
+    // The confirmation replaces the form and does not disappear by itself.
+    const sent = await screen.findByTestId('report-sent');
+    expect(sent).toHaveTextContent('Report sent');
+    expect(sent).toHaveTextContent('An administrator will review it');
+    expect(screen.queryByRole('button', { name: /submit report/i })).not.toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('does not show the confirmation when the report is refused', async () => {
+    mockReportApi(409, { detail: { code: 'already_reported', message: 'You have already reported this.' } });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    await screen.findByText('You already have an open report about this.');
+    expect(screen.queryByTestId('report-sent')).not.toBeInTheDocument();
   });
 
   it('says it was already reported when the backend refuses with 409', async () => {

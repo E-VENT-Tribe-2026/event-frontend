@@ -11,7 +11,7 @@ import { getAuthToken, setAuthToken } from '@/lib/auth';
 import { hasSignedInSession } from '@/lib/signedIn';
 import { supabase } from '@/lib/supabase';
 import { deleteNotification, deleteNotifications, markAllNotificationsRead, markNotificationRead, relativeTime, type ApiNotification } from '@/lib/notificationsApi';
-import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck, AlertTriangle, MessageCircle } from 'lucide-react';
+import { CalendarClock, BellOff, RefreshCw, Info, Trash2, UserPlus, UserMinus, PlusCircle, CheckCheck, ExternalLink, Contact, UserCheck, AlertTriangle, MessageCircle, ShieldAlert, Ban } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import { useTopBarSearch } from '@/app/AppChrome';
@@ -26,6 +26,10 @@ const ACK_ERROR = "We couldn't confirm that you read this warning. Check your co
 
 const WARN = 'hsl(0 84% 60%)';
 const WARN_TEXT = 'hsl(0 90% 72%)';
+// "Your content was removed": the red of the administrator panel (--adm-danger / --adm-danger-text).
+const REMOVED = 'hsl(0 84% 60%)';
+const REMOVED_TEXT = 'hsl(0 92% 74%)';
+const REMOVED_PREFIX = /^Your content was removed\.?\s*/i;
 
 type NotificationKind =
   | 'user_joined'
@@ -40,6 +44,8 @@ type NotificationKind =
   | 'event_invitation'
   | 'event_chat'
   | 'warning'
+  | 'content_removed'
+  | 'event_removed'
   | 'other';
 
 type UINotification = {
@@ -70,6 +76,8 @@ const iconMap: Record<NotificationKind, React.ElementType> = {
   event_invitation: CalendarClock,
   event_chat:      MessageCircle,
   warning:         AlertTriangle,
+  content_removed: ShieldAlert,
+  event_removed:   Ban,
   other:           Info,
 };
 
@@ -86,6 +94,8 @@ const colorMap: Record<NotificationKind, string> = {
   event_invitation: 'text-primary bg-primary/20',
   event_chat:      'text-primary bg-primary/20',
   warning:         'text-destructive bg-destructive/15',
+  content_removed: 'text-red-500 bg-red-500/15',
+  event_removed:   'text-red-500 bg-red-500/15',
   other:           'text-primary bg-primary/20',
 };
 
@@ -104,7 +114,13 @@ function isActivityKind(kind: NotificationKind): boolean {
 }
 
 function isUpdatesKind(kind: NotificationKind): boolean {
-  return kind === 'event_updated' || kind === 'event_cancelled' || kind === 'event_deleted';
+  return (
+    kind === 'event_updated' ||
+    kind === 'event_cancelled' ||
+    kind === 'event_deleted' ||
+    kind === 'event_removed' ||
+    kind === 'content_removed'
+  );
 }
 
 /** A warning that still waits for acknowledgement: it cannot be selected or deleted. */
@@ -115,6 +131,9 @@ function isWaitingWarning(n: UINotification): boolean {
 function normalizeKind(type: string, isWarning?: boolean): NotificationKind {
   const t = type.toLowerCase().trim();
   if (isWarning || t === 'warning' || t.includes('warn')) return 'warning';
+  // Administrator removals: a removal notice for the owner, and a notice for an event's participants.
+  if (t === 'content_removed') return 'content_removed';
+  if (t === 'event_removed') return 'event_removed';
   if (t === 'friend_request_accepted' || (t.includes('friend') && t.includes('accept'))) {
     return 'friend_request_accepted';
   }
@@ -149,10 +168,10 @@ function fromApi(n: ApiNotification): UINotification {
     createdAt: n.created_at ?? null,
     read: Boolean(n.read),
   };
-  if (kind !== 'warning') return base;
+  if (kind !== 'warning' && kind !== 'content_removed') return base;
   return {
     ...base,
-    // The administrator's reason; never replaced by a generic text.
+    // The administrator's reason (or the removal notice); never replaced by a generic text.
     message: n.message ?? '',
     warningId: n.warning_id ?? null,
     warningAcknowledged: Boolean(n.warning_acknowledged),
@@ -463,6 +482,11 @@ export default function NotificationsPage() {
         saveNotifications(legacy);
       }
     }
+    if (n.kind === 'content_removed') {
+      // The event may be removed: show the warning again to read, never a "not found" page.
+      onOpenWarning(n);
+      return;
+    }
     if (n.kind === 'event_chat' && n.relatedEventId) {
       navigate(`/chat?eventId=${encodeURIComponent(n.relatedEventId)}`);
     } else if (n.relatedEventId) navigate(`/event/${n.relatedEventId}`);
@@ -593,8 +617,85 @@ export default function NotificationsPage() {
     );
   };
 
+  // Solid red card, so a removal looks different from the warning cards above.
+  const renderContentRemovedCard = (n: UINotification, i: number) => {
+    const isDeleting = deletingIds.has(n.id);
+    const detail = n.message.replace(REMOVED_PREFIX, '');
+    const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        void onOpenNotification(n);
+      }
+    };
+    return (
+      <motion.div
+        key={n.id}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: i * 0.02 }}
+        role="button"
+        tabIndex={0}
+        aria-label="Your content was removed: tap to read"
+        data-testid="content-removed-card"
+        className="flex items-center gap-3.5 rounded-2xl p-4 transition-all shadow-sm cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+        style={{
+          border: `2px solid ${REMOVED}`,
+          background: 'hsl(0 84% 60% / .16)',
+          boxShadow: '0 0 0 3px hsl(0 84% 60% / .12)',
+        }}
+        onClick={() => void onOpenNotification(n)}
+        onKeyDown={onKeyDown}
+      >
+        <input
+          type="checkbox"
+          checked={selectedIds.has(n.id)}
+          onChange={() => toggleSelected(n.id)}
+          onClick={(event) => event.stopPropagation()}
+          className="h-4 w-4 shrink-0 accent-primary cursor-pointer rounded"
+          aria-label="Select notification"
+        />
+        <div className="shrink-0 rounded-xl p-2.5" style={{ background: REMOVED }}>
+          <ShieldAlert className="h-5 w-5 text-white" aria-hidden="true" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            {!n.read && (
+              <span className="h-2 w-2 rounded-full animate-pulse shrink-0" style={{ background: REMOVED }} data-testid="unread-dot" />
+            )}
+            <span className="font-bold uppercase" style={{ fontSize: 10, letterSpacing: '.06em', color: REMOVED_TEXT }}>
+              Content removed
+            </span>
+            <span className="text-[10px] text-muted-foreground">· {relativeTime(n.createdAt)}</span>
+          </div>
+          <p className="mt-0.5 font-bold" style={{ fontSize: 14, color: REMOVED_TEXT }}>
+            Your content was removed
+          </p>
+          {/* Plain text only: React escapes the message. It names what was removed and the event, and says it counts as a warning. */}
+          <p className="mt-0.5 line-clamp-3 break-words text-foreground" style={{ fontSize: 13 }} data-testid="content-removed-detail">
+            {detail}
+          </p>
+          <span className="mt-1 inline-block font-semibold" style={{ fontSize: 12, color: REMOVED_TEXT }}>Tap to read ›</span>
+        </div>
+        <div className="shrink-0 flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={(e) => void onDelete(n.id, e)}
+            className="rounded-xl p-2 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
+            aria-label="Delete notification"
+            title="Delete notification"
+          >
+            {isDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </motion.div>
+    );
+  };
+
   const renderCard = (n: UINotification, i: number) => {
     if (n.kind === 'warning') return renderWarningCard(n, i);
+    if (n.kind === 'content_removed') return renderContentRemovedCard(n, i);
     const Icon = iconMap[n.kind];
     const isDeleting = deletingIds.has(n.id);
     return (

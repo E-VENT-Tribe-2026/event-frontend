@@ -9,13 +9,23 @@ import EventPollCard from '@/components/EventPollCard';
 import { UserAvatar } from '@/components/UserAvatar';
 import { encodeChatPayload } from '@/lib/chatPayload';
 import { userProfilePath } from '@/lib/friendsApi';
-import { formatDateSeparator, isLocalChatMessage, isNearBottom, type ChatEvent, type ChatMessage } from '@/pages/chat/chatModel';
+import {
+  REMOVED_EVENT_NOTE,
+  REMOVED_MESSAGE_NOTE,
+  formatDateSeparator,
+  isLocalChatMessage,
+  isNearBottom,
+  type ChatEvent,
+  type ChatMessage,
+} from '@/pages/chat/chatModel';
 
 type ChatThreadViewProps = {
   chat: ChatEvent;
   messages: ChatMessage[];
   messagesLoading: boolean;
   chatUnavailable: boolean;
+  /** The event was removed by an administrator: the chat shows a note and accepts nothing new. */
+  chatRemoved?: boolean;
   chatApiMissing: boolean;
   sending: boolean;
   input: string;
@@ -48,6 +58,7 @@ export default function ChatThreadView({
   messages,
   messagesLoading,
   chatUnavailable,
+  chatRemoved = false,
   chatApiMissing,
   sending,
   input,
@@ -72,7 +83,7 @@ export default function ChatThreadView({
   messagesEndRef,
   pinToBottomRef,
 }: ChatThreadViewProps) {
-  const isReadOnly = Boolean(chat.isPast || chat.isCancelled);
+  const isReadOnly = Boolean(chat.isPast || chat.isCancelled || chatRemoved);
   const emojis = ['😀', '😂', '❤️', '👍', '🎉', '🔥', '🙌', '😊'];
   const [report, setReport] = useState<{
     type: 'event' | 'message';
@@ -92,7 +103,7 @@ export default function ChatThreadView({
     document.addEventListener('pointerdown', hideOutside);
     return () => document.removeEventListener('pointerdown', hideOutside);
   }, [flaggedMessageId]);
-  const canReportEvent = Boolean(user.id) && user.id !== chat.organizerId;
+  const canReportEvent = Boolean(user.id) && user.id !== chat.organizerId && !chatRemoved;
 
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-background">
@@ -116,8 +127,8 @@ export default function ChatThreadView({
 
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-sm font-bold text-foreground">{chat.name}</h1>
-              <p className={`text-[10px] ${chatUnavailable ? 'text-destructive' : chat.isCancelled ? 'text-amber-500 font-medium' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
-                {chatUnavailable ? 'Chat unavailable' : chat.isCancelled ? 'Cancelled event · read-only' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
+              <p className={`text-[10px] ${chatUnavailable || chatRemoved ? 'text-destructive' : chat.isCancelled ? 'text-amber-500 font-medium' : chat.isPast ? 'text-muted-foreground' : 'text-green-500'}`}>
+                {chatRemoved ? 'Removed by an administrator' : chatUnavailable ? 'Chat unavailable' : chat.isCancelled ? 'Cancelled event · read-only' : chat.isPast ? 'Past event · read-only' : chatApiMissing ? 'Offline preview' : 'Active'}
                 {!chatUnavailable && messages.filter((m) => m.messageType === 'checkin').length > 0 && (
                   <span className="ml-2 inline-flex items-center gap-0.5 text-primary">
                     <MapPinned className="h-3 w-3" />
@@ -167,7 +178,17 @@ export default function ChatThreadView({
               ))}
             </div>
           )}
-          {!messagesLoading && messages.length === 0 && !chatUnavailable && (
+          {chatRemoved && (
+            <div
+              role="alert"
+              data-testid="chat-removed-note"
+              className="mx-auto mt-4 flex max-w-md items-start gap-2 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{REMOVED_EVENT_NOTE}</p>
+            </div>
+          )}
+          {!messagesLoading && messages.length === 0 && !chatUnavailable && !chatRemoved && (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                 <Send className="h-6 w-6 text-primary" />
@@ -215,7 +236,7 @@ export default function ChatThreadView({
                     <div
                       data-message-id={m.id}
                       onClick={() => {
-                        if (m.from === 'them') setFlaggedMessageId((current) => (current === m.id ? null : m.id));
+                        if (m.from === 'them' && !m.isRemoved) setFlaggedMessageId((current) => (current === m.id ? null : m.id));
                       }}
                       className={`group max-w-[72%] flex flex-col gap-1 ${m.from === 'me' ? 'items-end' : 'items-start'}`}
                     >
@@ -224,7 +245,7 @@ export default function ChatThreadView({
                           <span className="text-[11px] font-semibold text-foreground">
                             {m.senderName || 'Unknown'}
                           </span>
-                          {!isLocalChatMessage(m.id) && (
+                          {!isLocalChatMessage(m.id) && !m.isRemoved && (
                             <button
                               type="button"
                               aria-label="Report message"
@@ -246,13 +267,19 @@ export default function ChatThreadView({
                         </div>
                       )}
                       <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
-                        m.messageType === 'poll'
+                        m.isRemoved
+                          ? 'glass-card border border-dashed border-border text-muted-foreground'
+                          : m.messageType === 'poll'
                           ? 'glass-card w-full text-foreground'
                           : m.from === 'me'
                             ? 'gradient-primary text-primary-foreground rounded-br-sm'
                             : 'glass-card text-foreground rounded-bl-sm'
                       }`}>
-                        {m.messageType === 'poll' && m.pollId && (m.options?.length || 0) > 1 ? (
+                        {m.isRemoved ? (
+                          <p data-testid="removed-message" className="italic leading-relaxed">
+                            {REMOVED_MESSAGE_NOTE}
+                          </p>
+                        ) : m.messageType === 'poll' && m.pollId && (m.options?.length || 0) > 1 ? (
                           <EventPollCard
                             question={m.question || m.text}
                             options={m.options || []}
@@ -276,7 +303,7 @@ export default function ChatThreadView({
                         ) : (
                           <p className="whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
                         )}
-                        <p className={`mt-1 text-[10px] ${m.from === 'me' ? 'text-primary-foreground/60 text-right' : 'text-muted-foreground'}`}>{m.time}</p>
+                        <p className={`mt-1 text-[10px] ${m.from === 'me' && !m.isRemoved ? 'text-primary-foreground/60 text-right' : 'text-muted-foreground'}`}>{m.time}</p>
                       </div>
                     </div>
                     {m.from === 'me' && (
@@ -386,7 +413,9 @@ export default function ChatThreadView({
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void onSend(); } }}
             placeholder={
-              chat.isCancelled
+              chatRemoved
+                ? 'This event was removed'
+                : chat.isCancelled
                 ? 'Cancelled event chat is read-only'
                 : chat.isPast
                   ? 'Past event chat is read-only'
@@ -421,7 +450,7 @@ export default function ChatThreadView({
           title={report.type === 'event' ? 'Report this event' : 'Report this message'}
           quote={report.type === 'message' ? report.quote : undefined}
           onSuccess={(message) => {
-            setReport(null);
+            // The window stays open with its own "Report sent" until the user closes it.
             onToast?.(message, 'success');
           }}
           onError={(message) => onToast?.(message, 'error')}
