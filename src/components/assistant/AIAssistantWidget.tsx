@@ -21,8 +21,6 @@ import { getCurrentUser } from '@/lib/storage';
 import { assistantQuota, consumeAssistantAsk, BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
 import {
   sendAssistantChat,
-  searchAssistantEvents,
-  draftAssistantEvent,
   extractCardsFromReply,
   type AssistantChatMessage,
   type AssistantEventItem,
@@ -232,55 +230,21 @@ export const AIAssistantWidget: React.FC = () => {
 
     let charged = false;
     try {
-      // If user specifically clicks quick search chip
-      if (trimmed.startsWith('🔍 Search upcoming') || trimmed.toLowerCase().startsWith('/search ')) {
-        const rawQuery = trimmed
-          .replace(/^🔍\s*Search\s*upcoming\s*/i, '')
-          .replace(/^\/search\s*/i, '')
-          .trim();
-        const cleanQuery = rawQuery.replace(/\bevents?\b/gi, '').replace(/\bupcoming\b/gi, '').trim();
-        const queryToSearch = cleanQuery || 'music';
-
-        const searchRes = await searchAssistantEvents(queryToSearch);
-        const hasEvents = searchRes.events && searchRes.events.length > 0;
-        const displayTerm = rawQuery || queryToSearch;
-
-        const assistantMsg: ChatThreadMessage = {
-          id: `asst-${Date.now()}`,
-          role: 'assistant',
-          content: hasEvents
-            ? `Here are the matching events for **"${displayTerm}"**:`
-            : `No events found matching **"${displayTerm}"**.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          events: searchRes.events,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        lastFailedPromptRef.current = null;
-        charged = true;
-        return;
-      }
-
-      // If user clicks draft event chip
-      if (trimmed.startsWith('✨ Draft a') || trimmed.toLowerCase().startsWith('/draft ')) {
-        const draftPrompt = trimmed.replace(/^✨\s*Draft\s*a\s*/i, '').replace(/^\/draft\s*/i, '').trim();
-        const draftRes = await draftAssistantEvent(draftPrompt || 'Tech meetup this Friday at 6pm');
-        const assistantMsg: ChatThreadMessage = {
-          id: `asst-${Date.now()}`,
-          role: 'assistant',
-          content: `I've prepared a draft event for **"${draftPrompt || 'Tech Meetup'}"**:`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          draft: draftRes.draft,
-          validationIssues: draftRes.validation_issues,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        lastFailedPromptRef.current = null;
-        charged = true;
-        return;
-      }
-
-      // Standard multi-turn chat API
-      const res = await sendAssistantChat(apiHistory);
+      // Standard multi-turn chat API. The latest draft goes with the turn so a
+      // clarification is merged onto it and comes back on this same reply.
+      const currentDraft = [...nextMessages].reverse().find((message) => message.draft)?.draft;
+      const res = currentDraft
+        ? await sendAssistantChat(apiHistory, undefined, currentDraft)
+        : await sendAssistantChat(apiHistory);
       const parsed = extractCardsFromReply(res.reply || '', res);
+      if (parsed.draft) {
+        try {
+          window.sessionStorage.setItem('event_assistant_draft_prefill', JSON.stringify(parsed.draft));
+          window.dispatchEvent(new CustomEvent('assistant-draft-updated', { detail: parsed.draft }));
+        } catch {
+          // The chat card still shows the updated draft when storage is unavailable.
+        }
+      }
 
       const assistantMsg: ChatThreadMessage = {
         id: `asst-${Date.now()}`,
