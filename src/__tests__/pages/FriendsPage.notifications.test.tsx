@@ -94,6 +94,7 @@ beforeEach(() => {
     route('GET', '/api/friends/requests/sent', () =>
       json(page([{ request_id: 42, created_at: '2026-09-30T09:00:00Z', user: user('s1', 'jane_doe', 'Jane Doe') }])),
     ),
+    route('GET', '/api/blocks', () => json(page([]))),
   ];
 });
 
@@ -140,7 +141,10 @@ describe('Friends tab refreshes the notification list (#243)', () => {
       ),
     );
     renderFriends('/friends?tab=sent');
-    fireEvent.click(await screen.findByRole('button', { name: /Cancel/ }));
+    const cancel = await screen.findByRole('button', { name: /Cancel/ });
+    invalidateNotificationsMock.mockClear();
+    invalidatePrefixMock.mockClear();
+    fireEvent.click(cancel);
     expect(await screen.findByText('Friend request not found.')).toBeInTheDocument();
     expect(invalidateNotificationsMock).not.toHaveBeenCalled();
     expect(invalidatePrefixMock).not.toHaveBeenCalled();

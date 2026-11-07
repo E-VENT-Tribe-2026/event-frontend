@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Calendar, MapPin, Tag, Users, Wallet, Loader2, AlertCircle } from 'lucide-react';
-import BottomNav from '@/components/BottomNav';
 import AdminPerson from '@/components/admin/AdminPerson';
 import { fetchAdminEventDetails, type AdminEventDetails } from '@/lib/adminApi';
 import { formatAdminDateTime, isEventCancelled } from '@/lib/adminFormat';
@@ -62,7 +61,7 @@ export default function AdminEventDetailsPage() {
   const cost = formatCost(event?.cost);
 
   return (
-    <div className="min-h-screen bg-background pb-24 text-foreground">
+    <div className="min-h-screen bg-background pb-10 text-foreground">
       <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-lg">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4 sm:px-6">
           <button
@@ -157,9 +156,7 @@ export default function AdminEventDetailsPage() {
                     <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                     <div>
                       <dt className="sr-only">Capacity</dt>
-                      <dd className="text-foreground">
-                        {participantTotal} of {event.max_capacity} spots taken
-                      </dd>
+                      <dd className="text-foreground">Capacity: {event.max_capacity}</dd>
                     </div>
                   </div>
                 )}
@@ -194,8 +191,6 @@ export default function AdminEventDetailsPage() {
           </>
         )}
       </main>
-
-      <BottomNav />
     </div>
   );
 }

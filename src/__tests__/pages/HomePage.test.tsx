@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { EventItem, User } from '@/lib/storage';
 import HomePage from '@/pages/HomePage';
+import { clearAuthToken, setAuthToken } from '@/lib/auth';
 
 const { getCurrentUserMock, getUsersMock, getEventsMock } = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn<[], User | null>(),
@@ -104,6 +105,7 @@ describe('HomePage', () => {
   });
 
   afterEach(() => {
+    clearAuthToken();
     vi.unstubAllGlobals();
   });
 
@@ -142,6 +144,7 @@ describe('HomePage', () => {
       expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
     });
     expect(screen.queryByText(/Loading the latest events/i)).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'See what your friends are up to' })).toBeInTheDocument();
   });
 
   it('shows empty state when API returns no events and local storage is empty', async () => {
@@ -156,6 +159,25 @@ describe('HomePage', () => {
     await waitFor(() => {
       expect(screen.getByText(/No events match your filters/i)).toBeInTheDocument();
     });
+  });
+
+  it('lets a live API event replace a stale local copy of the same id', async () => {
+    getEventsMock.mockReturnValue([
+      localEvent({ id: 'api-e1', title: 'Stale Local Title', budget: 25 }),
+    ]);
+
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
+      if (url.includes('/api/events')) return Promise.resolve(jsonOk({ data: [apiEventRow] }));
+      return Promise.reject(new Error('unmocked'));
+    });
+
+    renderHome();
+    await waitFor(() => {
+      expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText('Stale Local Title')).not.toBeInTheDocument();
   });
 
   it('merges local events when API returns an empty list', async () => {
@@ -188,7 +210,7 @@ describe('HomePage', () => {
       expect(screen.getAllByText('Backend Event Alpha').length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sports' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Sports' }));
 
     await waitFor(() => {
       const withCategory = fetchMock.mock.calls
@@ -196,6 +218,71 @@ describe('HomePage', () => {
         .filter((u) => u.includes('category=Sports'));
       expect(withCategory.length).toBeGreaterThan(0);
     });
+  });
+
+  it('hides people the user already sent a friend request to', async () => {
+    setAuthToken('tok');
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
+      if (url.includes('/api/recommendations')) return Promise.resolve(jsonOk({ data: [] }));
+      if (url.includes('/api/events/my-events')) return Promise.resolve(jsonOk({ data: [] }));
+      if (url.includes('/api/participants/my/events')) return Promise.resolve(jsonOk([]));
+      if (url.includes('/api/friends/suggestions')) {
+        return Promise.resolve(jsonOk({
+          data: [
+            { id: 's1', username: 'jane_doe', full_name: 'Jane Doe' },
+            { id: 's2', username: 'maya', full_name: 'Maya' },
+          ],
+        }));
+      }
+      if (url.includes('/api/friends/requests/sent')) {
+        return Promise.resolve(jsonOk({
+          page: 1,
+          limit: 50,
+          has_more: false,
+          data: [{
+            request_id: 1,
+            created_at: '2030-01-01T00:00:00Z',
+            user: {
+              id: 's1', username: 'jane_doe', full_name: 'Jane Doe', display_name: 'Jane Doe',
+              avatar_kind: null, icon_id: null, avatar_url: null,
+            },
+          }],
+        }));
+      }
+      if (url.includes('/api/friends/requests/incoming')) return Promise.resolve(jsonOk({ data: [], has_more: false }));
+      if (url.includes('/api/friends')) return Promise.resolve(jsonOk({ data: [], has_more: false }));
+      if (url.includes('/api/blocks')) return Promise.resolve(jsonOk({ data: [], has_more: false }));
+      if (url.includes('/api/profile/me')) return Promise.resolve(jsonOk({ id: 'u-me', interests: ['Music'] }));
+      if (url.includes('/api/events')) return Promise.resolve(jsonOk({ data: [] }));
+      return Promise.resolve(jsonOk({}));
+    });
+
+    renderHome();
+    expect(await screen.findByText('Maya')).toBeInTheDocument();
+    expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
+  });
+
+  it('stacks interest matches as long cards, not a marquee', async () => {
+    setAuthToken('tok');
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
+      if (url.includes('/api/recommendations')) return Promise.resolve(jsonOk({ data: [apiEventRow] }));
+      if (url.includes('/api/events/my-events')) return Promise.resolve(jsonOk({ data: [] }));
+      if (url.includes('/api/participants/my/events')) return Promise.resolve(jsonOk([]));
+      if (url.includes('/api/friends')) return Promise.resolve(jsonOk({ data: [], has_more: false }));
+      if (url.includes('/api/blocks')) return Promise.resolve(jsonOk({ data: [], has_more: false }));
+      if (url.includes('/api/profile/me')) return Promise.resolve(jsonOk({ id: 'u-me', interests: ['Music'] }));
+      if (url.includes('/api/events')) return Promise.resolve(jsonOk({ data: [] }));
+      return Promise.resolve(jsonOk({}));
+    });
+
+    renderHome();
+    expect(await screen.findByTestId('interest-event-list')).toBeInTheDocument();
+    expect(screen.getByTestId('interest-event-row')).toBeInTheDocument();
+    expect(screen.queryByTestId('interest-marquee')).not.toBeInTheDocument();
   });
 
 });

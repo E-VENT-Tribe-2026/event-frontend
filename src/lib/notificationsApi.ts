@@ -1,6 +1,48 @@
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { cachedFetch, invalidate, TTL } from '@/lib/queryCache';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  notificationAllowed,
+  type NotificationPrefs,
+} from '@/lib/accountSettings';
+import { cachedFetch, invalidate, invalidatePrefix, TTL } from '@/lib/queryCache';
+
+export const NOTIFICATIONS_CHANGED_EVENT = 'eventapp:notifications-changed';
+
+export function notifyNotificationsChanged() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT));
+}
+
+function bustNotificationCache(token: string) {
+  invalidate(`/api/notifications/all:${token.slice(-16)}`);
+  invalidatePrefix('/api/notifications');
+  notifyNotificationsChanged();
+}
+
+/** Incoming friend-request rows (not "accepted"). */
+export function isIncomingFriendRequestType(type: string): boolean {
+  const t = type.toLowerCase().trim();
+  if (t === 'friend_request_accepted') return false;
+  return t.startsWith('friend_request');
+}
+
+/**
+ * Bell badge: unread notifications plus pending requests that are not already
+ * an unread friend-request row (the notifications page merges those the same way).
+ */
+export function countBellUnreads(
+  notifications: ApiNotification[],
+  pendingRequestCount: number,
+  prefs: NotificationPrefs = DEFAULT_NOTIFICATION_PREFS,
+): number {
+  const allowed = notifications.filter((n) => notificationAllowed(n.type, prefs));
+  const unread = allowed.filter((n) => !n.read);
+  const pending = prefs.friend_requests ? pendingRequestCount : 0;
+  const unreadRequestNotifs = unread.filter((n) => isIncomingFriendRequestType(n.type)).length;
+  const extraPending = Math.max(0, pending - unreadRequestNotifs);
+  return unread.length + extraPending;
+}
 
 export type ApiNotification = {
   id: string;
@@ -13,7 +55,23 @@ export type ApiNotification = {
   created_at?: string | null;
   read?: boolean;
   actor_name?: string | null;
+  /** Warning rows only (event-backend #191); `message` is the administrator's reason. */
+  is_warning?: boolean;
+  warning_id?: string | null;
+  warning_acknowledged?: boolean | null;
+  warning_withdrawn?: boolean | null;
 };
+
+/** Warning fields for rows with `is_warning === true`; nothing for any other row. */
+function warningFields(row: Record<string, unknown>): Partial<ApiNotification> {
+  if (row.is_warning !== true) return {};
+  return {
+    is_warning: true,
+    warning_id: row.warning_id == null ? null : String(row.warning_id),
+    warning_acknowledged: typeof row.warning_acknowledged === 'boolean' ? row.warning_acknowledged : null,
+    warning_withdrawn: typeof row.warning_withdrawn === 'boolean' ? row.warning_withdrawn : null,
+  };
+}
 
 function normalizeType(type: string): string {
   // Return the raw type as-is so the UI can map it to the correct icon/color.
@@ -90,6 +148,7 @@ export async function fetchNotifications(token: string): Promise<ApiNotification
           : typeof row.triggered_by_name === 'string' ? row.triggered_by_name
           : typeof row.profiles?.full_name === 'string' ? row.profiles.full_name
           : null,
+        ...warningFields(row),
       })) as ApiNotification[];
     },
     TTL.SHORT, // 30s — notifications should feel fresh
@@ -109,8 +168,7 @@ export async function markNotificationRead(token: string, id: string): Promise<v
     });
   }
   if (!res.ok) throw new Error('Failed to mark notification read');
-  // Invalidate so next fetch gets fresh unread count
-  invalidate(`/api/notifications/all:${token.slice(-16)}`);
+  bustNotificationCache(token);
 }
 
 export async function deleteNotification(token: string, id: string): Promise<void> {
@@ -120,8 +178,7 @@ export async function deleteNotification(token: string, id: string): Promise<voi
     res = await fetch(getApiUrl(`${API_ENDPOINTS.NOTIFICATIONS}/delete/${id}`), { method: 'DELETE', headers });
   }
   if (!res.ok) throw new Error('Failed to delete notification');
-  // Invalidate so next fetch reflects deletion
-  invalidate(`/api/notifications/all:${token.slice(-16)}`);
+  bustNotificationCache(token);
 }
 
 export async function markAllNotificationsRead(token: string): Promise<void> {
@@ -131,6 +188,7 @@ export async function markAllNotificationsRead(token: string): Promise<void> {
     headers,
   });
   if (!res.ok) throw new Error('Failed to mark all notifications read');
+  bustNotificationCache(token);
 }
 
 export async function deleteNotifications(token: string, ids: string[]): Promise<void> {
@@ -145,4 +203,5 @@ export async function deleteNotifications(token: string, ids: string[]): Promise
     body: JSON.stringify({ notification_ids: ids }),
   });
   if (!res.ok) throw new Error('Failed to delete notifications');
+  bustNotificationCache(token);
 }

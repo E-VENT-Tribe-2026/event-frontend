@@ -1,40 +1,35 @@
 /**
- * TanStack Query client with localStorage persistence.
+ * TanStack Query client with sessionStorage persistence.
  *
- * - Data is serialised to localStorage under the key 'event-tribe-query-cache'
- * - Cache is considered fresh for 5 minutes (staleTime)
- * - Persisted cache max age: 24 hours
- * - On logout call queryClient.clear() to wipe both in-memory and localStorage cache
+ * - Data is serialised to sessionStorage under the key 'event-tribe-query-cache'
+ * - Cache is considered fresh for 30 minutes (staleTime)
+ * - Persisted for the tab session (cleared when the tab closes, and on logout)
  */
 import { QueryClient } from '@tanstack/react-query';
-import { persistQueryClient } from '@tanstack/react-query-persist-client';
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister';
+
+export const SESSION_CACHE_MAX_AGE = 8 * 60 * 60 * 1000;
+export const SESSION_STALE_TIME = 30 * 60 * 1000;
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000,        // 5 min — data stays fresh
-      gcTime:    24 * 60 * 60 * 1000,  // 24 h  — keep in memory/storage
+      staleTime: SESSION_STALE_TIME,
+      gcTime: SESSION_CACHE_MAX_AGE,
       retry: 1,
       refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   },
 });
 
-// Only persist in browser environments
-if (typeof window !== 'undefined') {
-  const persister = createSyncStoragePersister({
-    storage: window.localStorage,
-    key: 'event-tribe-query-cache',
-    throttleTime: 1000,    // debounce writes by 1 s
-    serialize: JSON.stringify,
-    deserialize: JSON.parse,
-  });
-
-  persistQueryClient({
-    queryClient,
-    persister,
-    maxAge: 24 * 60 * 60 * 1000,  // 24 hours
-    buster: import.meta.env.VITE_CACHE_BUSTER ?? '',  // bump to invalidate old caches on deploy
-  });
-}
+export const queryPersister =
+  typeof window !== 'undefined'
+    ? createSyncStoragePersister({
+        storage: window.sessionStorage,
+        key: 'event-tribe-query-cache',
+        throttleTime: 1000,
+        serialize: JSON.stringify,
+        deserialize: JSON.parse,
+      })
+    : undefined;

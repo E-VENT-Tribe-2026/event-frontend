@@ -4,8 +4,6 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AdminEventDetailsPage from '@/pages/AdminEventDetailsPage';
 import * as adminApi from '@/lib/adminApi';
 
-vi.mock('@/components/BottomNav', () => ({ default: () => <nav /> }));
-
 const baseEvent: adminApi.AdminEventDetails = {
   id: 'e1',
   title: 'Community Tech Summit',
@@ -129,6 +127,14 @@ describe('AdminEventDetailsPage (ticket #249)', () => {
     expect(container.querySelector('img[src="x"]')).toBeNull();
     expect(container.querySelector('i')).toBeNull();
     expect(container.querySelector('b')).toBeNull();
+  });
+
+  it('does not show the user tab bar', async () => {
+    renderPage();
+    await screen.findByText('Community Tech Summit');
+    expect(screen.queryByRole('link', { name: /^Home$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Chat$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Friends$/i })).not.toBeInTheDocument();
   });
 
   it('has a back button', async () => {

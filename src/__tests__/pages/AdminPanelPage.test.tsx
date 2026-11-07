@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AdminPanelPage from '@/pages/AdminPanelPage';
 import BottomNav from '@/components/BottomNav';
@@ -112,6 +112,8 @@ describe('Admin Panel — Ticket #248', () => {
       page: 1,
       limit: 20,
       total_pages: 1,
+      has_more: false,
+      next_before: null,
     });
     vi.spyOn(adminApi, 'fetchAdminReports').mockResolvedValue({
       items: [],
@@ -221,6 +223,91 @@ describe('Admin Panel — Ticket #248', () => {
     expect(adminApi.grantAdminRole).toHaveBeenCalledWith('user-1');
   });
 
+  it('shows suspended status on the admin profile and requires a reason to lift', async () => {
+    vi.spyOn(adminApi, 'fetchAdminUsers').mockResolvedValue({
+      items: [{ ...mockUsers[0], is_suspended: true, status: 'suspended' }],
+      total: 1,
+      page: 1,
+      limit: 20,
+      total_pages: 1,
+    });
+    vi.spyOn(adminApi, 'fetchAdminUserDetails').mockResolvedValue({
+      ...mockUserDetailsAlex,
+      is_suspended: true,
+      status: 'suspended',
+      suspension: {
+        reason: 'Spam reports',
+        suspended_at: '2026-01-01T00:00:00Z',
+        suspended_by: 'ada',
+      },
+    });
+    vi.spyOn(adminApi, 'liftSuspension').mockResolvedValue({ message: 'Suspension lifted.' });
+
+    render(
+      <MemoryRouter initialEntries={['/admin']}>
+        <AdminPanelPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /View details for Alex Smith/i }));
+    expect(await screen.findByTestId('account-status-badge')).toHaveTextContent('Suspended');
+    expect(screen.getByText(/Spam reports/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Lift suspension/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText(/Provide a reason for lifting/i)).toBeInTheDocument();
+
+    const confirm = within(dialog).getByRole('button', { name: /Lift Suspension/i });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Appeal accepted' } });
+    fireEvent.click(confirm);
+
+    await waitFor(() => {
+      expect(adminApi.liftSuspension).toHaveBeenCalledWith('user-1', 'Appeal accepted');
+    });
+    expect(await screen.findByTestId('account-status-badge')).toHaveTextContent('Active');
+  });
+
+  it('shows a lift-suspension reason in the audit log', async () => {
+    vi.spyOn(adminApi, 'fetchAdminAudit').mockResolvedValue({
+      items: [
+        {
+          id: 'a1',
+          action: 'lift_suspension',
+          admin_id: 'ada',
+          admin_name: 'Ada Admin',
+          admin_username: 'ada.admin',
+          target_id: 'user-1',
+          target_type: 'user',
+          target_name: 'Alex Smith',
+          target_username: 'alex_smith',
+          reason: 'Appeal accepted',
+          details: null,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      limit: 20,
+      total_pages: 1,
+      has_more: false,
+      next_before: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/admin']}>
+        <AdminPanelPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Audit Log/i }));
+    expect(await screen.findAllByText('Lifted suspension')).not.toHaveLength(0);
+    expect(screen.getAllByTestId('audit-reason').some((el) => el.textContent === 'Appeal accepted')).toBe(true);
+    expect(screen.getAllByText('Ada Admin').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('@ada.admin').length).toBeGreaterThan(0);
+  });
+
   it('shows no make admin button for an already administrator account', async () => {
     render(
       <MemoryRouter initialEntries={['/admin']}>
@@ -249,12 +336,13 @@ describe('Admin Panel — Ticket #248', () => {
     const eventsTabBtn = screen.getByRole('tab', { name: /Events/i });
     fireEvent.click(eventsTabBtn);
 
-    expect(await screen.findByText(/Events Management/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ticket #249 Integration Point/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText('Search by event title')).toBeInTheDocument();
+    expect(screen.getByText('Total Events')).toBeInTheDocument();
+    expect(eventsTabBtn).toHaveAttribute('aria-selected', 'true');
   });
 
   describe('BottomNav & AdminGuard', () => {
-    it('BottomNav shows Admin button immediately left of Profile for verified admin', async () => {
+    it('BottomNav shows Admin after Friends and keeps Profile out of the tab bar', async () => {
       render(
         <MemoryRouter initialEntries={['/home']}>
           <BottomNav />
@@ -263,12 +351,10 @@ describe('Admin Panel — Ticket #248', () => {
 
       const adminLink = await screen.findByRole('link', { name: /Admin/i });
       expect(adminLink).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /^Profile$/i })).not.toBeInTheDocument();
 
-      const profileLink = screen.getByRole('link', { name: /Profile/i });
-      expect(profileLink).toBeInTheDocument();
-
-      // Ensure Admin is immediately before Profile in document order
-      expect(adminLink.compareDocumentPosition(profileLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const friendsLink = screen.getByRole('link', { name: /Friends/i });
+      expect(friendsLink.compareDocumentPosition(adminLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     });
 
     it('BottomNav hides Admin button when user is not a verified admin', async () => {

@@ -17,13 +17,20 @@ vi.mock('react-router-dom', async (importOriginal) => {
   };
 });
 
+const { syncSupabaseSessionMock } = vi.hoisted(() => ({
+  syncSupabaseSessionMock: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock('@/lib/supabase', () => ({
   supabase: null,
+  syncSupabaseSession: (...args: unknown[]) => syncSupabaseSessionMock(...args),
+  clearSupabaseSession: vi.fn(),
 }));
 
 describe('LoginPage', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    syncSupabaseSessionMock.mockClear();
     clearAuthToken();
     sessionStorage.clear();
     vi.stubGlobal(
@@ -111,6 +118,7 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
+    expect(syncSupabaseSessionMock).toHaveBeenCalledWith('at1', 'rt1');
   });
 
   it('opens the username step when the account has no username', async () => {
@@ -182,6 +190,7 @@ describe('LoginPage', () => {
       hasMfaLinked: false,
       factorId: undefined,
     });
+    expect(syncSupabaseSessionMock).toHaveBeenCalledWith('aal1-token', '');
   });
 
   it('sends an administrator with an already-linked app to /admin-verify with the factor id (Scenario C)', async () => {

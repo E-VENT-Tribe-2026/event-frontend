@@ -23,8 +23,9 @@ import {
   Network,
   Leaf,
   Users,
+  Trash2,
 } from 'lucide-react';
-import { fetchAdminCounts } from '@/lib/adminApi';
+import { fetchAdminCounts, fetchAdminEvents } from '@/lib/adminApi';
 
 /* -------------------------------------------------------------------------- */
 /* Types & config                                                             */
@@ -50,6 +51,8 @@ interface ApiEvent {
   start_datetime: string;
   end_datetime: string | null;
   organizer: Organizer | null;
+  /** Marked as removed by an administrator (#236). Only the admin list knows it. */
+  is_removed?: boolean;
 }
 
 interface AdminEventsTabProps {
@@ -128,16 +131,26 @@ function matchesCategory(e: ApiEvent, selected: string): boolean {
   return normalizeCategory(e.category) === selected.toLowerCase();
 }
 
+function isCancelledEvent(e: ApiEvent): boolean {
+  if (e.is_cancelled) return true;
+  const status = (e.status ?? '').trim().toLowerCase();
+  return status === 'cancelled' || status === 'canceled';
+}
+
 /**
- * The status of one event. When the server already filtered by sub-tab,
- * that tab IS the status. In the "All" tab we work it out: cancelled wins,
- * then an event counts as upcoming until it has ended.
+ * Cancelled wins. Otherwise the event is upcoming until it has ended
+ * (end time, or start when there is no end).
  */
-function getEventStatus(e: ApiEvent, tab: SubTab, now: number): EventStatus {
-  if (e.is_cancelled || e.status === 'cancelled') return 'cancelled';
-  if (tab === 'upcoming' || tab === 'past') return tab;
-  const endOrStart = new Date(e.end_datetime ?? e.start_datetime).getTime();
-  return !isNaN(endOrStart) && endOrStart > now ? 'upcoming' : 'past';
+function getEventStatus(e: ApiEvent, now: number): EventStatus {
+  if (isCancelledEvent(e)) return 'cancelled';
+  const start = new Date(e.start_datetime).getTime();
+  const end = e.end_datetime ? new Date(e.end_datetime).getTime() : start;
+  const close = Number.isNaN(end) ? start : end;
+  return !Number.isNaN(close) && close > now ? 'upcoming' : 'past';
+}
+
+function matchesSubTab(status: EventStatus, tab: SubTab): boolean {
+  return tab === 'all' || status === tab;
 }
 
 function organizerName(o: Organizer | null): string {
@@ -173,7 +186,42 @@ async function fetchEvents(tab: SubTab, signal: AbortSignal): Promise<ApiEvent[]
     }
     if (items.length < PAGE_SIZE) break;
   }
-  return collected;
+  return markRemoved(tab, collected);
+}
+
+/**
+ * The public list leaves removed events out, so the admin list tells which events are removed:
+ * those are marked, and added to the list when the public list does not have them.
+ */
+async function markRemoved(tab: SubTab, events: ApiEvent[]): Promise<ApiEvent[]> {
+  const removed: ApiEvent[] = [];
+  try {
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const res = await fetchAdminEvents(tab, page, PAGE_SIZE);
+      for (const raw of res.items as unknown as Array<Record<string, unknown>>) {
+        if (raw.is_removed !== true && !raw.removed_at) continue;
+        removed.push({
+          id: String(raw.id),
+          title: String(raw.title ?? ''),
+          category: typeof raw.category === 'string' ? raw.category : null,
+          status: String(raw.status ?? ''),
+          is_cancelled: raw.is_cancelled === true,
+          start_datetime: String(raw.start_datetime ?? raw.date ?? ''),
+          end_datetime: typeof raw.end_datetime === 'string' ? raw.end_datetime : null,
+          organizer: (raw.organizer as Organizer | null) ?? null,
+          is_removed: true,
+        });
+      }
+      if (page >= (res.total_pages ?? 1)) break;
+    }
+  } catch {
+    // Without the admin list the events are still shown, just not marked.
+    return events;
+  }
+  const removedIds = new Set(removed.map((e) => e.id));
+  const marked = events.map((e) => (removedIds.has(e.id) ? { ...e, is_removed: true } : e));
+  const known = new Set(events.map((e) => e.id));
+  return [...marked, ...removed.filter((e) => !known.has(e.id))];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -303,7 +351,9 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
 
   const subTabItems = useMemo(() => {
     const now = Date.now();
-    return tabEvents.map((event) => ({ event, status: getEventStatus(event, activeSubTab, now) }));
+    return tabEvents
+      .map((event) => ({ event, status: getEventStatus(event, now) }))
+      .filter(({ status }) => matchesSubTab(status, activeSubTab));
   }, [tabEvents, activeSubTab]);
 
   // Pill counts always describe the current sub-tab.
@@ -336,7 +386,7 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
   return (
     <div className="space-y-6">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Event counts">
         {statCards.map((card) => (
           <div key={card.label} className="rounded-[16px] border p-4 space-y-2"
             style={{ background: 'var(--adm-grad-card)', borderColor: 'var(--adm-border)', boxShadow: '0 4px 20px hsl(213 61% 5% / .5)' }}>
@@ -367,7 +417,7 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
           onFocus={() => setSearchFocused(true)}
           onBlur={() => setSearchFocused(false)}
           placeholder="Search events by title..."
-          aria-label="Search events by title"
+          aria-label="Search by event title"
           className="w-full rounded-[12px] border text-sm outline-none transition-colors"
           style={{
             background: 'var(--adm-card)',
@@ -496,6 +546,14 @@ export default function AdminEventsTab({ onOpenEvent, onErrorToast }: AdminEvent
                         <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize hidden sm:inline-block"
                           style={{ background: 'hsl(271 76% 53% / .18)', color: 'var(--adm-primary-text)', border: '1px solid hsl(271 76% 53% / .4)' }}>
                           {event.category}
+                        </span>
+                      )}
+                      {event.is_removed && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                          style={{ background: 'hsl(0 84% 60% / .15)', color: 'var(--adm-danger-text)', borderColor: 'hsl(0 84% 60% / .35)' }}
+                        >
+                          <Trash2 className="h-3 w-3" />Removed
                         </span>
                       )}
                       <StatusPill status={status} />

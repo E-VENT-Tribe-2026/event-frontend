@@ -33,6 +33,8 @@ interface Props {
   onUserLocation?: (coords: { lat: number; lng: number }) => void;
   placeholder?: string;
   error?: string;
+  /** When false, skip the automatic geolocation prompt (user can still tap locate). Default true. */
+  locateOnMount?: boolean;
 }
 
 // Germany centre as fallback
@@ -65,6 +67,7 @@ export default function LocationSearchInput({
   onUserLocation,
   placeholder = 'Search for a venue, address or city…',
   error,
+  locateOnMount = true,
 }: Props) {
   const [query, setQuery] = useState(value);
   const [results, setResults] = useState<LocationResult[]>([]);
@@ -86,6 +89,7 @@ export default function LocationSearchInput({
 
   // Request geolocation on mount
   useEffect(() => {
+    if (!locateOnMount) return;
     if (!navigator.geolocation) return;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(

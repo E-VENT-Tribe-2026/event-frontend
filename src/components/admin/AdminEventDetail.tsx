@@ -34,6 +34,10 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   fetchAdminEventDetail,
+  personDisplayName,
+  readChatMessages,
+  readRemovedState,
+  type AdminChatMessage,
   removeEvent,
   type AdminEventDetail,
   type AdminEventParticipant,
@@ -264,18 +268,6 @@ function ParticipantRow({
           <p className="truncate text-sm font-semibold" style={{ color: 'var(--adm-fg)' }}>
             {participant.full_name}
           </p>
-          {participant.is_pro && (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-              style={{
-                background: 'hsl(45 93% 50% / .15)',
-                color: 'hsl(45 93% 60%)',
-                borderColor: 'hsl(45 93% 50% / .4)',
-              }}
-            >
-              Pro
-            </span>
-          )}
         </div>
         {participant.username && (
           <p className="truncate text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
@@ -358,6 +350,7 @@ export default function AdminEventDetailPage({
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<AdminChatMessage[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -367,6 +360,7 @@ export default function AdminEventDetailPage({
       .then((data) => {
         if (!cancelled) {
           setEvent(data);
+          setChatMessages(readChatMessages(data.chats ?? data.chat));
           setLoading(false);
         }
       })
@@ -385,9 +379,12 @@ export default function AdminEventDetailPage({
     if (!event || removing) return;
     setRemoving(true);
     try {
-      const res = await removeEvent(event.id);
-      onSuccessToast(res.message || 'Event removed.');
-      onBack();
+      const removal = await removeEvent(event.id);
+      // Stay on the details: the event is marked as removed, not deleted.
+      setEvent((prev) =>
+        prev ? { ...prev, is_removed: true, removed_at: removal.removed_at, removed_by: removal.removed_by } : prev,
+      );
+      onSuccessToast('Event removed. It is marked as removed, not deleted.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to remove event.';
       onErrorToast(msg);
@@ -402,6 +399,16 @@ export default function AdminEventDetailPage({
       <AdminEventChat
         eventId={eventId}
         eventTitle={event.title}
+        messages={chatMessages}
+        onMessageRemoved={(messageId, removal) =>
+          setChatMessages((prev) =>
+            prev.map((m) =>
+              m.id === messageId
+                ? { ...m, is_removed: true, removed_at: removal.removed_at, removed_by: removal.removed_by }
+                : m,
+            ),
+          )
+        }
         onBack={() => setShowChat(false)}
         onErrorToast={onErrorToast}
         onSuccessToast={onSuccessToast}
@@ -427,6 +434,7 @@ export default function AdminEventDetailPage({
   const participantCount = extra.participant_count ?? participants.length;
   const priceLabel = event ? formatPrice(extra) : null;
   const status = event ? getStatusLabel(event, startIso) : null;
+  const removed = readRemovedState(event);
 
   return (
     <>
@@ -467,6 +475,24 @@ export default function AdminEventDetailPage({
           </div>
         ) : event ? (
           <>
+            {removed.is_removed && (
+              <div
+                role="status"
+                className="rounded-[14px] border px-4 py-3 text-xs space-y-0.5"
+                style={{ borderColor: 'hsl(0 84% 60% / .45)', background: 'hsl(0 84% 60% / .1)', color: 'var(--adm-danger-text)' }}
+              >
+                <p className="flex items-center gap-2 font-semibold">
+                  <Trash2 className="h-4 w-4 shrink-0" />
+                  Removed by an administrator
+                  {removed.removed_by ? ` (${personDisplayName(removed.removed_by)})` : ''}
+                  {removed.removed_at ? ` on ${formatDateTime(removed.removed_at)}` : ''}.
+                </p>
+                <p style={{ color: 'var(--adm-muted-fg)' }}>
+                  The event is marked as removed, not deleted. Users no longer see it.
+                </p>
+              </div>
+            )}
+
             {/* ===== Main card: hero + details ===== */}
             {(() => {
               const H = getCategoryHue(event.category);
@@ -611,19 +637,21 @@ export default function AdminEventDetailPage({
                   <MessageCircle className="h-4 w-4" />
                   Open event chat
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowRemoveDialog(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all active:scale-95"
-                  style={{
-                    borderColor: 'hsl(0 84% 60% / .4)',
-                    background: 'hsl(0 84% 60% / .1)',
-                    color: 'var(--adm-danger-text)',
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Remove event
-                </button>
+                {!removed.is_removed && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRemoveDialog(true)}
+                    className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all active:scale-95"
+                    style={{
+                      borderColor: 'hsl(0 84% 60% / .4)',
+                      background: 'hsl(0 84% 60% / .1)',
+                      color: 'var(--adm-danger-text)',
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remove event
+                  </button>
+                )}
               </div>
             </div>
 
@@ -687,10 +715,10 @@ export default function AdminEventDetailPage({
       <AlertDialog open={showRemoveDialog} onOpenChange={(open) => !open && setShowRemoveDialog(false)}>
         <AlertDialogContent className="rounded-2xl max-w-sm">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-base font-bold">Remove Event?</AlertDialogTitle>
+            <AlertDialogTitle className="text-base font-bold">Remove this event?</AlertDialogTitle>
             <AlertDialogDescription className="text-xs text-muted-foreground">
-              This will permanently delete &ldquo;{event?.title}&rdquo; and all its data. This action cannot
-              be undone.
+              &ldquo;{event?.title}&rdquo; is marked as removed, not deleted. Users no longer see it, and
+              administrators still see it, marked as removed. The organizer is notified and receives a warning.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row gap-2 justify-end">
@@ -712,7 +740,7 @@ export default function AdminEventDetailPage({
                   Removing...
                 </>
               ) : (
-                'Remove Event'
+                'Remove event'
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
