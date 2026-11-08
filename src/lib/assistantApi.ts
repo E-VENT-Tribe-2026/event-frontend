@@ -222,6 +222,22 @@ function getAuthHeaders(): HeadersInit {
   return headers;
 }
 
+function assistantErrorText(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'msg' in item) return String(item.msg);
+        return '';
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+  if (detail && typeof detail === 'object' && 'msg' in detail) return String(detail.msg);
+  return '';
+}
+
 /**
  * Handle API HTTP response errors uniformly with user-friendly error messages
  */
@@ -246,7 +262,7 @@ async function handleAssistantError(res: Response): Promise<never> {
         errorMessage = body.error;
       }
       if (!errorMessage) {
-        errorMessage = body.detail || body.message || body.reply || '';
+        errorMessage = assistantErrorText(body.detail) || body.message || body.reply || '';
       }
     }
   } catch {
@@ -300,16 +316,19 @@ async function handleAssistantError(res: Response): Promise<never> {
  */
 export async function sendAssistantChat(
   messages: AssistantChatMessage[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  draft?: AssistantDraftEvent
 ): Promise<AssistantChatResponse> {
   const url = getApiUrl(API_ENDPOINTS.ASSISTANT_CHAT);
+  const payload: { messages: AssistantChatMessage[]; draft?: AssistantDraftEvent } = { messages };
+  if (draft) payload.draft = draft;
 
   let res: Response;
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(payload),
       credentials: 'include',
       signal,
     });

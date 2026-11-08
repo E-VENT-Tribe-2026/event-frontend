@@ -707,8 +707,13 @@ function readReportDetail(value: unknown): AdminReportDetail {
     description: asText(row.description) || null,
     chat_context,
     content_removed: row.content_removed === true, // live target state, not status
-    target_user: readPerson(row.target_user),
-    target_user_is_admin: row.target_user_is_admin === true,
+    // Warn and suspend go to the reported user (user and message reports) or the event's organizer.
+    target_user:
+      readPerson(row.target_user) ??
+      (summary.target_type === 'event'
+        ? readPerson(row.organizer) ?? readPerson(asObject(row.reported)?.organizer)
+        : summary.reported_user ?? summary.message?.sender ?? null),
+    target_user_is_admin: row.target_user_is_admin === true || row.reported_user_is_administrator === true,
     outcome,
     closed_at: asText(row.closed_at) || null,
     closed_by: readPerson(row.closed_by),
@@ -1753,6 +1758,12 @@ export async function fetchAdminReportsList(
   limit = 20,
   tab: AdminReportTab = 'open',
 ): Promise<AdminReportsResponse> {
+  if (tab === 'open') {
+    // The backend's open list is complete and authoritative; it is paged here.
+    const open = await fetchOpenReports();
+    const paged = paginateReportItems(open.items, page, limit);
+    return { ...paged, total: open.total };
+  }
   const first =
     tab === 'closed' ? await fetchClosedAdminReports(page, limit) : await fetchAdminReports(page, limit, tab);
   const mixed = first.items.some((row) => !reportMatchesTab(row.status, tab));
@@ -1788,10 +1799,21 @@ export async function fetchReportsFiledByUser(userId: string): Promise<AdminUser
   }
 }
 
-/** The number of open reports. Uses GET /api/admin/reports, counting only `open`. */
+/** Every open report, newest first, with their number. GET /api/admin/reports/open (not paged). */
+export async function fetchOpenReports(): Promise<{ total: number; items: AdminReportSummary[] }> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORTS_OPEN), {
+    method: 'GET',
+    headers: getAdminHeaders(),
+    cache: 'no-store',
+  });
+  const body = await handleAdminResponse<Record<string, unknown>>(res);
+  const items = Array.isArray(body.items) ? body.items.map(readReportSummary) : [];
+  return { total: typeof body.total === 'number' ? body.total : items.length, items };
+}
+
+/** The number of open reports, from GET /api/admin/reports/open. */
 export async function fetchOpenReportCount(): Promise<number> {
-  const page = await fetchAdminReportsList(1, 20, 'open');
-  return page.total;
+  return (await fetchOpenReports()).total;
 }
 
 /** A report's details. GET /api/admin/reports/{id} */
@@ -1816,14 +1838,12 @@ async function postAdminReport(url: string, body: Record<string, unknown>): Prom
 /** Closes an open report as Dismissed. POST /api/admin/reports/{id}/dismiss — path only, no body. */
 export async function dismissReport(reportId: string): Promise<AdminReportDetail> {
   const id = reportId.trim();
-  let res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(id)), {
+  // No fallback to /action: it only accepts warn, suspend and remove_content.
+  const res = await fetch(getApiUrl(API_ENDPOINTS.ADMIN_REPORT_DISMISS(id)), {
     method: 'POST',
     headers: getAdminHeaders(),
     cache: 'no-store',
   });
-  if (res.status === 404 || res.status === 405 || res.status === 422 || res.status >= 500) {
-    res = await postAdminReport(API_ENDPOINTS.ADMIN_REPORT_ACTION(id), { action: 'dismiss' });
-  }
   const body = await handleAdminResponse<unknown>(res);
   let detail = readReportDetail(body);
   if (!detail.id) detail = { ...detail, id };

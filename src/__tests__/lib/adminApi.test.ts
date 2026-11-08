@@ -628,15 +628,12 @@ describe('adminApi service', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('status=resolved');
   });
 
-  it('reads the open-reports number from GET /api/admin/reports?status=open total', async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({ items: [], total: 4, page: 1, limit: 20, total_pages: 1 }),
-    );
+  it('reads the open-reports number from GET /api/admin/reports/open total', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], total: 4 }));
     await expect(fetchOpenReportCount()).resolves.toBe(4);
-    const url = String(fetchMock.mock.calls[0][0]);
-    expect(url).toContain('/api/admin/reports');
-    expect(url).toContain('status=open');
-    expect(url).not.toContain('open-count');
+    const url = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost');
+    expect(url.pathname).toBe('/api/admin/reports/open');
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe('no-store');
   });
 
   it('reads event, user and message from a nested reported envelope', async () => {
@@ -672,9 +669,17 @@ describe('adminApi service', () => {
     expect(page.items[0].message?.sender?.username).toBe('jossy');
   });
 
-  it('filters a mixed reports page onto the requested tab and counts only those rows', async () => {
-    fetchMock.mockImplementation(async () =>
-      jsonResponse({
+  it('lists open reports from /reports/open, and filters a mixed page onto the other tabs', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      new URL(String(input), 'http://localhost').pathname === '/api/admin/reports/open'
+        ? jsonResponse({
+            total: 2,
+            items: [
+              { id: 26, status: 'open', target_type: 'user', reason: 'spam', origin: 'profile', created_at: '2026-11-03T08:56:13Z' },
+              { id: 25, status: 'open', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-11-03T08:55:55Z' },
+            ],
+          })
+        : jsonResponse({
         items: [
           { id: 29, status: 'dismissed', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-11-03T09:18:19Z' },
           { id: 26, status: 'open', target_type: 'user', reason: 'spam', origin: 'profile', created_at: '2026-11-03T08:56:13Z' },
@@ -695,17 +700,13 @@ describe('adminApi service', () => {
     await expect(fetchOpenReportCount()).resolves.toBe(2);
   });
 
-  it('does not count closed reports in the open-reports number', async () => {
+  it('takes the open-reports number from the backend, which leaves closed reports out', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
+        total: 1,
         items: [
           { id: 1, status: 'open', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-10-25T10:00:00Z' },
-          { id: 2, status: 'closed', target_type: 'event', reason: 'spam', origin: 'event_details', created_at: '2026-10-24T10:00:00Z' },
         ],
-        total: 2,
-        page: 1,
-        limit: 20,
-        total_pages: 1,
       }),
     );
     await expect(fetchOpenReportCount()).resolves.toBe(1);
@@ -837,42 +838,16 @@ describe('adminApi service', () => {
     expect(closed.event?.title).toBe('Jazz');
   });
 
-  it('falls back to POST /action when /dismiss is missing', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ detail: 'Not Found' }, { status: 404 }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          id: 11,
-          status: 'dismissed',
-          target_type: 'event',
-          reason: 'spam',
-          origin: 'event_details',
-          created_at: '2026-10-25T10:00:00Z',
-        }),
-      );
-    const closed = await dismissReport('11');
-    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/admin/reports/11/action');
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ action: 'dismiss' });
-    expect(closed.status).toBe('dismissed');
-  });
-
-  it('falls back to POST /action when /dismiss returns 500', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response('Internal Server Error', { status: 500, headers: { 'content-type': 'text/plain' } }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          id: 11,
-          status: 'dismissed',
-          target_type: 'event',
-          reason: 'spam',
-          origin: 'event_details',
-          created_at: '2026-10-25T10:00:00Z',
-        }),
-      );
-    const closed = await dismissReport('11');
-    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/admin/reports/11/action');
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ action: 'dismiss' });
-    expect(closed.status).toBe('dismissed');
+  it('does not retry a refused dismissal through /action, and shows the reason', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { detail: { code: 'not_assignee', message: 'Only the assigned administrator can close this report.' } },
+        { status: 403 },
+      ),
+    );
+    await expect(dismissReport('11')).rejects.toThrow('Only the assigned administrator can close this report.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/reports/11/dismiss');
   });
 
   it('builds a warning reason from what was reported', () => {
@@ -1057,8 +1032,8 @@ describe('adminApi service', () => {
   it('collects this administrator’s assigned and closed reports from the report lists', async () => {
     const ada = { id: 'u-admin', full_name: 'Ada Admin' };
     fetchMock.mockImplementation(async (input) => {
-      const url = String(input);
-      const status = new URL(url, 'http://localhost').searchParams.get('status');
+      const url = new URL(String(input), 'http://localhost');
+      const status = url.pathname === '/api/admin/reports/open' ? 'open' : url.searchParams.get('status');
       const items =
         status === 'open'
           ? [

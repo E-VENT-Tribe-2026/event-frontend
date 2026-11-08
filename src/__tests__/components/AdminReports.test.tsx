@@ -159,14 +159,13 @@ describe('Reports tab', () => {
     total,
     total_pages: totalPages,
   });
+  /** GET /api/admin/reports/open: every open report with their number, not paged. */
+  const openList = (items: () => unknown[]) => on('GET', '/api/admin/reports/open', () => ({ total: items().length, items: items() }));
 
   it('shows open reports by default, each with reporter, item, reason, time and status', async () => {
     routes.push(
-      on('GET', '/api/admin/reports', (c) =>
-        c.search.get('status') === 'open'
-          ? page([eventReport, userReport], 1, 1, 2)
-          : page([dismissedReport], 1, 1, 1),
-      ),
+      openList(() => [eventReport, userReport]),
+      on('GET', '/api/admin/reports', () => page([dismissedReport], 1, 1, 1)),
     );
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
 
@@ -182,7 +181,7 @@ describe('Reports tab', () => {
     expect(row).toHaveTextContent('2026-10-25');
     expect(row).toHaveTextContent('Open');
     expect(within(open).queryByText('Dismissed')).not.toBeInTheDocument();
-    expect(calls.some((c) => c.search.get('status') === 'open')).toBe(true);
+    expect(calls.some((c) => c.path === '/api/admin/reports/open')).toBe(true);
     expect(calls.every((c) => c.cache === 'no-store')).toBe(true);
   });
 
@@ -257,11 +256,7 @@ describe('Reports tab', () => {
 
   it('fetches the open reports again on a live update', async () => {
     let openItems: unknown[] = [eventReport];
-    routes.push(
-      on('GET', '/api/admin/reports', (c) =>
-        c.search.get('status') === 'open' ? page(openItems, 1, 1, openItems.length) : page([], 1, 1, 0),
-      ),
-    );
+    routes.push(openList(() => openItems), on('GET', '/api/admin/reports', () => page([], 1, 1, 0)));
     const { rerender } = render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} liveVersion={0} />);
     const open = await screen.findByRole('region', { name: 'open-reports' });
     await within(open).findByText('Rooftop Jazz Night');
@@ -274,11 +269,7 @@ describe('Reports tab', () => {
   });
 
   it('lists a chat report with the sender and the reported text', async () => {
-    routes.push(
-      on('GET', '/api/admin/reports', (c) =>
-        c.search.get('status') === 'open' ? page([messageReport], 1, 1, 1) : page([messageReport], 1, 1, 1),
-      ),
-    );
+    routes.push(openList(() => [messageReport]));
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
     const open = await screen.findByRole('region', { name: 'open-reports' });
     const row = await within(open).findByRole('button', { name: /report by Alice Martin about Message by Bob Stone/ });
@@ -289,16 +280,7 @@ describe('Reports tab', () => {
 
   it('shows who an open report is assigned to', async () => {
     routes.push(
-      on('GET', '/api/admin/reports', (c) =>
-        c.search.get('status') === 'open'
-          ? page(
-              [{ ...eventReport, assigned_to: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' } }],
-              1,
-              1,
-              1,
-            )
-          : page([], 1, 1, 0),
-      ),
+      openList(() => [{ ...eventReport, assigned_to: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' } }]),
     );
     render(<AdminReportsTab onOpenReport={vi.fn()} onErrorToast={vi.fn()} />);
     const open = await screen.findByRole('region', { name: 'open-reports' });
@@ -306,7 +288,7 @@ describe('Reports tab', () => {
   });
 
   it('opens a report when its row is pressed', async () => {
-    routes.push(on('GET', '/api/admin/reports', () => page([userReport], 1, 1, 1)));
+    routes.push(openList(() => [userReport]));
     const onOpenReport = vi.fn();
     render(<AdminReportsTab onOpenReport={onOpenReport} onErrorToast={vi.fn()} />);
     const open = await screen.findByRole('region', { name: 'open-reports' });
@@ -471,57 +453,75 @@ describe('Report details', () => {
     expect(post?.body).toEqual({ action: 'warn', reason: 'Harassment.' });
   });
 
-  it('removes the reported event, then resolves the report by warning the user', async () => {
+  it('removes the reported event through the report action, which resolves the report', async () => {
     routes.push(
-      on('POST', '/api/admin/events/ev-1/remove', () => ({
-        event_id: 'ev-1',
-        is_removed: true,
-        removed_at: '2026-10-27T15:00:00Z',
-        removed_by: ADMIN,
-      })),
       on('POST', '/api/admin/reports/11/action', () =>
-        detail(eventReport, { status: 'resolved', outcome: 'warned', content_removed: true }),
+        detail(eventReport, { status: 'resolved', outcome: 'content_removed', content_removed: true }),
       ),
     );
     const h = renderDetail(detail(eventReport, { assigned_to: ADMIN }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
     const dialog = await screen.findByRole('alertdialog');
-    const confirm = within(dialog).getByRole('button', { name: 'Remove' });
-    expect(within(dialog).getByLabelText('Reason')).toHaveValue('Misleading event.');
-    fireEvent.click(confirm);
+    expect(dialog).toHaveTextContent('marked as removed, not deleted');
+    expect(within(dialog).queryByLabelText('Reason')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
 
-    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The user was warned');
-    expect(screen.getByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
     expect(screen.getByText('Resolved')).toBeInTheDocument();
-    expect(screen.getByText('Content is removed')).toBeInTheDocument();
-    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-1/remove')).toBe(true);
-    const action = calls.find((c) => c.path === '/api/admin/reports/11/action');
-    expect(action?.body).toEqual({
-      action: 'warn',
-      reason: 'Misleading event.',
-    });
+    const posts = calls.filter((c) => c.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(posts[0].path).toBe('/api/admin/reports/11/action');
+    expect(posts[0].body).toEqual({ action: 'remove_content' });
     expect(h.onReportClosed).toHaveBeenCalled();
   });
 
-  it('removes the reported chat message, then closes the report', async () => {
+  it('removes the reported chat message through the report action', async () => {
     routes.push(
-      on('POST', '/api/admin/events/ev-2/messages/501/remove', () => ({
-        event_id: 'ev-2',
-        message_id: 501,
-        is_removed: true,
-      })),
       on('POST', '/api/admin/reports/13/action', () =>
-        detail(messageReport, { status: 'resolved', outcome: 'warned', content_removed: true }),
+        detail(messageReport, { status: 'resolved', outcome: 'content_removed', content_removed: true }),
       ),
     );
     renderDetail(detail(messageReport, { assigned_to: ADMIN }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
-    const dialog = await screen.findByRole('alertdialog');
-    expect(within(dialog).getByLabelText('Reason')).toHaveValue('User is spamming the group chat.');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
 
-    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The user was warned');
-    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-2/messages/501/remove')).toBe(true);
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('The reported content was removed');
+    expect(calls.find((c) => c.path === '/api/admin/reports/13/action')?.body).toEqual({ action: 'remove_content' });
+  });
+
+  it('offers Warn and Suspend from the backend fields: the reported user, or the organizer of an event', async () => {
+    // Real backend shape: no target_user; the user is in reported.user, the admin flag is reported_user_is_administrator.
+    const { target_user: _t, target_user_is_admin: _a, ...userBody } = detail(userReport) as Record<string, unknown>;
+    renderDetail({ ...userBody, reported_user: undefined, reported: { type: 'user', user: BOB }, reported_user_is_administrator: false });
+    expect(await screen.findByRole('button', { name: 'Warn the user' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Suspend the user' })).toBeInTheDocument();
+    expect(screen.queryByText(/no longer exists/)).not.toBeInTheDocument();
+  });
+
+  it('offers Warn and Suspend on an event report without the organizer in the data', async () => {
+    const { target_user: _t, target_user_is_admin: _a, ...eventBody } = detail(eventReport) as Record<string, unknown>;
+    renderDetail({ ...eventBody, reported: { type: 'event', event: { id: 'ev-1', title: 'Rooftop Jazz Night' } } });
+    expect(await screen.findByRole('button', { name: 'Warn the user' })).toBeInTheDocument();
+    expect(screen.getByText(/apply to the event's organizer\./)).toBeInTheDocument();
+    expect(screen.queryByText(/no longer exists/)).not.toBeInTheDocument();
+  });
+
+  it('hides Warn and Suspend when reported_user_is_administrator is true', async () => {
+    const { target_user: _t, target_user_is_admin: _a, ...userBody } = detail(userReport) as Record<string, unknown>;
+    renderDetail({ ...userBody, reported_user: undefined, reported: { type: 'user', user: ADMIN }, reported_user_is_administrator: true });
+    await screen.findByRole('button', { name: 'Dismiss' });
+    expect(screen.queryByRole('button', { name: 'Warn the user' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Ada Admin is now an administrator/)).toBeInTheDocument();
+  });
+
+  it('names the event of an event report from reported.event', async () => {
+    renderDetail({
+      ...detail(eventReport),
+      event: undefined,
+      reported: { type: 'event', event: { id: 'ev-1', title: 'Rooftop Jazz Night', name: 'Rooftop Jazz Night' } },
+    });
+    expect(await screen.findByRole('heading', { name: 'Rooftop Jazz Night' })).toBeInTheDocument();
+    expect(screen.queryByText('Unknown event')).not.toBeInTheDocument();
   });
 
   it('does not remove content when the report is assigned to someone else', async () => {
@@ -544,6 +544,7 @@ describe('Report details', () => {
       expect(h.onErrorToast).toHaveBeenCalledWith('This report is already assigned to someone else.');
     });
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-1/remove')).toBe(false);
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/reports/11/action')).toBe(false);
   });
 
   it('assigns an open report to the signed-in administrator', async () => {
@@ -1031,12 +1032,9 @@ describe('Open reports number next to the Reports tab', () => {
     let openCount = 2;
     routes.push(
       on('GET', '/api/profile/me', () => ({ id: 'u-admin', full_name: 'Ada Admin' })),
-      on('GET', '/api/admin/reports', () => ({
-        items: [],
+      on('GET', '/api/admin/reports/open', () => ({
+        items: Array.from({ length: openCount }, (_, i) => ({ ...eventReport, id: 100 + i })),
         total: openCount,
-        page: 1,
-        limit: 1,
-        total_pages: 1,
       })),
       on('GET', '/api/admin/users', () => ({ items: [], total: 0, page: 1, limit: 20, total_pages: 1 })),
       on('GET', '/api/admin/users/counters', () => ({ administrators: 1, suspended: 0, with_warnings: 0 })),

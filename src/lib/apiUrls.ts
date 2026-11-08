@@ -26,6 +26,7 @@ export const API_ENDPOINTS = {
   ADMIN_ACCOUNT: '/api/admin/account',
   ADMIN_AUDIT: '/api/admin/audit-log',
   ADMIN_REPORTS: '/api/admin/reports',
+  ADMIN_REPORTS_OPEN: '/api/admin/reports/open',
   ADMIN_REPORT_DETAIL: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}`,
   ADMIN_REPORT_DISMISS: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/dismiss`,
   ADMIN_REPORT_ACTION: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/action`,

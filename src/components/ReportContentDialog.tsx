@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import ReportFlag from '@/components/ReportFlag';
 import {
   Dialog,
@@ -47,6 +47,8 @@ export default function ReportContentDialog({
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  // Set once the report is sent: the window then shows its own confirmation until it is closed.
+  const [sent, setSent] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -54,6 +56,7 @@ export default function ReportContentDialog({
     setDescription('');
     setFormError('');
     setSubmitting(false);
+    setSent(false);
   }, [open, reasons, targetId, targetType]);
 
   const heading =
@@ -77,7 +80,8 @@ export default function ReportContentDialog({
         origin,
         description: description.trim() || null,
       });
-      onOpenChange(false);
+      // Tell the user right here, in the window, and keep it open until they close it.
+      setSent(true);
       onSuccess?.(result.message || 'Thanks. We received your report.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not send the report.';
@@ -91,6 +95,22 @@ export default function ReportContentDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md rounded-2xl">
+        {sent ? (
+          <div className="space-y-4 py-2 text-center" data-testid="report-sent">
+            <CheckCircle2 className="mx-auto h-12 w-12 text-green-500" aria-hidden="true" />
+            <DialogHeader className="items-center space-y-1 text-center sm:text-center">
+              <DialogTitle>Report sent</DialogTitle>
+              <DialogDescription>Thank you. An administrator will review it.</DialogDescription>
+            </DialogHeader>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="w-full rounded-xl gradient-primary py-3 text-sm font-semibold text-primary-foreground shadow-glow"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -171,6 +191,7 @@ export default function ReportContentDialog({
             </button>
           </DialogFooter>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );
