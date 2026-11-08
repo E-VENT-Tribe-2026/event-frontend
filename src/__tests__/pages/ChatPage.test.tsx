@@ -670,6 +670,10 @@ describe('ChatPage', () => {
       origin: 'event_chat',
       description: null,
     });
+    // The report window confirms in itself and stays open until it is closed.
+    expect(await screen.findByTestId('report-sent')).toHaveTextContent('Report sent');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByTestId('report-sent')).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: /report event/i })).toBeInTheDocument();
   });
 });

@@ -13,7 +13,7 @@ import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
-import { cachedFetch, invalidatePrefix, peekCache, TTL } from '@/lib/queryCache';
+import { cachedFetch, invalidate, invalidatePrefix, peekCache, TTL } from '@/lib/queryCache';
 import { fetchOrganizerProfile } from '@/lib/organizerProfile';
 import { formatUserIdentity } from '@/lib/userIdentity';
 import InvitedByBanner from '@/components/InvitedByBanner';
@@ -38,6 +38,7 @@ import EventDetailsMap from '@/pages/eventDetails/EventDetailsMap';
 import EventDetailsRemoved from '@/pages/eventDetails/EventDetailsRemoved';
 import EventDetailsBalloonLoader from '@/pages/eventDetails/EventDetailsBalloonLoader';
 import EventDetailsStatus from '@/pages/eventDetails/EventDetailsStatus';
+import EventDetailsAdminRemoved from '@/pages/eventDetails/EventDetailsAdminRemoved';
 import EventDetailsVenueModal from '@/pages/eventDetails/EventDetailsVenueModal';
 import {
   type AttendeeRow,
@@ -56,6 +57,8 @@ export default function EventDetailsPage() {
   const [apiEvent, setApiEvent] = useState<EventItem | null>(null);
   const [apiEventStatus, setApiEventStatus] = useState<string | null>(null);
   const [apiNotFound, setApiNotFound] = useState(false);
+  // An administrator removed the event: the server answers 410, which is not the same as "not found".
+  const [apiRemoved, setApiRemoved] = useState(false);
   const [loadingApi, setLoadingApi] = useState(true);
   const [balloonFinished, setBalloonFinished] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
@@ -86,7 +89,7 @@ export default function EventDetailsPage() {
     if (!state?.event || !id) return null;
     return state.event.id === id ? state.event : null;
   }, [location.state, id]);
-  const event = apiNotFound ? null : (apiEvent ?? routeEvent ?? localEvent ?? null);
+  const event = apiNotFound || apiRemoved ? null : (apiEvent ?? routeEvent ?? localEvent ?? null);
   const useApiParticipation = apiEvent !== null;
 
   const getApiToken = async (): Promise<string | null> => {
@@ -236,15 +239,18 @@ export default function EventDetailsPage() {
       setLoadingApi(false);
       setApiEvent(null);
       setApiNotFound(false);
+      setApiRemoved(false);
       return;
     }
     let cancelled = false;
     setApiNotFound(false);
+    setApiRemoved(false);
     const eventKey = `/api/events/${id}`;
     const applyEvent = (data: Record<string, unknown>) => {
       const mapped = mapApiEventToItem(data);
       setApiEvent(mapped);
       setApiNotFound(false);
+      setApiRemoved(false);
       setApiEventStatus(typeof data?.status === 'string' ? data.status : null);
       setInvitation((data?.invitation as EventInvitationSummary | null | undefined) ?? null);
       return mapped;
@@ -268,9 +274,9 @@ export default function EventDetailsPage() {
           async () => {
         const res = await fetch(getApiUrl(`/api/events/${id}`), { headers });
             if (!res.ok) {
-              if (res.status === 404) {
-                const err = new Error('Event not found') as Error & { status?: number };
-                err.status = 404;
+              if (res.status === 404 || res.status === 410) {
+                const err = new Error(res.status === 410 ? 'Event removed' : 'Event not found') as Error & { status?: number };
+                err.status = res.status;
                 throw err;
               }
               throw new Error();
@@ -290,6 +296,16 @@ export default function EventDetailsPage() {
           if (prof && !cancelled) setOrganizerProfile(prof);
         }
       } catch (err) {
+        if ((err as { status?: number })?.status === 410) {
+          // Removed by an administrator: say so, and never keep showing a saved copy of it.
+          invalidate(eventKey);
+          if (!cancelled) {
+            setApiRemoved(true);
+            setApiEvent(null);
+            setApiEventStatus(null);
+          }
+          return;
+        }
         if ((err as { status?: number })?.status === 404) {
           if (!cancelled) {
             setApiNotFound(true);
@@ -495,6 +511,9 @@ export default function EventDetailsPage() {
 
   if (!localEvent && !balloonFinished) {
     return <EventDetailsBalloonLoader ready={!loadingApi} onBurstDone={finishBalloon} />;
+  }
+  if (apiRemoved) {
+    return <EventDetailsAdminRemoved onBack={() => navigate(-1)} onBrowse={() => navigate('/home')} />;
   }
   if (!event) {
     return <EventDetailsStatus message="Event not found" />;
