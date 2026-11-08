@@ -127,6 +127,13 @@ function detail(summary: Record<string, unknown>, extra: Record<string, unknown>
 
 beforeEach(() => {
   setAuthToken('admin-token');
+  setCurrentUserFromOAuth({
+    id: 'u-admin',
+    email: 'ada@test.com',
+    name: 'Ada Admin',
+    username: 'ada',
+    role: 'administrator',
+  });
   routes = [];
   calls = [];
   realtime.handlers.clear();
@@ -452,7 +459,7 @@ describe('Report details', () => {
         detail(eventReport, { status: 'resolved', outcome: 'content_removed', content_removed: true }),
       ),
     );
-    const h = renderDetail(detail(eventReport));
+    const h = renderDetail(detail(eventReport, { assigned_to: ADMIN }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('marked as removed, not deleted');
@@ -474,7 +481,7 @@ describe('Report details', () => {
         detail(messageReport, { status: 'resolved', outcome: 'content_removed', content_removed: true }),
       ),
     );
-    renderDetail(detail(messageReport));
+    renderDetail(detail(messageReport, { assigned_to: ADMIN }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
 
@@ -515,6 +522,29 @@ describe('Report details', () => {
     });
     expect(await screen.findByRole('heading', { name: 'Rooftop Jazz Night' })).toBeInTheDocument();
     expect(screen.queryByText('Unknown event')).not.toBeInTheDocument();
+  });
+
+  it('does not remove content when the report is assigned to someone else', async () => {
+    routes.push(
+      on('POST', '/api/admin/events/ev-1/remove', () => ({
+        event_id: 'ev-1',
+        is_removed: true,
+      })),
+    );
+    const h = renderDetail(
+      detail(eventReport, {
+        assigned_to: { id: 'u-other', full_name: 'Other Admin', username: 'other' },
+      }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => {
+      expect(h.onErrorToast).toHaveBeenCalledWith('This report is already assigned to someone else.');
+    });
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/events/ev-1/remove')).toBe(false);
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/reports/11/action')).toBe(false);
   });
 
   it('assigns an open report to the signed-in administrator', async () => {
@@ -608,7 +638,7 @@ describe('Report details', () => {
         409,
       ),
     );
-    const h = renderDetail(detail(eventReport));
+    const h = renderDetail(detail(eventReport, { assigned_to: ADMIN }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the reported content' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('marked as removed, not deleted');
@@ -635,6 +665,24 @@ const eventDetailBody = {
     { id: 900, sender: BOB, content: 'Spam spam spam', created_at: '2026-10-26T10:00:00Z', is_removed: false },
   ],
 };
+
+describe('Admin event map', () => {
+  it('pins the event at the coordinates from the admin event payload', async () => {
+    routes.push(
+      on('GET', '/api/admin/events/ev-1', () => ({
+        ...eventDetailBody,
+        location_name: 'InnoWi, Bremen',
+        location: { type: 'Point', coordinates: [8.848829, 53.107601] },
+      })),
+    );
+    render(
+      <AdminEventDetail eventId="ev-1" onBack={vi.fn()} onErrorToast={vi.fn()} onSuccessToast={vi.fn()} />,
+    );
+    expect(await screen.findByRole('img', { name: /Map showing event location at 53.107601, 8.848829/ })).toBeInTheDocument();
+    expect(screen.getAllByText('InnoWi, Bremen').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Map (placeholder)')).not.toBeInTheDocument();
+  });
+});
 
 describe('Remove event', () => {
   it('asks for confirmation that says it is marked as removed, not deleted, and then shows who removed it and when', async () => {

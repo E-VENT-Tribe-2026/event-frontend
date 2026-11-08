@@ -7,6 +7,7 @@ import { UPCOMING_PREVIEW, type SuggestedUser } from '@/pages/home/homeModel';
 
 type HomeSidebarProps = {
   user: User;
+  calendarEvents?: EventItem[];
   upcomingForYou: EventItem[];
   upcomingLimit: number;
   upcomingInitialLoading: boolean;
@@ -21,6 +22,7 @@ type HomeSidebarProps = {
 
 export default function HomeSidebar({
   user,
+  calendarEvents,
   upcomingForYou,
   upcomingLimit,
   upcomingInitialLoading,
@@ -35,9 +37,9 @@ export default function HomeSidebar({
   return (
     <aside className="space-y-4">
       <MyCalendarSection
-        events={upcomingForYou}
+        events={calendarEvents ?? upcomingForYou}
         onOpenEvent={(id) => {
-          const event = upcomingForYou.find((row) => row.id === id);
+          const event = (calendarEvents ?? upcomingForYou).find((row) => row.id === id);
           if (event) onOpenEvent(event);
         }}
       />

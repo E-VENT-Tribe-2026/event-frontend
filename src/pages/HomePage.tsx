@@ -11,7 +11,7 @@ import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
 import { hasSignedInSession } from '@/lib/signedIn';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
-import { isEventUpcoming, eventStartMs } from '@/lib/eventTime';
+import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { EVENTS_CHANGED_EVENT } from '@/lib/realtimeEvents';
 import { useMaxPrice, useFavorites, useEvents, useRecommendations, useMyEvents, useJoinedEvents } from '@/lib/queries';
 import { invalidate, invalidatePrefix, cachedFetch, TTL } from '@/lib/queryCache';
@@ -305,14 +305,23 @@ export default function HomePage() {
 
   const availableCities = useMemo(() => getEventCities(events), [events]);
 
-  const upcomingForYou = useMemo(() => {
-    const combined = [...(myEventsData ?? []), ...(joinedEventsData ?? [])];
+  const myAndJoinedEvents = useMemo(() => {
     const byId = new Map<string, EventItem>();
-    combined.forEach((e) => byId.set(e.id, e));
-    return Array.from(byId.values())
-      .filter((e) => isEventUpcoming(e) && String(e.status || '').toLowerCase() !== 'cancelled')
-      .sort((a, b) => eventStartMs(a) - eventStartMs(b));
+    for (const event of [...(myEventsData ?? []), ...(joinedEventsData ?? [])]) {
+      byId.set(event.id, event);
+    }
+    return Array.from(byId.values()).sort((a, b) => eventStartMs(a) - eventStartMs(b));
   }, [myEventsData, joinedEventsData]);
+
+  const calendarEvents = useMemo(
+    () => myAndJoinedEvents.filter((e) => !isEventCancelled(e)),
+    [myAndJoinedEvents],
+  );
+
+  const upcomingForYou = useMemo(
+    () => calendarEvents.filter((e) => isEventUpcoming(e)),
+    [calendarEvents],
+  );
 
   const applyFilters = useCallback(
   (list: EventItem[]) =>
@@ -408,6 +417,7 @@ export default function HomePage() {
           {user ? (
             <HomeSidebar
               user={user}
+              calendarEvents={calendarEvents}
               upcomingForYou={upcomingForYou}
               upcomingLimit={upcomingLimit}
               upcomingInitialLoading={upcomingInitialLoading}

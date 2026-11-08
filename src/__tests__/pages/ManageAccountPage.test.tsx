@@ -75,6 +75,7 @@ function renderPage() {
     <MemoryRouter initialEntries={['/account']}>
       <Routes>
         <Route path="/account" element={<ManageAccountPage />} />
+        <Route path="/login" element={<p>Signed out</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -158,6 +159,63 @@ describe('ManageAccountPage', () => {
     expect(screen.getByRole('button', { name: 'Delete account' })).toBeInTheDocument();
   });
 
+  it('hides Delete account for administrators', () => {
+    getCurrentUserMock.mockReturnValue({ ...basicUser, role: 'administrator' });
+    renderPage();
+    expect(screen.queryByRole('button', { name: 'Delete account' })).not.toBeInTheDocument();
+  });
+
+  it('requires typing the username before delete is enabled', async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }));
+    const confirm = await screen.findByRole('button', { name: 'Delete forever' });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Type to confirm account deletion'), { target: { value: 'sonia' } });
+    expect(confirm).not.toBeDisabled();
+  });
+
+  it('DELETEs /api/auth/account then signs out', async () => {
+    setAuthToken('tok');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/auth/account') && init?.method === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
+      if (url.includes('/api/auth/me')) {
+        return new Response(JSON.stringify({ id: 'u1', email: 'sonia@test.com' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/profile/me')) {
+        return new Response(JSON.stringify({ id: 'u1', username: 'sonia' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <MemoryRouter initialEntries={['/account']}>
+        <Routes>
+          <Route path="/account" element={<ManageAccountPage />} />
+          <Route path="/login" element={<p>Signed out</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete account' }));
+    fireEvent.change(screen.getByLabelText('Type to confirm account deletion'), { target: { value: 'sonia' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/auth/account'),
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+    expect(await screen.findByText('Signed out')).toBeInTheDocument();
+  });
+
   it('unblocks someone from the blocked list', async () => {
     fetchBlockedUsersMock.mockResolvedValue({
       page: 1,
@@ -190,15 +248,6 @@ describe('ManageAccountPage', () => {
     await waitFor(() => {
       expect(readNotificationPrefs('u1').invitations).toBe(false);
     });
-  });
-
-  it('requires typing the username before delete is enabled', async () => {
-    renderPage();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }));
-    const confirm = await screen.findByRole('button', { name: 'Delete forever' });
-    expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Type to confirm account deletion'), { target: { value: 'sonia' } });
-    expect(confirm).not.toBeDisabled();
   });
 
   it('posts a password change', async () => {

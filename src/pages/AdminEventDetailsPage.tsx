@@ -4,6 +4,10 @@ import { ArrowLeft, Calendar, MapPin, Tag, Users, Wallet, Loader2, AlertCircle }
 import AdminPerson from '@/components/admin/AdminPerson';
 import { fetchAdminEventDetails, type AdminEventDetails } from '@/lib/adminApi';
 import { formatAdminDateTime, isEventCancelled } from '@/lib/adminFormat';
+import EventLocationMap from '@/components/EventLocationMap';
+import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import { readEventCoordinates } from '@/lib/mapApiEvent';
+import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 
 function formatCost(cost: number | null | undefined): string | null {
   if (cost === null || cost === undefined) return null;
@@ -59,6 +63,7 @@ export default function AdminEventDetailsPage() {
   const participants = event?.participants ?? [];
   const participantTotal = event?.participant_count ?? participants.length;
   const cost = formatCost(event?.cost);
+  const coords = readEventCoordinates(event as unknown as Record<string, unknown> | null);
 
   return (
     <div className="min-h-screen bg-background pb-10 text-foreground">
@@ -131,6 +136,23 @@ export default function AdminEventDetailsPage() {
                       <dt className="sr-only">Location</dt>
                       <dd className="break-words text-foreground">{event.location_name}</dd>
                     </div>
+                  </div>
+                )}
+                {hasValidEventCoordinates(coords.lat, coords.lng) && (
+                  <div className="space-y-2 pt-1">
+                    <a
+                      href={openInGoogleMapsUrl({
+                        lat: coords.lat,
+                        lng: coords.lng,
+                        placeName: event.location_name ?? undefined,
+                      })}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-primary"
+                    >
+                      Open in Google Maps
+                    </a>
+                    <EventLocationMap latitude={coords.lat} longitude={coords.lng} className="h-52" />
                   </div>
                 )}
                 {event.category && (

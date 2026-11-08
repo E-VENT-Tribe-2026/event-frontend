@@ -25,6 +25,7 @@ import {
   dismissReport,
   actOnReport,
   removeReportedContent,
+  reportActionAssignmentError,
   warningReasonFromReport,
   assignReport,
   fetchAdministrators,
@@ -49,6 +50,23 @@ describe('adminApi service', () => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(authModule, 'getAuthToken').mockReturnValue('mock_admin_token');
+    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue({
+      id: 'u-admin',
+      role: 'administrator',
+      name: 'Ada Admin',
+      username: 'ada',
+      email: 'ada@test.com',
+      password: '',
+      avatar: '',
+      profilePhoto: '',
+      coverPhoto: '',
+      interests: [],
+      dob: '',
+      gender: '',
+      isPremium: false,
+      friends: [],
+      createdAt: '',
+    });
   });
 
   afterEach(() => {
@@ -877,7 +895,7 @@ describe('adminApi service', () => {
         outcome: null,
         closed_at: null,
         closed_by: null,
-        assigned_to: null,
+        assigned_to: { id: 'u-admin', full_name: 'Ada Admin', username: 'ada' },
       },
     );
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/admin/events/ev-1/remove');
@@ -889,6 +907,36 @@ describe('adminApi service', () => {
     expect(closed.status).toBe('resolved');
     expect(closed.outcome).toBe('warned');
     expect(closed.content_removed).toBe(true);
+  });
+
+  it('does not remove content when the report is not assigned to the caller', async () => {
+    await expect(
+      removeReportedContent({
+        id: '11',
+        status: 'open',
+        target_type: 'event',
+        reason: 'spam',
+        origin: 'event_details',
+        created_at: '2026-10-25T10:00:00Z',
+        reporter: null,
+        event: { id: 'ev-1', title: 'Jazz' },
+        reported_user: null,
+        message: null,
+        description: null,
+        chat_context: [],
+        content_removed: false,
+        target_user: null,
+        target_user_is_admin: false,
+        outcome: null,
+        closed_at: null,
+        closed_by: null,
+        assigned_to: { id: 'u-other', full_name: 'Other Admin', username: 'other' },
+      }),
+    ).rejects.toThrow('This report is already assigned to someone else.');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      reportActionAssignmentError({ assigned_to: null }, 'u-admin'),
+    ).toBe('Assign this report to yourself before taking action.');
   });
 
   it('assigns a report with POST /assign { admin_id }', async () => {

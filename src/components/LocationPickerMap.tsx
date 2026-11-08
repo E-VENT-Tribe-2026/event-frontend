@@ -15,20 +15,14 @@ export type LocationPickerMapProps = {
  * Validates that coordinates are present, 
  * not NaN, and not the 0,0 placeholder.
  */
-export const hasValidEventCoordinates = (lat: any, lng: any): boolean => {
-  // Check for null, undefined, or NaN
-  if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
-    return false;
-  }
-
-  // Check for the 0,0 placeholder specifically (Null Island)
-  if (lat === 0 && lng === 0) {
-    return false;
-  }
-
-  // Ensure they are finite numbers (prevents Infinity issues)
-  return Number.isFinite(lat) && Number.isFinite(lng);
-}; // <--- Make sure this brace is here!
+export const hasValidEventCoordinates = (lat: unknown, lng: unknown): boolean => {
+  if (lat === null || lng === null || lat === undefined || lng === undefined) return false;
+  const latN = typeof lat === 'number' ? lat : Number(lat);
+  const lngN = typeof lng === 'number' ? lng : Number(lng);
+  if (!Number.isFinite(latN) || !Number.isFinite(lngN)) return false;
+  if (latN === 0 && lngN === 0) return false;
+  return latN >= -90 && latN <= 90 && lngN >= -180 && lngN <= 180;
+};
 
 /**
  * Click the map to place or move the pin; drag the pin to fine-tune.
