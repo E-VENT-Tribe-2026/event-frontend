@@ -4,6 +4,7 @@ import {
   ShieldPlus,
   ShieldOff,
   Calendar,
+  CalendarDays,
   Loader2,
   AlertCircle,
   ArrowLeft,
@@ -35,21 +36,29 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   fetchAdminUserDetails,
+  fetchReportsFiledByUser,
+  fetchUserWarnings,
   grantAdminRole,
   warnUser,
   withdrawWarning,
   suspendUser,
   liftSuspension,
+  isSuspendedAccount,
+  userReportListsFromDetails,
+  reportReasonLabel,
+  type AdminUserReportRef,
   type AdminUserDetailsFull,
   type AdminEventSummary,
   type AdminUserWarning,
 } from '@/lib/adminApi';
+import { ReportStatusPill } from '@/components/admin/AdminReportsTab';
 
 interface AdminUserDetailProps {
   userId: string;
   onBack: () => void;
   onOpenEvent?: (eventId: string) => void;
   onOpenUser?: (userId: string) => void;
+  onOpenReport?: (reportId: string) => void;
   onErrorToast: (message: string) => void;
   onSuccessToast: (message: string) => void;
 }
@@ -70,20 +79,12 @@ type PersonRef = {
   avatar_url?: string;
 };
 
-type ReportRef = {
-  id: string;
-  title?: string;
-  reason?: string;
-  status?: string;
-  created_at?: string;
-};
-
 type UserExtra = {
   friends?: PersonRef[];
   blocked_by_user?: PersonRef[];
   blocked_this_user?: PersonRef[];
-  reports_about?: ReportRef[];
-  reports_made?: ReportRef[];
+  reports_about?: unknown;
+  reports_made?: unknown;
 };
 
 /* ---------- Helpers ---------- */
@@ -360,51 +361,82 @@ function PersonColumn({
   );
 }
 
+function reportKindLabel(type: AdminUserReportRef['target_type']): string {
+  return type === 'user' ? 'User' : type === 'message' ? 'Chat message' : 'Event';
+}
+
 function ReportList({
   icon,
   title,
   reports,
   emptyMessage,
+  onOpenReport,
+  onOpenEvent,
 }: {
   icon: LucideIcon;
   title: string;
-  reports?: ReportRef[];
+  reports: AdminUserReportRef[];
   emptyMessage: string;
+  onOpenReport?: (reportId: string) => void;
+  onOpenEvent?: (eventId: string) => void;
 }) {
-  const list = reports ?? [];
   return (
-    <div className="space-y-2">
-      <SectionTitle icon={icon} title={title} count={list.length} size="sm" />
-      {list.length === 0 ? (
+    <div id={title === 'Reports made by this user' ? 'reports-made' : undefined} className="space-y-2" aria-label={title}>
+      <SectionTitle icon={icon} title={title} count={reports.length} size="sm" />
+      {reports.length === 0 ? (
         <EmptyBox>{emptyMessage}</EmptyBox>
       ) : (
         <div className="space-y-2">
-          {list.map((r) => (
+          {reports.map((r) => {
+            const eventTitle = r.event?.title;
+            const eventId = r.event?.id;
+            const showEvent = r.target_type === 'event' || Boolean(eventTitle);
+            return (
             <div
               key={r.id}
               className="flex items-center justify-between gap-3 rounded-xl p-2.5"
               style={{ background: 'hsl(213 40% 18% / .55)' }}
             >
-              <div className="min-w-0">
+              <button
+                type="button"
+                onClick={onOpenReport ? () => onOpenReport(r.id) : undefined}
+                aria-label={`Open report: ${reportReasonLabel(r.reason)}${eventTitle ? `, event ${eventTitle}` : ''}`}
+                className="min-w-0 flex-1 text-left"
+              >
                 <p className="truncate text-[13px] font-semibold" style={{ color: 'var(--adm-fg)' }}>
-                  {r.title || r.reason || 'Report'}
+                  {reportReasonLabel(r.reason)}
+                  <span className="ml-1.5 text-[11px] font-medium" style={{ color: 'var(--adm-muted-fg)' }}>
+                    {reportKindLabel(r.target_type)}
+                  </span>
                 </p>
+                {showEvent && (
+                  <p className="flex items-center gap-1 truncate text-[11px]" style={{ color: 'var(--adm-primary-text)' }}>
+                    <CalendarDays className="h-3 w-3 shrink-0" />
+                    Event: {eventTitle || 'Unknown event'}
+                  </p>
+                )}
                 {r.created_at && (
                   <p className="text-[11px]" style={{ color: 'var(--adm-muted-fg)' }}>
                     {formatYmd(r.created_at)}
                   </p>
                 )}
+              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {eventId && onOpenEvent && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenEvent(eventId)}
+                    className="rounded-lg border px-2 py-1 text-[10px] font-semibold"
+                    style={{ borderColor: 'var(--adm-border)', color: 'var(--adm-primary-text)' }}
+                  >
+                    Open event
+                  </button>
+                )}
+                <ReportStatusPill status={r.status} />
               </div>
-              {r.status && (
-                <span
-                  className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize"
-                  style={{ background: 'var(--adm-secondary)', color: 'var(--adm-muted-fg)' }}
-                >
-                  {r.status}
-                </span>
-              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -420,6 +452,7 @@ export default function AdminUserDetail({
   onBack,
   onOpenEvent,
   onOpenUser,
+  onOpenReport,
   onErrorToast,
   onSuccessToast,
 }: AdminUserDetailProps) {
@@ -435,16 +468,23 @@ export default function AdminUserDetail({
   const [withdrawWarningId, setWithdrawWarningId] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<boolean>(false);
   const [pendingWithdrawWarning, setPendingWithdrawWarning] = useState<AdminUserWarning | null>(null);
+  const [filedReports, setFiledReports] = useState<AdminUserReportRef[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
 
-    fetchAdminUserDetails(userId)
-      .then((data) => {
+    Promise.all([
+      fetchAdminUserDetails(userId),
+      fetchUserWarnings(userId).catch(() => [] as AdminUserWarning[]),
+    ])
+      .then(([data, warnings]) => {
         if (!cancelled) {
-          setUser(data);
+          setUser({
+            ...data,
+            warnings: warnings.length ? warnings : (data.warnings ?? []),
+          });
           setLoading(false);
         }
       })
@@ -459,6 +499,26 @@ export default function AdminUserDetail({
       cancelled = true;
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (!user) return;
+    const lists = userReportListsFromDetails(user);
+    if (lists.madeProvided && lists.made.length > 0) {
+      setFiledReports(null);
+      return;
+    }
+    let cancelled = false;
+    fetchReportsFiledByUser(user.id)
+      .then((rows) => {
+        if (!cancelled) setFiledReports(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setFiledReports([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const openDialog = (kind: DialogKind) => {
     setReason('');
@@ -490,11 +550,24 @@ export default function AdminUserDetail({
         onSuccessToast(res.message || 'Warning issued.');
       } else if (dialogKind === 'suspend') {
         const res = await suspendUser(user.id, reason.trim());
-        setUser((prev) => (prev ? { ...prev, is_suspended: true } : null));
+        setUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                is_suspended: true,
+                status: 'suspended',
+                suspension: {
+                  reason: reason.trim(),
+                  suspended_at: new Date().toISOString(),
+                  suspended_by: 'You',
+                },
+              }
+            : null,
+        );
         onSuccessToast(res.message || 'User suspended.');
       } else if (dialogKind === 'lift') {
-        const res = await liftSuspension(user.id);
-        setUser((prev) => (prev ? { ...prev, is_suspended: false, suspension: null } : null));
+        const res = await liftSuspension(user.id, reason.trim());
+        setUser((prev) => (prev ? { ...prev, is_suspended: false, status: 'active', suspension: null } : null));
         onSuccessToast(res.message || 'Suspension lifted.');
       } else if (dialogKind === 'makeAdmin') {
         const res = await grantAdminRole(user.id);
@@ -530,10 +603,14 @@ export default function AdminUserDetail({
   };
 
   const isAdmin = Boolean(user?.is_admin || user?.role === 'administrator');
-  const isSuspended = Boolean(user?.is_suspended);
-  const needsReason = dialogKind === 'warn' || dialogKind === 'suspend';
+  const isSuspended = user ? isSuspendedAccount(user) : false;
+  const needsReason = dialogKind === 'warn' || dialogKind === 'suspend' || dialogKind === 'lift';
 
   const extra = (user ?? {}) as UserExtra;
+  const reportLists = userReportListsFromDetails(user);
+  const reportsAbout = reportLists.about;
+  const reportsMade =
+    reportLists.made.length > 0 ? reportLists.made : (filedReports ?? reportLists.made);
   const warnings = (user?.warnings ?? []) as WarningExtra[];
   const warningCount = warnings.length;
   const sortedWarnings = [...warnings].sort(
@@ -550,7 +627,7 @@ export default function AdminUserDetail({
   const dialogDescription: Record<NonNullable<DialogKind>, string> = {
     warn: `Provide a reason for warning ${user?.full_name ?? 'this user'}.`,
     suspend: `Provide a reason for suspending ${user?.full_name ?? 'this user'}.`,
-    lift: `Lift the suspension on ${user?.full_name ?? 'this user'}. They will regain access immediately.`,
+    lift: `Provide a reason for lifting the suspension on ${user?.full_name ?? 'this user'}. They will regain access immediately.`,
     makeAdmin: `Promote ${user?.full_name ?? 'this user'} to administrator? They will receive full administrative access.`,
   };
 
@@ -680,6 +757,7 @@ export default function AdminUserDetail({
                   <span style={{ color: 'var(--adm-muted-fg)' }}>Account status</span>
                   {isSuspended ? (
                     <span
+                      data-testid="account-status-badge"
                       className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
                       style={{
                         background: 'hsl(0 84% 60% / .15)',
@@ -691,6 +769,7 @@ export default function AdminUserDetail({
                     </span>
                   ) : (
                     <span
+                      data-testid="account-status-badge"
                       className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
                       style={{
                         background: 'hsl(152 60% 42% / .15)',
@@ -760,6 +839,33 @@ export default function AdminUserDetail({
                   Warn
                 </button>
 
+                {!isAdmin && (
+                  <button
+                    type="button"
+                    data-testid="action-reports-made"
+                    onClick={() =>
+                      document.getElementById('reports-made')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95"
+                    style={{
+                      borderColor: 'var(--adm-border)',
+                      background: 'var(--adm-secondary)',
+                      color: 'var(--adm-fg)',
+                    }}
+                  >
+                    <Flag className="h-3.5 w-3.5" style={{ color: 'var(--adm-primary-text)' }} />
+                    Reports they made
+                    {reportsMade.length > 0 && (
+                      <span
+                        className="rounded-full px-1.5 text-[10px] font-bold"
+                        style={{ background: 'hsl(271 76% 53%)', color: 'white' }}
+                      >
+                        {reportsMade.length}
+                      </span>
+                    )}
+                  </button>
+                )}
+
                 {isSuspended ? (
                   <button
                     type="button"
@@ -790,6 +896,34 @@ export default function AdminUserDetail({
                   </button>
                 )}
               </div>
+
+              {isSuspended && (
+                <div
+                  className="mt-4 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px]"
+                  style={{
+                    background: 'hsl(0 84% 60% / .08)',
+                    borderColor: 'hsl(0 84% 60% / .3)',
+                    color: 'var(--adm-fg)',
+                  }}
+                  role="status"
+                >
+                  <Ban
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    style={{ color: 'var(--adm-danger-text)' }}
+                  />
+                  <p>
+                    <strong>This account is suspended.</strong>
+                    {user.suspension?.reason ? (
+                      <>
+                        {' '}
+                        Reason: {user.suspension.reason}
+                      </>
+                    ) : (
+                      ' The profile stays visible to administrators.'
+                    )}
+                  </p>
+                </div>
+              )}
 
               {/* Warning banner */}
               {warningCount > 0 && !isSuspended && (
@@ -994,33 +1128,39 @@ export default function AdminUserDetail({
               )}
             </div>
 
-            {/* ===== Report history ===== */}
-            <div className="rounded-[16px] border p-5 space-y-4" style={CARD_STYLE}>
-              <SectionTitle
-                icon={Flag}
-                title="Report history"
-                count={(extra.reports_about?.length ?? 0) + (extra.reports_made?.length ?? 0)}
-              />
-              <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-                Newest first. Reports about events this user organizes count as reports about them.
-              </p>
+            {/* ===== Report history (not for an administrator) ===== */}
+            {!isAdmin && (
+              <div className="rounded-[16px] border p-5 space-y-4" style={CARD_STYLE}>
+                <SectionTitle
+                  icon={Flag}
+                  title="Report history"
+                  count={reportsAbout.length + reportsMade.length}
+                />
+                <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                  Newest first. Reports about events this user organizes count as reports about them.
+                </p>
 
-              <ReportList
-                icon={AlertTriangle}
-                title="Reports about this user"
-                reports={extra.reports_about}
-                emptyMessage="No reports about this user."
-              />
+                <ReportList
+                  icon={AlertTriangle}
+                  title="Reports about this user"
+                  reports={reportsAbout}
+                  emptyMessage="No reports about this user."
+                  onOpenReport={onOpenReport}
+                  onOpenEvent={onOpenEvent}
+                />
 
-              <div className="border-t" style={{ borderColor: 'var(--adm-border)' }} />
+                <div className="border-t" style={{ borderColor: 'var(--adm-border)' }} />
 
-              <ReportList
-                icon={MessageSquare}
-                title="Reports made by this user"
-                reports={extra.reports_made}
-                emptyMessage="This user has not reported anything."
-              />
-            </div>
+                <ReportList
+                  icon={MessageSquare}
+                  title="Reports made by this user"
+                  reports={reportsMade}
+                  emptyMessage="This user has not reported anything."
+                  onOpenReport={onOpenReport}
+                  onOpenEvent={onOpenEvent}
+                />
+              </div>
+            )}
           </>
         ) : null}
       </div>

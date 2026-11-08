@@ -18,13 +18,21 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 vi.mock('@/lib/supabase', () => ({
   supabase: null,
+  syncSupabaseSession: vi.fn(() => Promise.resolve()),
+  clearSupabaseSession: vi.fn(),
 }));
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 describe('SignupPage', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     clearAuthToken();
-    sessionStorage.clear();
     vi.stubGlobal(
       'fetch',
       vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))),
@@ -48,30 +56,60 @@ describe('SignupPage', () => {
     );
   }
 
-  it('shows validation messages when submitting empty form', async () => {
+  async function unlockSignup() {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ valid: true, email: 'alex@example.com' }));
     renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Invitation code'), { target: { value: 'ABCD-2345' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    await screen.findByPlaceholderText('Username');
+  }
+
+  it('does not show the registration form until email and code are verified', () => {
+    renderPage();
+    expect(screen.getByPlaceholderText('Email')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Invitation code')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Username')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /create account/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps the form locked when the code is rejected', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ valid: false }));
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Invitation code'), { target: { value: 'ZZZZ-9999' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    expect(await screen.findByText('This invitation is not valid or has expired.')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Username')).not.toBeInTheDocument();
+  });
+
+  it('locks the invited email after a valid code', async () => {
+    await unlockSignup();
+    const emailInput = screen.getByPlaceholderText('Email') as HTMLInputElement;
+    expect(emailInput).toHaveAttribute('readonly');
+    expect(emailInput.value).toBe('alex@example.com');
+    fireEvent.change(emailInput, { target: { value: 'other@example.com' } });
+    expect(emailInput.value).toBe('alex@example.com');
+  });
+
+  it('shows validation messages when submitting empty form', async () => {
+    await unlockSignup();
     fireEvent.click(screen.getByRole('button', { name: /create account/i }));
     expect(await screen.findByText('Username is required')).toBeInTheDocument();
-    expect(screen.getByText('Email is required')).toBeInTheDocument();
     expect(screen.getByText('Password is required')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it('shows conflict message when server returns 409', async () => {
-  const fetchMock = vi.mocked(fetch);
-  fetchMock.mockResolvedValueOnce(
-    new Response(JSON.stringify({ message: 'Email already exists' }), {
-      status: 409,
-      headers: { 'content-type': 'application/json' },
-    }),
-  );
+    await unlockSignup();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ message: 'Email already exists' }, 409),
+    );
 
-    renderPage();
-       fireEvent.change(screen.getByPlaceholderText('Username'), {
+    fireEvent.change(screen.getByPlaceholderText('Username'), {
       target: { value: 'alex_user' },
     });
     fireEvent.change(screen.getByPlaceholderText('Full name'), { target: { value: 'Alex' } });
-    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
     fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
     const dobInput = screen.getByLabelText(/birthdate/i) as HTMLInputElement;
@@ -86,31 +124,35 @@ describe('SignupPage', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it('registers and navigates home when API returns tokens and profile loads', async () => {
+  it('registers with the verified email and invite_code', async () => {
     const fetchMock = vi.mocked(fetch);
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/auth/verify-invite')) {
+        return jsonResponse({ valid: true, email: 'alex@example.com' });
+      }
       if (url.includes('/api/auth/register')) {
-        return new Response(
-          JSON.stringify({ access_token: 'tok', refresh_token: 'ref' }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
+        const body = JSON.parse(String(init?.body ?? '{}')) as { invite_code?: string; email?: string };
+        expect(body.email).toBe('alex@example.com');
+        expect(body.invite_code).toBe('ABCD-2345');
+        return jsonResponse({ access_token: 'tok', refresh_token: 'ref' });
       }
       if (url.includes('/api/auth/me')) {
-        return new Response(JSON.stringify({ id: 'new-user', email: 'alex@example.com' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+        return jsonResponse({ id: 'new-user', email: 'alex@example.com' });
       }
       return new Response('not mocked', { status: 500 });
     });
 
     renderPage();
-      fireEvent.change(screen.getByPlaceholderText('Username'), {
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Invitation code'), { target: { value: 'ABCD-2345' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    await screen.findByPlaceholderText('Username');
+
+    fireEvent.change(screen.getByPlaceholderText('Username'), {
       target: { value: 'alex_user' },
     });
     fireEvent.change(screen.getByPlaceholderText('Full name'), { target: { value: 'Alex' } });
-    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'alex@example.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'Secret1!' } });
     fireEvent.change(screen.getByPlaceholderText('Confirm Password'), { target: { value: 'Secret1!' } });
     const dobInput = screen.getByLabelText(/birthdate/i) as HTMLInputElement;
@@ -126,6 +168,3 @@ describe('SignupPage', () => {
     });
   });
 });
-
-
-

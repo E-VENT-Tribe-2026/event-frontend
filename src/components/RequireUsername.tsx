@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { getAuthToken } from '@/lib/auth';
-import { getApiUrl } from '@/lib/api';
-import { hasChosenUsername } from '@/lib/username';
+import { getAuthToken, notifyAuthExpired } from '@/lib/auth';
+import { fetchMyProfile, ProfileMeError } from '@/lib/profileMe';
+import { hasChosenUsername, profileFromMeResponse } from '@/lib/username';
 import { getPendingAdminVerification } from '@/lib/adminAuth';
+import { getCurrentUser } from '@/lib/storage';
+import { isAdministratorRole } from '@/lib/adminApi';
 
 /** Paths that administrators are allowed to stay on without being redirected to /admin. */
-const ADMIN_EXEMPT_PATHS = ['/admin', '/admin-verify', '/choose-username'];
+const ADMIN_EXEMPT_PATHS = ['/admin', '/admin-verify'];
 
 /** Signed-in accounts without a username stay on the selection step. */
 export default function RequireUsername({ children }: { children: React.ReactNode }) {
@@ -20,17 +22,25 @@ export default function RequireUsername({ children }: { children: React.ReactNod
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(getApiUrl('/api/profile/me'), {
-          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        });
-        const profile = await res.json().catch(() => ({} as { username?: string; role?: string }));
+        const body = await fetchMyProfile(token);
         if (cancelled) return;
-        if (res.ok && typeof profile.role === 'string') {
-          setRole(profile.role);
+        const profile = profileFromMeResponse(body);
+        if (typeof profile.role === 'string') setRole(profile.role);
+        const username = typeof profile.username === 'string' ? profile.username : null;
+        setState(hasChosenUsername(username) ? 'ok' : 'need');
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof ProfileMeError && error.status === 401) {
+          notifyAuthExpired();
+          return;
         }
-        setState(res.ok && hasChosenUsername(profile.username) ? 'ok' : 'need');
-      } catch {
-        if (!cancelled) setState('need');
+        // 403 = profile setup required. Other failures must not bounce a
+        // signed-in user to /choose-username on refresh.
+        if (error instanceof ProfileMeError && error.status === 403) {
+          setState('need');
+          return;
+        }
+        setState('ok');
       }
     })();
     return () => {
@@ -46,13 +56,13 @@ export default function RequireUsername({ children }: { children: React.ReactNod
 
   if (!token) return <Navigate to="/login" replace />;
   if (state === 'checking') return null;
-  if (state === 'need') return <Navigate to="/choose-username" replace />;
+
+  const isAdmin = isAdministratorRole(role) || isAdministratorRole(getCurrentUser()?.role);
+  // A verified administrator must reach the admin panel, not choose-username / password setup.
+  if (state === 'need' && !isAdmin) return <Navigate to="/choose-username" replace />;
 
   // Redirect verified administrators away from non-admin pages
-  if (
-    role === 'administrator' &&
-    !ADMIN_EXEMPT_PATHS.includes(location.pathname)
-  ) {
+  if (isAdmin && !ADMIN_EXEMPT_PATHS.includes(location.pathname)) {
     return <Navigate to="/admin" replace />;
   }
 

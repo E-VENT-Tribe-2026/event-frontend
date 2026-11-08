@@ -1,13 +1,21 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Map, PlusCircle, MessageCircle, User, LayoutDashboard, Users, Shield } from 'lucide-react';
-import { getCurrentUser, setCurrentUserFromOAuth } from '@/lib/storage';
-import { UserAvatar } from '@/components/UserAvatar';
+import { Home, Map, PlusCircle, MessageCircle, LayoutDashboard, Users, Shield } from 'lucide-react';
+import { getCurrentUser } from '@/lib/storage';
 import { getAuthToken } from '@/lib/auth';
-import { getApiUrl } from '@/lib/api';
-import { API_ENDPOINTS } from '@/lib/apiUrls';
+import { applyMyProfileToSession, fetchMyProfile } from '@/lib/profileMe';
 import { useEffect, useState } from 'react';
+import {
+  CHAT_UNREAD_CHANGED_EVENT,
+  countUnreadChats,
+} from '@/lib/chatUnread';
 import { fetchIncomingRequestCount, FRIENDS_CHANGED_EVENT } from '@/lib/friendsApi';
+import { CHAT_MESSAGES_CHANGED_EVENT } from '@/lib/realtimeEvents';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
+
+function prefetchMap() {
+  void import('@/pages/MapPage');
+  void import('leaflet');
+}
 
 export default function BottomNav() {
   const location = useLocation();
@@ -20,31 +28,15 @@ export default function BottomNav() {
     return () => window.removeEventListener('eventapp:user-updated', sync);
   }, []);
 
-  // Fetch profile on mount to load avatar
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) return;
-    fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    })
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then((data: Record<string, unknown>) => {
-        const p = (data.data || data.user || data) as Record<string, unknown>;
-        if (!p.id) return;
-        // Use setCurrentUserFromOAuth so it works even if user isn't in memory yet
-        setCurrentUserFromOAuth({
-          id: String(p.id),
-          email: String(p.email || ''),
-          name: String(p.full_name || p.name || ''),
-          avatar: String(p.avatar_url || ''),
-          bio: String(p.bio || ''),
-          interests: Array.isArray(p.interests) ? p.interests as string[] : [],
-        });
+    if (!getAuthToken()) return;
+    void fetchMyProfile()
+      .then((body) => {
+        applyMyProfileToSession(body);
         setUser(getCurrentUser());
-        window.dispatchEvent(new CustomEvent('eventapp:user-updated'));
       })
       .catch(() => {});
-  }, []); // once on mount
+  }, []);
 
   // Pending incoming friend requests, refreshed on every screen load and after friendship changes.
   const [requestCount, setRequestCount] = useState(0);
@@ -61,6 +53,20 @@ export default function BottomNav() {
     return () => {
       cancelled = true;
       window.removeEventListener(FRIENDS_CHANGED_EVENT, refresh);
+    };
+  }, [location.pathname]);
+
+  const [unreadChats, setUnreadChats] = useState(() => countUnreadChats(getCurrentUser()?.id));
+  useEffect(() => {
+    const refresh = () => setUnreadChats(countUnreadChats(getCurrentUser()?.id));
+    refresh();
+    window.addEventListener(CHAT_UNREAD_CHANGED_EVENT, refresh);
+    window.addEventListener(CHAT_MESSAGES_CHANGED_EVENT, refresh);
+    window.addEventListener('eventapp:user-updated', refresh);
+    return () => {
+      window.removeEventListener(CHAT_UNREAD_CHANGED_EVENT, refresh);
+      window.removeEventListener(CHAT_MESSAGES_CHANGED_EVENT, refresh);
+      window.removeEventListener('eventapp:user-updated', refresh);
     };
   }, [location.pathname]);
 
@@ -86,9 +92,7 @@ export default function BottomNav() {
     ? [{ path: '/admin', icon: Shield, label: 'Admin' }]
     : [];
 
-  const profileItem = [{ path: '/profile', icon: User, label: 'Profile' }];
-
-  const navItems = [...baseItems, ...adminItem, ...profileItem];
+  const navItems = [...baseItems, ...adminItem];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg">
@@ -103,32 +107,42 @@ export default function BottomNav() {
             <Link
               key={path}
               to={path}
+              onPointerEnter={path === '/map' ? prefetchMap : undefined}
+              onFocus={path === '/map' ? prefetchMap : undefined}
               className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors ${baseText}`}
-              aria-label={path === '/friends' && requestCount > 0 ? `Friends, ${requestCount} pending requests` : undefined}
+              aria-label={
+                path === '/friends' && requestCount > 0
+                  ? `Friends, ${requestCount} pending requests`
+                  : path === '/chat' && unreadChats > 0
+                    ? `Chat, ${unreadChats} new chats`
+                    : undefined
+              }
             >
               {isCreate ? (
                 <div className="flex items-center justify-center rounded-full gradient-primary h-14 w-14 shadow-glow -mt-6 border-4 border-background">
                   <Icon className="h-6 w-6 text-primary-foreground" />
                 </div>
-              ) : path === '/profile' && user ? (
-                <UserAvatar
-                  src={user.profilePhoto}
-                  srcSecondary={user.avatar}
-                  seed={user.id}
-                  name={user.name}
-                  email={user.email}
-                  size="sm"
-                  className={active ? 'ring-2 ring-primary' : ''}
-                />
               ) : path === '/friends' ? (
                 <span className="relative">
                   <Icon className="h-5 w-5" />
                   {requestCount > 0 && (
                     <span
                       data-testid="friends-badge"
-                      className="absolute -right-2.5 -top-2 min-w-[18px] rounded-full gradient-primary px-1 text-center text-[10px] font-bold leading-[18px] text-primary-foreground"
+                      className="absolute -right-2.5 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none text-accent-foreground shadow-accent animate-pulse"
                     >
                       {requestCount > 99 ? '99+' : requestCount}
+                    </span>
+                  )}
+                </span>
+              ) : path === '/chat' ? (
+                <span className="relative">
+                  <Icon className="h-5 w-5" />
+                  {unreadChats > 0 && (
+                    <span
+                      data-testid="chat-badge"
+                      className="absolute -right-2.5 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none text-accent-foreground shadow-accent animate-pulse"
+                    >
+                      {unreadChats > 99 ? '99+' : unreadChats}
                     </span>
                   )}
                 </span>

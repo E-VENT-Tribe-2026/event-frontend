@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import {
   Search,
   Users,
@@ -9,13 +9,13 @@ import {
   ShieldCheck,
   Shield,
   Ban,
-  Star,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UserAvatar } from '@/components/UserAvatar';
-import { fetchAdminUsers, type AdminUserSummary } from '@/lib/adminApi';
+import { fetchAdminUsers, isSuspendedAccount, type AdminUserSummary } from '@/lib/adminApi';
+import AdminInviteCard from '@/components/admin/AdminInviteCard';
 
-type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings' | 'pro';
+type FilterChip = 'all' | 'administrators' | 'suspended' | 'with_warnings';
 
 type UserRow = AdminUserSummary & {
   is_suspended?: boolean;
@@ -26,6 +26,7 @@ type UserRow = AdminUserSummary & {
 interface AdminUsersTabProps {
   onOpenUser: (userId: string) => void;
   onErrorToast: (msg: string) => void;
+  onSuccessToast?: (msg: string) => void;
 }
 
 const PAGE_SIZE = 50;
@@ -36,30 +37,81 @@ const FILTER_LABELS: Record<FilterChip, string> = {
   administrators: 'Administrators',
   suspended: 'Suspended',
   with_warnings: 'With warnings',
-  pro: 'Pro',
 };
 
 const FILTER_ICONS: Partial<Record<FilterChip, typeof Shield>> = {
   administrators: Shield,
   suspended: Ban,
   with_warnings: AlertTriangle,
-  pro: Star,
+};
+
+const FILTER_STYLES: Record<FilterChip, { idle: CSSProperties; active: CSSProperties }> = {
+  all: {
+    idle: {
+      background: 'hsl(210 80% 52% / .12)',
+      borderColor: 'hsl(210 80% 52% / .4)',
+      color: 'hsl(210 90% 82%)',
+    },
+    active: {
+      background: 'hsl(210 80% 52%)',
+      borderColor: 'hsl(210 80% 52%)',
+      color: 'white',
+      boxShadow: '0 0 14px hsl(210 80% 52% / .45)',
+    },
+  },
+  administrators: {
+    idle: {
+      background: 'hsl(271 76% 53% / .14)',
+      borderColor: 'hsl(271 76% 53% / .4)',
+      color: 'hsl(271 85% 82%)',
+    },
+    active: {
+      background: 'hsl(271 76% 53%)',
+      borderColor: 'hsl(271 76% 53%)',
+      color: 'white',
+      boxShadow: '0 0 14px hsl(271 76% 53% / .45)',
+    },
+  },
+  suspended: {
+    idle: {
+      background: 'hsl(0 84% 60% / .12)',
+      borderColor: 'hsl(0 84% 60% / .4)',
+      color: 'var(--adm-danger-text)',
+    },
+    active: {
+      background: 'hsl(0 84% 60%)',
+      borderColor: 'hsl(0 84% 60%)',
+      color: 'white',
+      boxShadow: '0 0 14px hsl(0 84% 60% / .45)',
+    },
+  },
+  with_warnings: {
+    idle: {
+      background: 'hsl(38 92% 52% / .14)',
+      borderColor: 'hsl(38 92% 52% / .45)',
+      color: 'var(--adm-warn-text)',
+    },
+    active: {
+      background: 'hsl(38 92% 52%)',
+      borderColor: 'hsl(38 92% 52%)',
+      color: 'hsl(30 20% 8%)',
+      boxShadow: '0 0 14px hsl(38 92% 52% / .45)',
+    },
+  },
 };
 
 const isAdminUser = (u: UserRow) => (u.role ?? '').toLowerCase().includes('admin');
-const isSuspendedUser = (u: UserRow) => Boolean(u.is_suspended);
+const isSuspendedUser = (u: UserRow) => isSuspendedAccount(u);
 const hasWarnings = (u: UserRow) => (u.warnings_count ?? 0) > 0;
-const isProUser = (u: UserRow) => Boolean(u.is_pro);
 
 const FILTER_PREDICATES: Record<FilterChip, (u: UserRow) => boolean> = {
   all: () => true,
   administrators: isAdminUser,
   suspended: isSuspendedUser,
   with_warnings: hasWarnings,
-  pro: isProUser,
 };
 
-export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTabProps) {
+export default function AdminUsersTab({ onOpenUser, onErrorToast, onSuccessToast }: AdminUsersTabProps) {
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [allFetchedUsers, setAllFetchedUsers] = useState<UserRow[]>([]);
   const [page, setPage] = useState<number>(1);
@@ -201,6 +253,8 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
         </div>
       </div>
 
+      <AdminInviteCard onErrorToast={onErrorToast} onSuccessToast={onSuccessToast} />
+
       {/* Filter chips */}
       <div className="flex flex-wrap items-center gap-2">
         {(Object.keys(FILTER_LABELS) as FilterChip[]).map((chip) => {
@@ -213,20 +267,7 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
               onClick={() => setActiveFilter(chip)}
               aria-pressed={isActive}
               className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all"
-              style={
-                isActive
-                  ? {
-                      background: 'hsl(271 76% 53%)',
-                      borderColor: 'hsl(271 76% 53%)',
-                      color: 'white',
-                      boxShadow: '0 0 14px hsl(271 76% 53% / .45)',
-                    }
-                  : {
-                      background: 'var(--adm-card)',
-                      borderColor: 'var(--adm-border)',
-                      color: 'var(--adm-fg)',
-                    }
-              }
+              style={isActive ? FILTER_STYLES[chip].active : FILTER_STYLES[chip].idle}
             >
               {Icon && <Icon className="h-3.5 w-3.5" />}
               <span>{FILTER_LABELS[chip]}</span>
@@ -364,20 +405,6 @@ export default function AdminUsersTab({ onOpenUser, onErrorToast }: AdminUsersTa
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
-                      {isProUser(u) && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
-                          style={{
-                            background: 'hsl(45 93% 50% / .15)',
-                            color: 'hsl(45 93% 60%)',
-                            borderColor: 'hsl(45 93% 50% / .35)',
-                          }}
-                        >
-                          <Star className="h-3 w-3" />
-                          Pro
-                        </span>
-                      )}
-
                       {warnings > 0 && (
                         <span
                           className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"

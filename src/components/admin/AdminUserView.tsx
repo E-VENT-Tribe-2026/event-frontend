@@ -21,7 +21,6 @@ import {
   Leaf,
   Heart,
   Users,
-  Sparkles,
 } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
@@ -64,7 +63,6 @@ interface PublicEvent {
   max_participants?: number;
   is_free?: boolean;
   price?: number;
-  is_featured?: boolean;
 }
 
 const CATS = [
@@ -166,24 +164,7 @@ function normalizeEvent(raw: any): PublicEvent {
     max_participants: raw.max_participants ?? raw.max_capacity ?? undefined,
     is_free: raw.is_free ?? cost === 0,
     price: raw.price ?? cost,
-    is_featured: raw.is_featured ?? false,
   };
-}
-
-/** mapApiEventToItem does not carry the organizer object, so add it from the raw row. */
-function toMapItem(row: any): EventItem {
-  const item = mapApiEventToItem(row) as any;
-  const o = row?.organizer;
-  if (!o) return item as EventItem;
-  const fullName = o.full_name || o.display_name || o.username || '';
-  return {
-    ...item,
-    organizer: fullName || item.organizer,
-    organizerId: o.id ?? item.organizerId,
-    organizerFullName: fullName || item.organizerFullName,
-    organizerUsername: o.username ?? item.organizerUsername,
-    organizerAvatar: o.avatar_url ?? item.organizerAvatar,
-  } as EventItem;
 }
 
 function OrganizerAvatar({ name, src }: { name: string; src?: string }) {
@@ -234,7 +215,7 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
         setEvents(rows.map(normalizeEvent));
 
         try {
-          setMapItems((parseEventsApiList(data) as any[]).map(toMapItem));
+          setMapItems(parseEventsApiList(data).map(mapApiEventToItem));
         } catch {
           setMapItems([]);
         }
@@ -280,8 +261,6 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
     }
     return true;
   });
-
-  const featuredEvents = filtered.filter((e) => e.is_featured);
 
   // Event detail view
   if (state.eventId) {
@@ -437,7 +416,7 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
     );
   }
 
-  const renderCard = (e: PublicEvent, featured = false) => {
+  const renderCard = (e: PublicEvent) => {
     const H = getCategoryHue(e.category);
     return (
       <div
@@ -472,9 +451,6 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
               <h4 className="text-sm font-bold truncate text-foreground">{e.title}</h4>
-              {featured && (
-                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-semibold">Featured</span>
-              )}
             </div>
             {e.organizer_name && (
               <p className="text-xs text-muted-foreground">{e.organizer_name}</p>
@@ -583,19 +559,6 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
               );
             })}
           </div>
-
-          {/* Featured Section */}
-          {featuredEvents.length > 0 && !state.searchQuery && !state.categoryFilter && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-400" />
-                <h3 className="text-sm font-bold tracking-wider uppercase text-foreground">Featured</h3>
-              </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {featuredEvents.map((e) => renderCard(e, true))}
-              </div>
-            </div>
-          )}
 
           {/* All Events Section */}
           <div className="space-y-3">

@@ -66,6 +66,8 @@ export interface EventItem {
   organizerFullName?: string;
   status?: string;
   isCancelled?: boolean;
+  /** How many of the signed-in user's friends attend this event (0 when unknown). */
+  friendsAttendingCount?: number;
   isPrivate: boolean;
   isDraft: boolean;
   requiresApproval: boolean;
@@ -181,13 +183,14 @@ export function setCurrentUserFromOAuth(data: {
   id: string; 
   email: string; 
   name?: string; 
-  username: string;
+  username?: string;
   avatar?: string;
   bio?: string;
   dob?: string;
   gender?: string;
   role?: string;
   interests?: string[];
+  isPremium?: boolean;
 }): void {
   const users = getUsers();
   const existing = users.find((u) => u.email === data.email || u.id === data.id);
@@ -201,7 +204,8 @@ export function setCurrentUserFromOAuth(data: {
       ...existing,
       id: data.id,
       name,
-      email: data.email,
+      email: data.email?.trim() || existing.email,
+      username: data.username?.trim() || existing.username,
       avatar,
       bio: data.bio ?? existing.bio, // Preserve bio if provided
       dob: data.dob ?? existing.dob,
@@ -209,6 +213,7 @@ export function setCurrentUserFromOAuth(data: {
       role: (data.role as UserRole) ?? existing.role,
       interests: data.interests ?? existing.interests,
       profilePhoto: data.avatar || existing.profilePhoto || avatar,
+      isPremium: data.isPremium ?? existing.isPremium,
     };
     saveUsers(users.map((u) => (u.id === existing.id || u.email === data.email ? updated : u)));
   } else {
@@ -216,7 +221,7 @@ export function setCurrentUserFromOAuth(data: {
       id: data.id,
       role: (data.role as UserRole) || 'participant',
       name,
-      username: data.username, 
+      username: data.username?.trim() || '', 
       email: data.email,
       password: '',
       avatar,
@@ -226,7 +231,7 @@ export function setCurrentUserFromOAuth(data: {
       interests: data.interests && data.interests.length > 0 ? data.interests : [],
       dob: data.dob || '',
       gender: data.gender || '',
-      isPremium: false,
+      isPremium: data.isPremium ?? false,
       friends: [],
       createdAt: now,
     };

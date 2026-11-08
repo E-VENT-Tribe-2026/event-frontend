@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { EventItem } from '@/lib/storage';
-import { eventStartMs, isEventUpcoming } from '@/lib/eventTime';
+import { eventLocalDay, eventStartMs, isEventUpcoming, localDateTimeParts } from '@/lib/eventTime';
 
 const baseEvent = (over: Partial<EventItem>): EventItem =>
   ({
@@ -29,6 +29,19 @@ const baseEvent = (over: Partial<EventItem>): EventItem =>
     ...over,
   }) as EventItem;
 
+describe('localDateTimeParts', () => {
+  it('uses the local calendar day instead of the UTC date', () => {
+    const value = new Date('2026-10-25T23:30:00.000Z');
+    const parts = localDateTimeParts(value);
+    expect(parts.date).toBe(
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`,
+    );
+    expect(parts.time).toBe(
+      `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`,
+    );
+  });
+});
+
 describe('eventStartMs', () => {
   it('parses date and time to epoch ms', () => {
     const ms = eventStartMs(baseEvent({ date: '2030-01-02', time: '12:30' }));
@@ -39,6 +52,15 @@ describe('eventStartMs', () => {
   it('defaults time to midnight when empty', () => {
     const ms = eventStartMs(baseEvent({ date: '2030-03-04', time: '' }));
     expect(Number.isFinite(ms)).toBe(true);
+  });
+
+  it('uses the local calendar day, not a Date string parse', () => {
+    const day = eventLocalDay(baseEvent({ date: '2030-10-15', time: '20:00' }));
+    expect(day).toBeTruthy();
+    expect(day?.getFullYear()).toBe(2030);
+    expect(day?.getMonth()).toBe(9);
+    expect(day?.getDate()).toBe(15);
+    expect(day?.getHours()).toBe(0);
   });
 });
 

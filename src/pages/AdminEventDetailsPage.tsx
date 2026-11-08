@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Calendar, MapPin, Tag, Users, Wallet, Loader2, AlertCircle } from 'lucide-react';
-import BottomNav from '@/components/BottomNav';
 import AdminPerson from '@/components/admin/AdminPerson';
 import { fetchAdminEventDetails, type AdminEventDetails } from '@/lib/adminApi';
 import { formatAdminDateTime, isEventCancelled } from '@/lib/adminFormat';
+import EventLocationMap from '@/components/EventLocationMap';
+import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import { readEventCoordinates } from '@/lib/mapApiEvent';
+import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 
 function formatCost(cost: number | null | undefined): string | null {
   if (cost === null || cost === undefined) return null;
@@ -60,9 +63,10 @@ export default function AdminEventDetailsPage() {
   const participants = event?.participants ?? [];
   const participantTotal = event?.participant_count ?? participants.length;
   const cost = formatCost(event?.cost);
+  const coords = readEventCoordinates(event as unknown as Record<string, unknown> | null);
 
   return (
-    <div className="min-h-screen bg-background pb-24 text-foreground">
+    <div className="min-h-screen bg-background pb-10 text-foreground">
       <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-lg">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4 sm:px-6">
           <button
@@ -134,6 +138,23 @@ export default function AdminEventDetailsPage() {
                     </div>
                   </div>
                 )}
+                {hasValidEventCoordinates(coords.lat, coords.lng) && (
+                  <div className="space-y-2 pt-1">
+                    <a
+                      href={openInGoogleMapsUrl({
+                        lat: coords.lat,
+                        lng: coords.lng,
+                        placeName: event.location_name ?? undefined,
+                      })}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-primary"
+                    >
+                      Open in Google Maps
+                    </a>
+                    <EventLocationMap latitude={coords.lat} longitude={coords.lng} className="h-52" />
+                  </div>
+                )}
                 {event.category && (
                   <div className="flex items-start gap-2.5">
                     <Tag className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -157,9 +178,7 @@ export default function AdminEventDetailsPage() {
                     <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                     <div>
                       <dt className="sr-only">Capacity</dt>
-                      <dd className="text-foreground">
-                        {participantTotal} of {event.max_capacity} spots taken
-                      </dd>
+                      <dd className="text-foreground">Capacity: {event.max_capacity}</dd>
                     </div>
                   </div>
                 )}
@@ -194,8 +213,6 @@ export default function AdminEventDetailsPage() {
           </>
         )}
       </main>
-
-      <BottomNav />
     </div>
   );
 }

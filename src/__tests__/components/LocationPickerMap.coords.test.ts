@@ -12,5 +12,6 @@ describe('hasValidEventCoordinates', () => {
   it('accepts finite non-zero coordinates', () => {
     expect(hasValidEventCoordinates(40.7128, -74.006)).toBe(true);
     expect(hasValidEventCoordinates(-0.001, 12.3)).toBe(true);
+    expect(hasValidEventCoordinates('53.107601', '8.848829')).toBe(true);
   });
 });

@@ -1,5 +1,7 @@
 import "@testing-library/jest-dom";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
+
+configure({ asyncUtilTimeout: 5_000 });
 import { afterEach, vi } from "vitest";
 import { clearAuthToken } from "@/lib/auth";
 import {
@@ -12,6 +14,8 @@ import {
 } from "@/lib/storage";
 
 import { clearCache } from "@/lib/queryCache";
+import { queryClient } from "@/lib/queryClient";
+import { COLOR_SCHEME_STORAGE_KEY } from "@/lib/colorScheme";
 
 afterEach(() => {
   cleanup();
@@ -27,7 +31,18 @@ afterEach(() => {
   } catch {
     /* ignore */
   }
+  try {
+    window.localStorage.removeItem(COLOR_SCHEME_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (typeof document !== "undefined") {
+    document.documentElement.removeAttribute("data-color-scheme");
+    document.documentElement.classList.remove("dark");
+    document.documentElement.style.colorScheme = "";
+  }
   clearCache();
+  queryClient.clear();
   vi.clearAllMocks();
 });
 
