@@ -4,14 +4,13 @@ import {
   setCurrentUserFromOAuth,
   updateUser, 
   getEvents, 
-  getJoinRequests, 
   leaveEvent, 
   upsertEvent, 
   type EventItem 
 } from '@/lib/storage';
 import { logout } from '@/lib/storage';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Check, X, CreditCard, Heart, Trash2, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Mail } from 'lucide-react';
+import { LogOut, Edit2, Check, X, Heart, Trash2, ChevronLeft, ChevronRight, Upload, Calendar, Clock, Ban, Users, UserPlus, UserCheck, UserMinus, Mail } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
@@ -19,7 +18,7 @@ import AppToast from '@/components/AppToast';
 import { getAuthToken, clearAuthToken, notifyAuthExpired } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { mapApiEventToItem, parseJoinedEventsApiList } from '@/lib/mapApiEvent';
+import { mapApiEventToItem, parseJoinedEventsApiList, parseMyEventsApiList } from '@/lib/mapApiEvent';
 import { UserAvatar } from '@/components/UserAvatar';
 import { isEventUpcoming, isEventCancelled, eventStartMs } from '@/lib/eventTime';
 import { ALL_INTERESTS } from '@/lib/interests';
@@ -202,14 +201,6 @@ export default function ProfilePage() {
       .sort((a, b) => eventStartMs(b.e) - eventStartMs(a.e));
   }, [unifiedAllEvents]);
 
-  const approvedRequests = useMemo(() => {
-    if (!user) return [];
-    return getJoinRequests().filter(r => r.userId === user.id && r.status === 'approved').map(r => {
-      const evt = events.find(e => e.id === r.eventId);
-      return evt && !evt.participants.includes(user.id) ? { request: r, event: evt } : null;
-    }).filter(Boolean);
-  }, [user, events]);
-
   // Fetch Friends and Incoming Requests
   useEffect(() => {
     const token = getAuthToken();
@@ -348,8 +339,7 @@ export default function ProfilePage() {
         const mappedJoined = parseJoinedEventsApiList(joinedBody).map(mapApiEventToItem);
         setRemoteJoinedEvents(mappedJoined);
 
-        const createdRows = Array.isArray(createdBody?.data) ? createdBody.data : Array.isArray(createdBody) ? createdBody : [];
-        const mappedCreated = createdRows.map(mapApiEventToItem).filter(Boolean);
+        const mappedCreated = parseMyEventsApiList(createdBody).map(mapApiEventToItem).filter(Boolean);
         setRemoteOrganizedEvents(mappedCreated);
         mappedCreated.forEach((evt: EventItem) => upsertEvent(evt));
 
@@ -938,20 +928,6 @@ export default function ProfilePage() {
             <button type="button" onClick={() => void handleSave()} disabled={saving} className="flex items-center gap-1.5 rounded-full gradient-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-glow disabled:opacity-50">
               <Check className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save'}
             </button>
-          </div>
-        )}
-
-        {/* Pending Payments */}
-        {approvedRequests.length > 0 && (
-          <div className="rounded-2xl glass-card p-4 space-y-3 glow-border">
-            <h3 className="text-sm font-semibold flex items-center gap-2"><CreditCard className="h-4 w-4 text-accent" /> Pending Payments</h3>
-            {approvedRequests.map((item: any) => (
-              <div key={item.request.id} className="flex items-center gap-3 rounded-xl bg-secondary/50 p-3">
-                <img src={item.event.image} className="h-10 w-10 rounded-lg object-cover" />
-                <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{item.event.title}</p><p className="text-[10px] text-accent">Approved — Pay to join</p></div>
-                <button onClick={() => navigate(`/payment/${item.event.id}`)} className="gradient-primary rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground shadow-glow">Pay €{item.event.budget}</button>
-              </div>
-            ))}
           </div>
         )}
 

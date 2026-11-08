@@ -1272,6 +1272,24 @@ function sameAdmin(person: AdminEventPerson | null | undefined, adminId: string)
     .some((value) => value === wanted);
 }
 
+export function reportAssignedToCaller(
+  report: { assigned_to?: AdminEventPerson | null },
+  adminId?: string,
+): boolean {
+  const id = (adminId ?? getCurrentUser()?.id ?? '').trim();
+  return sameAdmin(report.assigned_to, id);
+}
+
+export function reportActionAssignmentError(
+  report: { assigned_to?: AdminEventPerson | null },
+  adminId?: string,
+): string | null {
+  if (reportAssignedToCaller(report, adminId)) return null;
+  return report.assigned_to
+    ? 'This report is already assigned to someone else.'
+    : 'Assign this report to yourself before taking action.';
+}
+
 async function collectAllReportsForTab(tab: AdminReportTab, maxPages = 20): Promise<AdminReportSummary[]> {
   const first = await fetchAdminReportsList(1, 50, tab);
   const items = [...first.items];
@@ -1898,6 +1916,8 @@ export async function removeReportedContent(
   report: AdminReportDetail,
   reason?: string,
 ): Promise<AdminReportDetail> {
+  const assignmentError = reportActionAssignmentError(report);
+  if (assignmentError) throw new Error(assignmentError);
   const warning = (reason ?? '').trim() || warningReasonFromReport(report);
   const id = report.id.trim();
   let removed = false;

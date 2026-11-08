@@ -50,4 +50,16 @@ describe('MyCalendarSection', () => {
     fireEvent.click(within(dayModal).getByRole('button', { name: /night market/i }));
     expect(onOpenEvent).toHaveBeenCalledWith('e1');
   });
+
+  it('still opens the day’s events when the start time has already passed', () => {
+    render(
+      <MyCalendarSection
+        events={[event({ id: 'e-today', title: 'Morning Yoga', date: '2030-10-15', time: '08:00' })]}
+        onOpenEvent={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('my-calendar'));
+    fireEvent.click(screen.getByRole('gridcell', { name: '15' }));
+    expect(within(screen.getByTestId('my-calendar-day-events')).getByText('Morning Yoga')).toBeInTheDocument();
+  });
 });

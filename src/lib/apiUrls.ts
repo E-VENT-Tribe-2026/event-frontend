@@ -2,6 +2,7 @@ export const API_ENDPOINTS = {
   LOGIN: '/api/auth/login',
   SIGNUP: '/api/auth/register',
   SIGNUP_INVITE_VERIFY: '/api/auth/verify-invite',
+  AUTH_ACCOUNT: '/api/auth/account',
   ADMIN_INVITE_USER: (email: string) => `/api/admin/invite_user/${encodeURIComponent(email)}`,
   EVENTS: '/api/events',
   PROFILE_ME: '/api/profile/me',

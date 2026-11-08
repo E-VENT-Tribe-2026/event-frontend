@@ -1,4 +1,5 @@
 import { getApiUrl } from '@/lib/api';
+import { API_ENDPOINTS } from '@/lib/apiUrls';
 import { getOAuthRedirectBaseUrl } from '@/lib/oauthRedirect';
 import { extractCityFromLocation } from '@/lib/eventLocation';
 
@@ -194,22 +195,40 @@ export async function changeAccountPassword(
   }
 }
 
-const DELETE_PATHS = ['/api/profile/me', '/api/auth/me', '/api/account'];
-
-export async function deleteAccount(token: string): Promise<void> {
-  let lastError = 'Could not delete this account.';
-  for (const path of DELETE_PATHS) {
-    const res = await fetch(getApiUrl(path), {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    });
-    if (res.ok || res.status === 204) return;
-    const body = await res.json().catch(() => ({}));
-    const detail = (body as { detail?: unknown; message?: unknown }).detail ?? (body as { message?: unknown }).message;
-    if (typeof detail === 'string' && detail.trim()) lastError = detail;
-    if (res.status !== 404 && res.status !== 405) throw new Error(lastError);
+function messageFromApiBody(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') return fallback;
+  const row = body as Record<string, unknown>;
+  const detail = row.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail.trim();
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const nested = detail as Record<string, unknown>;
+    const fromNested = nested.message ?? nested.detail;
+    if (typeof fromNested === 'string' && fromNested.trim()) return fromNested.trim();
   }
-  throw new Error(lastError);
+  if (typeof row.message === 'string' && row.message.trim()) return row.message.trim();
+  return fallback;
+}
+
+/** DELETE /api/auth/account — regular users only; administrators receive 403. */
+export async function deleteAccount(token: string): Promise<void> {
+  const res = await fetch(getApiUrl(API_ENDPOINTS.AUTH_ACCOUNT), {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (res.ok || res.status === 204) return;
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 403) {
+    throw new Error(messageFromApiBody(body, 'Administrators cannot delete their account this way.'));
+  }
+  if (res.status === 503) {
+    throw new Error(
+      messageFromApiBody(
+        body,
+        'Your upcoming events were updated, but the account could not be fully deleted. Try again.',
+      ),
+    );
+  }
+  throw new Error(messageFromApiBody(body, 'Could not delete this account.'));
 }
 
 export function mapStartView(userId: string | undefined): { center: [number, number]; zoom: number } {

@@ -31,6 +31,87 @@ function parseCoord(value: unknown): number {
   return 0;
 }
 
+function firstCoord(...values: unknown[]): number {
+  for (const value of values) {
+    const n = parseCoord(value);
+    if (n !== 0) return n;
+    if (typeof value === 'number' && value === 0) return 0;
+  }
+  return 0;
+}
+
+function namedCoords(row: Record<string, unknown>): { lat: number; lng: number } {
+  return {
+    lat: firstCoord(row.latitude, row.lat, row.y),
+    lng: firstCoord(row.longitude, row.lng, row.lon, row.x),
+  };
+}
+
+/** GeoJSON Position is [longitude, latitude]. */
+function geoJsonPosition(value: unknown): { lat: number; lng: number } | null {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const lng = parseCoord(value[0]);
+  const lat = parseCoord(value[1]);
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+function coordsFromUnknown(value: unknown): { lat: number; lng: number } | null {
+  const fromArray = geoJsonPosition(value);
+  if (fromArray) return fromArray;
+  if (typeof value === 'string' && value.trim()) {
+    const wkt = value.match(/POINT\s*\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)/i);
+    if (wkt) {
+      const lng = parseCoord(wkt[1]);
+      const lat = parseCoord(wkt[2]);
+      if (lat !== 0 || lng !== 0) return { lat, lng };
+    }
+  }
+  const rec = nestedRecord(value);
+  if (!rec) return null;
+  const named = namedCoords(rec);
+  if (named.lat !== 0 || named.lng !== 0) return named;
+  return (
+    geoJsonPosition(rec.coordinates) ??
+    coordsFromUnknown(rec.geometry) ??
+    coordsFromUnknown(rec.location) ??
+    coordsFromUnknown(rec.geo) ??
+    coordsFromUnknown(rec.point)
+  );
+}
+
+function coordsFromRow(row: Record<string, unknown>): { lat: number; lng: number } {
+  const named = namedCoords(row);
+  if (named.lat !== 0 || named.lng !== 0) return named;
+  return (
+    coordsFromUnknown(row.location) ??
+    coordsFromUnknown(row.geo) ??
+    coordsFromUnknown(row.point) ??
+    coordsFromUnknown(row.geometry) ??
+    coordsFromUnknown(row.coordinates) ?? { lat: 0, lng: 0 }
+  );
+}
+
+/** latitude/longitude, lat/lng, nested location, or GeoJSON [lng, lat]. */
+export function readEventCoordinates(
+  row: Record<string, unknown> | null | undefined,
+  depth = 0,
+): {
+  lat: number;
+  lng: number;
+} {
+  if (!row || depth > 3) return { lat: 0, lng: 0 };
+  const fromRow = coordsFromRow(row);
+  if (fromRow.lat !== 0 || fromRow.lng !== 0) return fromRow;
+  for (const key of ['data', 'event', 'item'] as const) {
+    const nested = nestedRecord(row[key]);
+    if (!nested) continue;
+    const fromNested = readEventCoordinates(nested, depth + 1);
+    if (fromNested.lat !== 0 || fromNested.lng !== 0) return fromNested;
+  }
+  return fromRow;
+}
+
 /** The backend sends friends_attending_count with each event; anything else counts as 0. */
 export function friendsAttendingCountFrom(value: unknown): number {
   const n = Number(value);
@@ -84,9 +165,12 @@ export function mapApiEventToItem(api: Record<string, unknown>): EventItem {
     category: (api.category as string) ?? 'Other',
     date: dateStr,
     time: timeStr,
-    location: (api.location_name as string) ?? '',
-    lat: parseCoord(api.latitude),
-    lng: parseCoord(api.longitude),
+    location:
+      (typeof api.location_name === 'string' && api.location_name) ||
+      (typeof api.location === 'string' ? api.location : '') ||
+      '',
+    lat: readEventCoordinates(api).lat,
+    lng: readEventCoordinates(api).lng,
     budget: Number.isFinite(cost) ? cost : 0,
     participantsLimit: Number.isFinite(capacity) ? capacity : 0,
     participants: [],
@@ -137,6 +221,49 @@ export function parseEventsApiList(body: unknown): Record<string, unknown>[] {
     if (Array.isArray(b[key])) return b[key] as Record<string, unknown>[];
   }
   return [];
+}
+
+const MY_EVENT_BUCKETS = [
+  'data',
+  'events',
+  'items',
+  'results',
+  'upcoming',
+  'past',
+  'cancelled',
+  'organized',
+  'joined',
+  'created',
+] as const;
+
+/** GET /api/events/my-events: a flat list, or upcoming/past/organized buckets. */
+export function parseMyEventsApiList(body: unknown): Record<string, unknown>[] {
+  if (Array.isArray(body)) {
+    const rows: Record<string, unknown>[] = [];
+    for (const row of body) {
+      const rec = asRecord(row);
+      if (rec && looksLikeEvent(rec)) rows.push(rec);
+    }
+    return rows;
+  }
+  const rec = asRecord(body);
+  if (!rec) return [];
+  const direct = parseEventsApiList(body).filter((row) => looksLikeEvent(row));
+  if (direct.length) return direct;
+  const out: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const key of MY_EVENT_BUCKETS) {
+    if (!(key in rec)) continue;
+    for (const row of parseMyEventsApiList(rec[key])) {
+      const id = String(row.id || '').trim();
+      if (id) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      out.push(row);
+    }
+  }
+  return out;
 }
 
 /** Normalize GET /api/participants/my/events into event records. */

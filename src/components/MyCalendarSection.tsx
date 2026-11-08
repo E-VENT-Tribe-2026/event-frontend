@@ -9,12 +9,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { EventItem } from '@/lib/storage';
-import { eventStartMs } from '@/lib/eventTime';
+import { eventLocalDay } from '@/lib/eventTime';
 
 function startDate(event: EventItem): Date | null {
-  const ms = eventStartMs(event);
-  if (Number.isNaN(ms)) return null;
-  return new Date(ms);
+  return eventLocalDay(event);
 }
 
 function sameDay(a: Date, b: Date): boolean {
@@ -95,7 +93,9 @@ export default function MyCalendarSection({ events, onOpenEvent }: MyCalendarSec
             onSelect={(next) => {
               if (next) setDay(next);
             }}
-            modifiers={{ attending: busyDays }}
+            modifiers={{
+              attending: (date) => busyDays.some((busy) => sameDay(busy, date)),
+            }}
             modifiersClassNames={{
               attending:
                 'bg-primary/25 text-primary font-semibold hover:bg-primary/35 hover:text-primary relative after:absolute after:bottom-1 after:left-1/2 after:h-1.5 after:w-1.5 after:-translate-x-1/2 after:rounded-full after:bg-primary',

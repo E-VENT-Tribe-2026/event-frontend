@@ -5,8 +5,6 @@ import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
 import * as authModule from '@/lib/auth';
 import * as assistantApiModule from '@/lib/assistantApi';
 import * as storageModule from '@/lib/storage';
-import { BASIC_ASSISTANT_ASKS_PER_DAY } from '@/lib/assistantQuota';
-
 describe('AIAssistantWidget — Ticket #196', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -102,7 +100,7 @@ describe('AIAssistantWidget — Ticket #196', () => {
     const drawer = await screen.findByTestId('ai-assistant-drawer');
     expect(drawer).toBeInTheDocument();
     expect(screen.getByText('E-VENT Assistant')).toBeInTheDocument();
-    expect(screen.getByText(`${BASIC_ASSISTANT_ASKS_PER_DAY} of ${BASIC_ASSISTANT_ASKS_PER_DAY} asks left today`)).toBeInTheDocument();
+    expect(screen.getByText('Ready to help')).toBeInTheDocument();
 
     // Close button
     const closeBtn = screen.getByLabelText('Close');
@@ -329,13 +327,9 @@ describe('AIAssistantWidget — Ticket #196', () => {
     );
   });
 
-  it('blocks a 6th Basic ask and shows remaining count', async () => {
-    window.localStorage.setItem(
-      'event_assistant_quota:anon',
-      JSON.stringify({ date: new Date().toISOString().slice(0, 10), used: 4 }),
-    );
+  it('does not cap asks at five per day', async () => {
     const sendChatSpy = vi.spyOn(assistantApiModule, 'sendAssistantChat').mockResolvedValue({
-      reply: 'This is ask number five.',
+      reply: 'Another answer.',
     });
 
     render(
@@ -346,21 +340,13 @@ describe('AIAssistantWidget — Ticket #196', () => {
 
     fireEvent.click(screen.getByTestId('ai-assistant-fab'));
     await screen.findByTestId('ai-assistant-drawer');
-    expect(screen.getByText('1 of 5 asks left today')).toBeInTheDocument();
+    expect(screen.getByText('Ready to help')).toBeInTheDocument();
+    expect(screen.queryByText(/asks left today/i)).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: 'Fifth ask' } });
-    fireEvent.click(screen.getByTestId('ai-chat-send'));
-
-    await waitFor(() => {
-      expect(screen.getByText('This is ask number five.')).toBeInTheDocument();
-    });
-    expect(sendChatSpy).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('0 of 5 asks left today')).toBeInTheDocument();
-
-    fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: 'Sixth ask' } });
-    fireEvent.click(screen.getByTestId('ai-chat-send'));
-
-    expect(sendChatSpy).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('ai-chat-send')).toBeDisabled();
+    for (let i = 0; i < 6; i++) {
+      fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: `Ask ${i + 1}` } });
+      fireEvent.click(screen.getByTestId('ai-chat-send'));
+      await waitFor(() => expect(sendChatSpy).toHaveBeenCalledTimes(i + 1));
+    }
   });
 });

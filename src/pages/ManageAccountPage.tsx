@@ -34,6 +34,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { getCurrentUser, logout, updateUser } from '@/lib/storage';
+import { isAdministratorRole } from '@/lib/adminApi';
 import { clearAuthToken, getAuthToken } from '@/lib/auth';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
@@ -281,10 +282,15 @@ export default function ManageAccountPage() {
       leaveSession();
     } catch (err) {
       setDeleteBusy(false);
-      setToast({ show: true, message: err instanceof Error ? err.message : 'Could not delete this account.', type: 'error' });
+      setToast({
+        show: true,
+        message: err instanceof Error ? err.message : 'Could not delete this account.',
+        type: 'error',
+      });
     }
   };
 
+  const isAdmin = isAdministratorRole(user.role);
   const deletePhrase = details.username || details.email || 'DELETE';
   const canDelete = deleteTyped.trim().toLowerCase() === deletePhrase.trim().toLowerCase();
   const inputCls = 'w-full rounded-xl bg-secondary px-4 py-3 pr-10 text-sm text-foreground outline-none border border-border/50';
@@ -546,14 +552,19 @@ export default function ManageAccountPage() {
             <LogOut className="h-4 w-4" />
             Log out of this device
           </button>
-          <button
-            type="button"
-            onClick={() => { setDeleteTyped(''); setDeleteOpen(true); }}
-            className="flex w-full items-center gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm font-medium text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete account
-          </button>
+          {!isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteTyped('');
+                setDeleteOpen(true);
+              }}
+              className="flex w-full items-center gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm font-medium text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete account
+            </button>
+          )}
         </section>
       </motion.main>
 
@@ -575,7 +586,8 @@ export default function ManageAccountPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this account?</AlertDialogTitle>
             <AlertDialogDescription>
-              This cannot be undone. Type <span className="font-semibold text-foreground">{deletePhrase}</span> to confirm.
+              Upcoming events you organize are cancelled and you are removed from upcoming events you joined.
+              Past events stay. Type <span className="font-semibold text-foreground">{deletePhrase}</span> to confirm.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <input

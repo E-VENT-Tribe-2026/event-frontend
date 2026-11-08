@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
 import AdminGuard from '@/components/AdminGuard';
 import RequireAuth from '@/components/RequireAuth';
 import RequireUsername from '@/components/RequireUsername';
@@ -76,7 +76,6 @@ export default function AppRoutes() {
         <Route path="/map" element={<SignedIn><MapPage /></SignedIn>} />
         <Route path="/profile" element={<SignedIn><ProfilePage /></SignedIn>} />
         <Route path="/account" element={<SignedIn><ManageAccountPage /></SignedIn>} />
-        <Route path="/premium" element={<Navigate to="/account" replace />} />
         <Route path="/user/:userId" element={<SignedIn><UserProfilePage /></SignedIn>} />
         <Route path="/chat" element={<SignedIn><ChatPage /></SignedIn>} />
         <Route path="/friends" element={<SignedIn><FriendsPage /></SignedIn>} />

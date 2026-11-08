@@ -43,6 +43,10 @@ import {
   type AdminEventParticipant,
 } from '@/lib/adminApi';
 import AdminEventChat from '@/components/admin/AdminEventChat';
+import EventLocationMap from '@/components/EventLocationMap';
+import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import { readEventCoordinates } from '@/lib/mapApiEvent';
+import { openInGoogleMapsUrl } from '@/lib/mapsLinks';
 
 interface AdminEventDetailProps {
   eventId: string;
@@ -295,47 +299,6 @@ function ParticipantRow({
   );
 }
 
-function MapPlaceholder() {
-  return (
-    <div
-      className="relative h-40 overflow-hidden rounded-xl border"
-      style={{
-        borderColor: 'var(--adm-border)',
-        background: 'hsl(213 40% 17%)',
-        backgroundImage:
-          'linear-gradient(hsl(213 30% 26% / .5) 1px, transparent 1px), linear-gradient(90deg, hsl(213 30% 26% / .5) 1px, transparent 1px)',
-        backgroundSize: '28px 28px',
-      }}
-    >
-      <svg
-        className="absolute inset-0 h-full w-full"
-        viewBox="0 0 1000 160"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <polygon points="0,170 0,158 1000,40 1000,58 90,170" fill="hsl(213 25% 32% / .85)" />
-        <polygon points="375,0 405,0 380,160 350,160" fill="hsl(213 25% 32% / .85)" />
-      </svg>
-      <MapPin
-        className="absolute h-9 w-9"
-        style={{
-          left: '52%',
-          top: '28%',
-          transform: 'translateX(-50%)',
-          color: 'hsl(330 85% 55%)',
-        }}
-        strokeWidth={2.5}
-      />
-      <span
-        className="absolute bottom-2 right-3 text-[10px]"
-        style={{ color: 'var(--adm-muted-fg)' }}
-      >
-        Map (placeholder)
-      </span>
-    </div>
-  );
-}
-
 export default function AdminEventDetailPage({
   eventId,
   onBack,
@@ -429,7 +392,11 @@ export default function AdminEventDetailPage({
   const organizerAvatar = org?.avatar_url ?? organizerEntry?.avatar_url;
 
   const startIso = extra.start_datetime || event?.date || '';
-  const locationName = extra.location_name || event?.location || '';
+  const locationName = extra.location_name || (typeof event?.location === 'string' ? event.location : '') || '';
+  const coords = readEventCoordinates({
+    ...(event as unknown as Record<string, unknown>),
+    ...(extra as unknown as Record<string, unknown>),
+  });
   const capacity = extra.max_capacity ?? event?.participants_limit;
   const participantCount = extra.participant_count ?? participants.length;
   const priceLabel = event ? formatPrice(extra) : null;
@@ -693,18 +660,33 @@ export default function AdminEventDetailPage({
             </div>
 
             {/* ===== Location ===== */}
-            {locationName && (
+            {(locationName || hasValidEventCoordinates(coords.lat, coords.lng)) && (
               <div className="rounded-[16px] border p-5 space-y-3" style={CARD_STYLE}>
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4" style={{ color: 'var(--adm-primary-text)' }} />
-                  <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
-                    Location
-                  </h3>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4" style={{ color: 'var(--adm-primary-text)' }} />
+                    <h3 className="text-sm font-bold" style={{ color: 'var(--adm-fg)' }}>
+                      Location
+                    </h3>
+                  </div>
+                  {hasValidEventCoordinates(coords.lat, coords.lng) && (
+                    <a
+                      href={openInGoogleMapsUrl({ lat: coords.lat, lng: coords.lng, placeName: locationName })}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-semibold"
+                      style={{ color: 'var(--adm-primary-text)' }}
+                    >
+                      Open in Google Maps
+                    </a>
+                  )}
                 </div>
-                <MapPlaceholder />
-                <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
-                  {locationName}
-                </p>
+                <EventLocationMap latitude={coords.lat} longitude={coords.lng} className="h-52" />
+                {locationName ? (
+                  <p className="text-xs" style={{ color: 'var(--adm-muted-fg)' }}>
+                    {locationName}
+                  </p>
+                ) : null}
               </div>
             )}
           </>

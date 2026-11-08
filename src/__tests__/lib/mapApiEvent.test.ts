@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapApiEventToItem, parseJoinedEventsApiList } from '@/lib/mapApiEvent';
+import { mapApiEventToItem, parseJoinedEventsApiList, parseMyEventsApiList, readEventCoordinates } from '@/lib/mapApiEvent';
 import { isEventUpcoming, localDateTimeParts } from '@/lib/eventTime';
 
 const harryPotterNight = {
@@ -65,6 +65,43 @@ describe('mapApiEventToItem', () => {
     });
     expect(item.organizerFullName).toBe('Alex');
     expect(item.organizerUsername).toBe('alex');
+  });
+});
+
+describe('readEventCoordinates', () => {
+  it('reads string latitude/longitude', () => {
+    expect(readEventCoordinates({ latitude: '53.107601', longitude: '8.848829' })).toEqual({
+      lat: 53.107601,
+      lng: 8.848829,
+    });
+  });
+
+  it('reads GeoJSON Point location without named lat/lng', () => {
+    expect(
+      readEventCoordinates({
+        location: { type: 'Point', coordinates: [8.848829, 53.107601] },
+      }),
+    ).toEqual({ lat: 53.107601, lng: 8.848829 });
+  });
+
+  it('reads coordinates nested under data.event', () => {
+    expect(
+      readEventCoordinates({
+        data: { event: { lat: 48.8566, lng: 2.3522 } },
+      }),
+    ).toEqual({ lat: 48.8566, lng: 2.3522 });
+  });
+});
+
+describe('parseMyEventsApiList', () => {
+  it('reads a flat data list and upcoming/organized buckets', () => {
+    expect(parseMyEventsApiList({ data: [harryPotterNight] }).map((e) => e.id)).toEqual([harryPotterNight.id]);
+    expect(
+      parseMyEventsApiList({
+        upcoming: [harryPotterNight],
+        past: [{ ...harryPotterNight, id: 'past-1', title: 'Old Night' }],
+      }).map((e) => e.id),
+    ).toEqual([harryPotterNight.id, 'past-1']);
   });
 });
 

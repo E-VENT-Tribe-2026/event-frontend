@@ -21,7 +21,6 @@ import {
   Leaf,
   Heart,
   Users,
-  Sparkles,
 } from 'lucide-react';
 import { getApiUrl } from '@/lib/api';
 import { getAuthToken } from '@/lib/auth';
@@ -64,7 +63,6 @@ interface PublicEvent {
   max_participants?: number;
   is_free?: boolean;
   price?: number;
-  is_featured?: boolean;
 }
 
 const CATS = [
@@ -166,7 +164,6 @@ function normalizeEvent(raw: any): PublicEvent {
     max_participants: raw.max_participants ?? raw.max_capacity ?? undefined,
     is_free: raw.is_free ?? cost === 0,
     price: raw.price ?? cost,
-    is_featured: raw.is_featured ?? false,
   };
 }
 
@@ -264,8 +261,6 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
     }
     return true;
   });
-
-  const featuredEvents = filtered.filter((e) => e.is_featured);
 
   // Event detail view
   if (state.eventId) {
@@ -421,7 +416,7 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
     );
   }
 
-  const renderCard = (e: PublicEvent, featured = false) => {
+  const renderCard = (e: PublicEvent) => {
     const H = getCategoryHue(e.category);
     return (
       <div
@@ -456,9 +451,6 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
               <h4 className="text-sm font-bold truncate text-foreground">{e.title}</h4>
-              {featured && (
-                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-semibold">Featured</span>
-              )}
             </div>
             {e.organizer_name && (
               <p className="text-xs text-muted-foreground">{e.organizer_name}</p>
@@ -567,19 +559,6 @@ export default function AdminUserView({ state, onStateChange, onBack, onOpenEven
               );
             })}
           </div>
-
-          {/* Featured Section */}
-          {featuredEvents.length > 0 && !state.searchQuery && !state.categoryFilter && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-400" />
-                <h3 className="text-sm font-bold tracking-wider uppercase text-foreground">Featured</h3>
-              </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {featuredEvents.map((e) => renderCard(e, true))}
-              </div>
-            </div>
-          )}
 
           {/* All Events Section */}
           <div className="space-y-3">

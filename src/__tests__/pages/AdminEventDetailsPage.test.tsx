@@ -57,6 +57,11 @@ describe('AdminEventDetailsPage (ticket #249)', () => {
     renderPage();
     expect(await screen.findByText('Annual tech conference.')).toBeInTheDocument();
     expect(screen.getByText('Central Hall')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Map showing event location at 48.8566, 2.3522/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open in Google Maps/ })).toHaveAttribute(
+      'href',
+      'https://www.google.com/maps/search/?api=1&query=48.8566%2C2.3522',
+    );
     expect(screen.getByText('Technology')).toBeInTheDocument();
     expect(screen.getByText('€15')).toBeInTheDocument();
     expect(screen.getByText('Capacity: 100')).toBeInTheDocument();

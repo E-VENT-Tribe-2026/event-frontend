@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { EventItem } from '@/lib/storage';
-import { eventStartMs, isEventUpcoming, localDateTimeParts } from '@/lib/eventTime';
+import { eventLocalDay, eventStartMs, isEventUpcoming, localDateTimeParts } from '@/lib/eventTime';
 
 const baseEvent = (over: Partial<EventItem>): EventItem =>
   ({
@@ -52,6 +52,15 @@ describe('eventStartMs', () => {
   it('defaults time to midnight when empty', () => {
     const ms = eventStartMs(baseEvent({ date: '2030-03-04', time: '' }));
     expect(Number.isFinite(ms)).toBe(true);
+  });
+
+  it('uses the local calendar day, not a Date string parse', () => {
+    const day = eventLocalDay(baseEvent({ date: '2030-10-15', time: '20:00' }));
+    expect(day).toBeTruthy();
+    expect(day?.getFullYear()).toBe(2030);
+    expect(day?.getMonth()).toBe(9);
+    expect(day?.getDate()).toBe(15);
+    expect(day?.getHours()).toBe(0);
   });
 });
 

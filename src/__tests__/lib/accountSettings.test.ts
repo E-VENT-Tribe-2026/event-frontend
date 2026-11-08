@@ -76,32 +76,37 @@ describe('deleteAccount', () => {
     vi.unstubAllGlobals();
   });
 
-  it('succeeds on the first supported DELETE', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).includes('/api/profile/me') && init?.method === 'DELETE') {
-          return new Response(null, { status: 204 });
-        }
-        return new Response('{}', { status: 404 });
+  it('DELETEs /api/auth/account with the session token and no body', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(deleteAccount('tok')).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/auth/account'),
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({ Authorization: 'Bearer tok' }),
       }),
     );
-    await expect(deleteAccount('tok')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty('body');
   });
 
-  it('skips 404/405 and uses a later path', async () => {
+  it('explains a 403 for administrators', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes('/api/profile/me')) return new Response('{}', { status: 404 });
-        if (url.includes('/api/auth/me')) return new Response('{}', { status: 405 });
-        if (url.includes('/api/account') && init?.method === 'DELETE') {
-          return new Response(JSON.stringify({ ok: true }), { status: 200 });
-        }
-        return new Response('{}', { status: 500 });
-      }),
+      vi.fn(async () => new Response(JSON.stringify({ detail: 'Forbidden' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      })),
     );
-    await expect(deleteAccount('tok')).resolves.toBeUndefined();
+    await expect(deleteAccount('tok')).rejects.toThrow('Forbidden');
+  });
+
+  it('keeps a 503 retryable after event updates succeed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } })),
+    );
+    await expect(deleteAccount('tok')).rejects.toThrow(/Try again/);
   });
 });
+

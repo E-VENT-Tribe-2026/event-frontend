@@ -31,6 +31,7 @@ import {
   dismissReport,
   actOnReport,
   removeReportedContent,
+  reportActionAssignmentError,
   formatReportTime,
   personDisplayName,
   reportedItemLabel,
@@ -168,10 +169,19 @@ export default function AdminReportDetail({
   }, [reportId]);
 
   const needsReason = activeAction === 'warn' || activeAction === 'suspend' || activeAction === 'remove';
+  const callerAdminId = (currentAdminId || getCurrentUser()?.id || '').trim();
 
   const handleConfirm = async () => {
     if (!report || acting || !activeAction) return;
     if (needsReason && !reason.trim()) return;
+    if (activeAction === 'remove') {
+      const assignmentError = reportActionAssignmentError(report, callerAdminId);
+      if (assignmentError) {
+        onErrorToast(assignmentError);
+        setActiveAction(null);
+        return;
+      }
+    }
     setActing(true);
     try {
       const updated =
@@ -215,8 +225,6 @@ export default function AdminReportDetail({
     );
     setActiveAction(kind);
   };
-
-  const callerAdminId = (currentAdminId || getCurrentUser()?.id || '').trim();
 
   const handleAssign = async (admin: { id: string; full_name?: string; username?: string | null }) => {
     if (!report || assigning) return;

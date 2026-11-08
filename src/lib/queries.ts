@@ -10,7 +10,7 @@ import { keepPreviousData, useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient, SESSION_STALE_TIME } from './queryClient';
 import { getApiUrl } from './api';
 import { getAuthToken, notifyAuthExpired } from './auth';
-import { mapApiEventToItem, parseEventsApiList, parseJoinedEventsApiList } from './mapApiEvent';
+import { mapApiEventToItem, parseEventsApiList, parseJoinedEventsApiList, parseMyEventsApiList } from './mapApiEvent';
 import { fetchNotifications, notifyNotificationsChanged, type ApiNotification } from './notificationsApi';
 import { invalidatePrefix } from './queryCache';
 import { notifyEventsChanged } from './realtimeEvents';
@@ -192,10 +192,8 @@ export function useMyEvents(userId: string | undefined) {
   return useQuery({
     queryKey: QK.myEvents(userId ?? ''),
     queryFn: async () => {
-      const data = await apiFetch<{ data?: unknown[] }>('/api/events/my-events');
-      return (Array.isArray(data.data) ? data.data : []).map(
-        (row) => mapApiEventToItem(row as Record<string, unknown>)
-      ) as EventItem[];
+      const data = await apiFetch<unknown>('/api/events/my-events');
+      return parseMyEventsApiList(data).map(mapApiEventToItem) as EventItem[];
     },
     enabled: Boolean(userId && getAuthToken()),
     staleTime: SESSION_STALE_TIME,
@@ -246,10 +244,8 @@ export function prefetchSignedInQueries(userId?: string) {
       queryClient.prefetchQuery({
         queryKey: QK.myEvents(userId),
         queryFn: async () => {
-          const data = await apiFetch<{ data?: unknown[] }>('/api/events/my-events');
-          return (Array.isArray(data.data) ? data.data : []).map((row) =>
-            mapApiEventToItem(row as Record<string, unknown>),
-          );
+          const data = await apiFetch<unknown>('/api/events/my-events');
+          return parseMyEventsApiList(data).map(mapApiEventToItem);
         },
       }),
       queryClient.prefetchQuery({
