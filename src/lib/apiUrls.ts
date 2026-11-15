@@ -33,6 +33,8 @@ export const API_ENDPOINTS = {
   ADMIN_REPORT_ASSIGN: (reportId: string) => `/api/admin/reports/${encodeURIComponent(reportId)}/assign`,
   MFA_STATUS: '/api/auth/mfa/status',
   ASSISTANT_CHAT: '/api/assistant/chat',
+  ASSISTANT_MESSAGES: '/api/assistant/messages',
+  ASSISTANT_CONVERSATIONS: '/api/assistant/conversations',
   ASSISTANT_TOOL_SEARCH: '/api/assistant/tools/search-events',
   ASSISTANT_TOOL_EVENT_DETAILS: '/api/assistant/tools/event-details',
   ASSISTANT_TOOL_DRAFT_EVENT: '/api/assistant/tools/draft-event',

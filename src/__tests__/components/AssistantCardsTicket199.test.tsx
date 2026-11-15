@@ -14,6 +14,10 @@ describe('AI Frontend — Ticket #199: Slick AI Agent Chat UI Components', () =>
     window.sessionStorage.clear();
     window.localStorage.clear();
     vi.spyOn(authModule, 'getAuthToken').mockReturnValue('mock-user-token');
+    vi.spyOn(assistantApiModule, 'fetchAssistantHistory').mockResolvedValue({
+      conversation_id: null,
+      messages: [],
+    });
     Element.prototype.scrollIntoView = vi.fn();
   });
 

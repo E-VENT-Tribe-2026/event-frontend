@@ -11,6 +11,10 @@ describe('AIAssistantWidget — Ticket #196', () => {
     window.sessionStorage.clear();
     window.localStorage.clear();
     vi.spyOn(authModule, 'getAuthToken').mockReturnValue('mock-user-token');
+    vi.spyOn(assistantApiModule, 'fetchAssistantHistory').mockResolvedValue({
+      conversation_id: null,
+      messages: [],
+    });
     // Mock scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -348,5 +352,103 @@ describe('AIAssistantWidget — Ticket #196', () => {
       fireEvent.click(screen.getByTestId('ai-chat-send'));
       await waitFor(() => expect(sendChatSpy).toHaveBeenCalledTimes(i + 1));
     }
+  });
+
+  it('shows a skeleton, then restores the saved conversation', async () => {
+    let resolveHistory: (value: assistantApiModule.AssistantHistoryResponse) => void = () => {};
+    vi.spyOn(assistantApiModule, 'fetchAssistantHistory').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve;
+        })
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByTestId('ai-assistant-fab'));
+
+    expect(await screen.findByTestId('ai-history-skeleton')).toBeInTheDocument();
+    resolveHistory({
+      conversation_id: 'conversation-1',
+      messages: [
+        { id: 'm1', role: 'user', content: 'Saved question', created_at: '2026-11-15T10:00:00Z' },
+        {
+          id: 'm2',
+          role: 'assistant',
+          content: 'Here is the draft.',
+          created_at: '2026-11-15T10:01:00Z',
+          metadata: { type: 'draft_event_preview', draft: { title: 'Jazz Night' } },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Saved question')).toBeInTheDocument();
+    expect(screen.getByText('Here is the draft.')).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-draft-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('ai-history-skeleton')).not.toBeInTheDocument();
+    expect(screen.queryByText('Welcome to E-VENT AI')).not.toBeInTheDocument();
+  });
+
+  it('shows starter prompts when the user has no saved conversation', async () => {
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByTestId('ai-assistant-fab'));
+
+    expect(await screen.findByText('Welcome to E-VENT AI')).toBeInTheDocument();
+    expect(screen.getByText('🔍 Search upcoming music events')).toBeInTheDocument();
+    expect(screen.queryByTestId('ai-new-chat')).not.toBeInTheDocument();
+  });
+
+  it('starts a fresh session and clears the local thread', async () => {
+    vi.spyOn(assistantApiModule, 'fetchAssistantHistory').mockResolvedValue({
+      conversation_id: 'conversation-1',
+      messages: [{ id: 'm1', role: 'user', content: 'Saved question' }],
+    });
+    const startChat = vi.spyOn(assistantApiModule, 'startAssistantConversation').mockResolvedValue({
+      conversation_id: 'conversation-2',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByTestId('ai-assistant-fab'));
+    expect(await screen.findByText('Saved question')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('ai-new-chat'));
+
+    expect(await screen.findByText('Welcome to E-VENT AI')).toBeInTheDocument();
+    expect(screen.queryByText('Saved question')).not.toBeInTheDocument();
+    expect(startChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the current thread when a new chat cannot be started', async () => {
+    vi.spyOn(assistantApiModule, 'fetchAssistantHistory').mockResolvedValue({
+      conversation_id: 'conversation-1',
+      messages: [{ id: 'm1', role: 'user', content: 'Saved question' }],
+    });
+    vi.spyOn(assistantApiModule, 'startAssistantConversation').mockRejectedValue(
+      new assistantApiModule.AssistantApiError('Could not start a new chat.', 503, 'SERVICE_UNAVAILABLE', true)
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByTestId('ai-assistant-fab'));
+    expect(await screen.findByText('Saved question')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('ai-new-chat'));
+
+    expect(await screen.findByText('Could not start a new chat.')).toBeInTheDocument();
+    expect(screen.getByText('Saved question')).toBeInTheDocument();
   });
 });
