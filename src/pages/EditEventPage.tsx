@@ -18,12 +18,13 @@ import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import DatePickerField from '@/components/DatePickerField';
 import TimePickerField from '@/components/TimePickerField';
-import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import LocationPickerMap, { GERMANY_MAP_CENTER, hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { formatPageTitle } from '@/lib/documentTitle';
 import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 import { invalidateEvents } from '@/lib/queries';
 import { sanitizeText } from '@/lib/sanitize';
+import { addMinutesHhmm, eventRangeFromTimes, formatEventDuration } from '@/lib/dateTimeField';
 
 type ApiEventRow = Record<string, unknown>;
 
@@ -31,7 +32,7 @@ function safeISO(d: Date) {
   return d.toISOString().split('.')[0] + 'Z';
 }
 
-const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
+const GERMANY_DEFAULT = { lat: GERMANY_MAP_CENTER[0], lng: GERMANY_MAP_CENTER[1] };
 
 export default function EditEventPage() {
   const { id } = useParams();
@@ -47,6 +48,7 @@ export default function EditEventPage() {
     category: 'Music',
     date: '',
     time: '',
+    endTime: '',
     location: '',
     budget: '0',
     limit: '50',
@@ -56,7 +58,6 @@ export default function EditEventPage() {
   const [pickedLat, setPickedLat] = useState<number | null>(null);
   const [pickedLng, setPickedLng] = useState<number | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>(GERMANY_DEFAULT);
-  const [durationMs, setDurationMs] = useState(7200000);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
@@ -67,9 +68,20 @@ export default function EditEventPage() {
   const [bannerFile, setBannerFile] = useState<File | null>(null);
 
   const update = (key: string, value: string | boolean) => {
-    setForm((f) => ({ ...f, [key]: value }));
-    if (errors[key]) {
-      setErrors((prev) => { const n = { ...prev }; delete n[key]; return n; });
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      if (key === 'time' && typeof value === 'string' && value && !f.endTime) {
+        next.endTime = addMinutesHhmm(value, 120);
+      }
+      return next;
+    });
+    if (errors[key] || (key === 'time' && errors.endTime)) {
+      setErrors((prev) => {
+        const n = { ...prev };
+        delete n[key];
+        if (key === 'time') delete n.endTime;
+        return n;
+      });
     }
   };
 
@@ -139,14 +151,12 @@ export default function EditEventPage() {
         const item = mapApiEventToItem(raw);
         const start = raw.start_datetime ? new Date(raw.start_datetime as string) : new Date();
         const end = raw.end_datetime ? new Date(raw.end_datetime as string) : new Date(start.getTime() + 7200000);
-        const dMs = Math.max(0, end.getTime() - start.getTime()) || 7200000;
 
         if (cancelled) return;
 
         setCachedItem(item);
         const categoryDefault = getCategoryBanner(item.category);
         setCustomBanner(item.image && item.image !== categoryDefault ? item.image : null);
-        setDurationMs(dMs);
         setCurrentParticipantCount(item.participants?.length ?? 0);
 
         try {
@@ -163,6 +173,7 @@ export default function EditEventPage() {
           category: item.category || 'Music',
           date: start.toISOString().slice(0, 10),
           time: start.toTimeString().slice(0, 5),
+          endTime: end.toTimeString().slice(0, 5),
           location: item.location,
           budget: String(item.budget ?? 0),
           limit: String(item.participantsLimit ?? 50),
@@ -199,14 +210,24 @@ export default function EditEventPage() {
       })()
     : undefined;
 
+  const selectedRange =
+    form.date && form.time && form.endTime
+      ? eventRangeFromTimes(form.date, form.time, form.endTime)
+      : null;
+  const durationHint = selectedRange ? formatEventDuration(selectedRange.start, selectedRange.end) : '';
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.title.trim()) e.title = 'Title is required';
     if (!form.description.trim()) e.description = 'Description is required';
     if (!form.date) e.date = 'Date is required';
-    if (!form.time) e.time = 'Time is required';
+    if (!form.time) e.time = 'Start time is required';
     else if (form.date === todayIso && minTime && form.time < minTime) {
       e.time = 'Start time cannot be in the past';
+    }
+    if (!form.endTime) e.endTime = 'End time is required';
+    else if (form.time && form.endTime === form.time) {
+      e.endTime = 'End time must be after start time';
     }
     if (!form.location.trim()) e.location = 'Location name is required';
     if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
@@ -235,8 +256,10 @@ export default function EditEventPage() {
       const token = await resolveApiToken();
       if (!token) throw new Error('You must be logged in to update an event.');
 
-      const startObj = new Date(`${form.date}T${form.time}:00`);
-      const endObj = new Date(startObj.getTime() + durationMs);
+      const range = eventRangeFromTimes(form.date, form.time, form.endTime);
+      if (!range) throw new Error('Choose a valid start and end time.');
+      const startObj = range.start;
+      const endObj = range.end;
       const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
 
       const uploaded = bannerFile ? await uploadEventBanner(bannerFile) : null;
@@ -431,7 +454,7 @@ export default function EditEventPage() {
           </p>
           <div className="rounded-2xl glass-card p-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
+              <div className="col-span-2 space-y-1">
                 <label htmlFor="edit-event-date" className="block text-xs font-semibold text-foreground">Event date</label>
                 <DatePickerField
                   id="edit-event-date"
@@ -443,17 +466,33 @@ export default function EditEventPage() {
                 {errors.date && <span className="text-[10px] text-destructive px-1">{errors.date}</span>}
               </div>
               <div className="space-y-1">
-                <label htmlFor="edit-event-time" className="block text-xs font-semibold text-foreground">Event time</label>
+                <label htmlFor="edit-event-time" className="block text-xs font-semibold text-foreground">Start time</label>
                 <TimePickerField
                   id="edit-event-time"
                   value={form.time}
                   min={minTime}
                   onChange={(next) => update('time', next)}
+                  listLabel="Start times"
                   className={errors.time ? 'ring-1 ring-destructive border-destructive/50' : undefined}
                 />
                 {errors.time && <span className="text-[10px] text-destructive px-1">{errors.time}</span>}
               </div>
+              <div className="space-y-1">
+                <label htmlFor="edit-event-end-time" className="block text-xs font-semibold text-foreground">End time</label>
+                <TimePickerField
+                  id="edit-event-end-time"
+                  value={form.endTime}
+                  onChange={(next) => update('endTime', next)}
+                  placeholder="Pick an end time"
+                  listLabel="End times"
+                  className={errors.endTime ? 'ring-1 ring-destructive border-destructive/50' : undefined}
+                />
+                {errors.endTime && <span className="text-[10px] text-destructive px-1">{errors.endTime}</span>}
+              </div>
             </div>
+            {durationHint ? (
+              <p className="mt-2 text-[11px] text-muted-foreground">Duration: {durationHint}</p>
+            ) : null}
           </div>
         </div>
 
@@ -479,7 +518,12 @@ export default function EditEventPage() {
                 Pin on map
                 <span className="ml-1 text-[10px] font-normal text-muted-foreground">(search above or click to adjust manually)</span>
               </label>
-              <LocationPickerMap latitude={pickedLat} longitude={pickedLng} onLocationChange={onMapLocationChange} />
+              <LocationPickerMap
+                latitude={pickedLat}
+                longitude={pickedLng}
+                onLocationChange={onMapLocationChange}
+                defaultCenter={[mapCenter.lat, mapCenter.lng]}
+              />
               {errors.mapLocation && <span className="mt-1 block px-1 text-[10px] text-destructive">{errors.mapLocation}</span>}
             </div>
           </div>
@@ -493,7 +537,7 @@ export default function EditEventPage() {
           <div className="rounded-2xl glass-card p-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor="edit-event-budget" className="block text-xs font-semibold text-foreground">Budget (USD)</label>
+                <label htmlFor="edit-event-budget" className="block text-xs font-semibold text-foreground">Budget (€)</label>
                 <input id="edit-event-budget" type="number" min={0} step="1" placeholder="0 = free event" value={form.budget} onChange={(e) => update('budget', e.target.value)} className={inputCls('budget')} />
                 <p className="text-[10px] text-muted-foreground px-0.5">Leave empty or enter 0 for free.</p>
                 {errors.budget && <span className="text-[10px] text-destructive px-1">{errors.budget}</span>}

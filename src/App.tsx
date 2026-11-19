@@ -20,7 +20,9 @@ const App = () => (
       buster: import.meta.env.VITE_CACHE_BUSTER ?? '',
       dehydrateOptions: {
         shouldDehydrateQuery: (query) =>
-          query.state.status === 'success' && query.queryKey[0] !== 'notifications',
+          query.state.status === 'success'
+          && query.queryKey[0] !== 'notifications'
+          && query.queryKey[0] !== 'userProfile',
       },
     }}
   >

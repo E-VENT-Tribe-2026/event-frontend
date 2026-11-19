@@ -19,12 +19,13 @@ import { hasSignedInSession } from '@/lib/signedIn';
 import { pickImageUrl, getGeneratedAvatarUrl } from '@/lib/avatars';
 import DatePickerField from '@/components/DatePickerField';
 import TimePickerField from '@/components/TimePickerField';
-import LocationPickerMap, { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import LocationPickerMap, { GERMANY_MAP_CENTER, hasValidEventCoordinates } from '@/components/LocationPickerMap';
 import LocationSearchInput, { type LocationResult } from '@/components/LocationSearchInput';
 import { invalidateEvents, prependCreatedEvent } from '@/lib/queries';
 import { localDateTimeParts } from '@/lib/eventTime';
 import { mapApiEventToItem } from '@/lib/mapApiEvent';
 import { sanitizeText } from '@/lib/sanitize';
+import { addMinutesHhmm, eventRangeFromTimes, formatEventDuration } from '@/lib/dateTimeField';
 
 function FormSection({
   icon: Icon,
@@ -48,14 +49,15 @@ function FormSection({
   );
 }
 
-function previewWhen(date: string, time: string): string {
+function previewWhen(date: string, time: string, endTime?: string): string {
   if (!date && !time) return 'Pick a date & time';
-  if (!date) return time;
+  if (!date) return endTime && time ? `${time} – ${endTime}` : time;
   try {
     const d = new Date(`${date}T${time || '00:00'}:00`);
     if (Number.isNaN(d.getTime())) return date;
     const day = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    return time ? `${day} · ${time}` : day;
+    if (!time) return day;
+    return endTime ? `${day} · ${time} – ${endTime}` : `${day} · ${time}`;
   } catch {
     return date;
   }
@@ -85,7 +87,7 @@ function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: s
   return { id: typeof id === 'string' ? id : undefined, created_by: created };
 }
 
-const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
+const GERMANY_DEFAULT = { lat: GERMANY_MAP_CENTER[0], lng: GERMANY_MAP_CENTER[1] };
 
 export default function CreateEventPage() {
   const navigate = useNavigate();
@@ -98,6 +100,7 @@ export default function CreateEventPage() {
     category: 'Music',
     date: '',
     time: '',
+    endTime: '',
     location: '',
     budget: '',
     limit: '50',
@@ -119,12 +122,23 @@ export default function CreateEventPage() {
   const applyAssistantDraft = useCallback((draftData: Record<string, unknown>) => {
     let dateVal = '';
     let timeVal = '';
+    let endTimeVal = '';
     if (typeof draftData.start_datetime === 'string') {
       try {
         const d = new Date(draftData.start_datetime);
         if (!isNaN(d.getTime())) {
           dateVal = d.toISOString().slice(0, 10);
           timeVal = d.toTimeString().slice(0, 5);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (typeof draftData.end_datetime === 'string') {
+      try {
+        const d = new Date(draftData.end_datetime);
+        if (!isNaN(d.getTime())) {
+          endTimeVal = d.toTimeString().slice(0, 5);
         }
       } catch {
         // ignore
@@ -138,6 +152,7 @@ export default function CreateEventPage() {
       category: typeof draftData.category === 'string' ? draftData.category : prev.category,
       date: dateVal || prev.date,
       time: timeVal || prev.time,
+      endTime: endTimeVal || (timeVal ? addMinutesHhmm(timeVal, 120) : prev.endTime),
       location: typeof draftData.location_name === 'string' ? draftData.location_name : prev.location,
       budget: draftData.cost !== undefined ? String(draftData.cost) : prev.budget,
       limit: draftData.max_capacity !== undefined ? String(draftData.max_capacity) : prev.limit,
@@ -178,8 +193,21 @@ export default function CreateEventPage() {
   }, [applyAssistantDraft]);
 
   const update = (key: string, value: string | boolean) => {
-    setForm(f => ({ ...f, [key]: value }));
-    if (errors[key]) setErrors(prev => { const n = { ...prev }; delete n[key]; return n; });
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      if (key === 'time' && typeof value === 'string' && value && !f.endTime) {
+        next.endTime = addMinutesHhmm(value, 120);
+      }
+      return next;
+    });
+    if (errors[key] || (key === 'time' && errors.endTime)) {
+      setErrors((prev) => {
+        const n = { ...prev };
+        delete n[key];
+        if (key === 'time') delete n.endTime;
+        return n;
+      });
+    }
   };
 
   const handleLocationSelect = (result: LocationResult) => {
@@ -228,14 +256,24 @@ export default function CreateEventPage() {
       })()
     : undefined;
 
+  const selectedRange =
+    form.date && form.time && form.endTime
+      ? eventRangeFromTimes(form.date, form.time, form.endTime)
+      : null;
+  const durationHint = selectedRange ? formatEventDuration(selectedRange.start, selectedRange.end) : '';
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.title.trim()) e.title = 'Title is required';
     if (!form.description.trim()) e.description = 'Description is required';
     if (!form.date) e.date = 'Date is required';
-    if (!form.time) e.time = 'Time is required';
+    if (!form.time) e.time = 'Start time is required';
     else if (form.date === todayIso && minTime && form.time < minTime) {
       e.time = 'Start time cannot be in the past';
+    }
+    if (!form.endTime) e.endTime = 'End time is required';
+    else if (form.time && form.endTime === form.time) {
+      e.endTime = 'End time must be after start time';
     }
     if (!form.location.trim()) e.location = 'Location name is required';
     if (!hasValidEventCoordinates(pickedLat, pickedLng)) {
@@ -273,7 +311,10 @@ export default function CreateEventPage() {
       const token = await resolveApiToken();
       if (!token) throw new Error('You must be logged in to publish an event.');
 
-      const startObj = new Date(`${form.date}T${form.time}:00`);
+      const range = eventRangeFromTimes(form.date, form.time, form.endTime);
+      if (!range) throw new Error('Choose a valid start and end time.');
+      const durationMs = range.end.getTime() - range.start.getTime();
+      const startObj = range.start;
       const safeISO = (d: Date) => d.toISOString().split('.')[0] + 'Z';
 
       const locationName = form.location.trim() || `${pickedLat!.toFixed(4)}, ${pickedLng!.toFixed(4)}`;
@@ -286,7 +327,6 @@ export default function CreateEventPage() {
       }
       const banner = uploadedBanner || publicBannerUrl(customBanner) || getCategoryBanner(form.category);
       const storedBanner = publicBannerUrl(banner);
-      const durationMs = 7200000;
 
       const authUser = supabase == null ? undefined : (await supabase.auth.getUser()).data?.user ?? undefined;
       const organizerName =
@@ -462,7 +502,7 @@ export default function CreateEventPage() {
                 {form.title.trim() || 'Untitled event'}
               </p>
               <p className="text-[11px] text-muted-foreground truncate">
-                {previewWhen(form.date, form.time)} · {form.location.trim() || 'Add a location'}
+                {previewWhen(form.date, form.time, form.endTime)} · {form.location.trim() || 'Add a location'}
               </p>
             </div>
           }
@@ -491,7 +531,7 @@ export default function CreateEventPage() {
 
         <FormSection icon={Calendar} title="Date & time">
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <label htmlFor="create-event-date" className="block text-xs font-semibold text-foreground">Event date</label>
               <DatePickerField
                 id="create-event-date"
@@ -503,17 +543,33 @@ export default function CreateEventPage() {
               {errors.date && <span className="text-[10px] text-destructive px-1">{errors.date}</span>}
             </div>
             <div className="space-y-1">
-              <label htmlFor="create-event-time" className="block text-xs font-semibold text-foreground">Event time</label>
+              <label htmlFor="create-event-time" className="block text-xs font-semibold text-foreground">Start time</label>
               <TimePickerField
                 id="create-event-time"
                 value={form.time}
                 min={minTime}
                 onChange={(next) => update('time', next)}
+                listLabel="Start times"
                 className={errors.time ? 'ring-1 ring-destructive border-destructive/50' : undefined}
               />
               {errors.time && <span className="text-[10px] text-destructive px-1">{errors.time}</span>}
             </div>
+            <div className="space-y-1">
+              <label htmlFor="create-event-end-time" className="block text-xs font-semibold text-foreground">End time</label>
+              <TimePickerField
+                id="create-event-end-time"
+                value={form.endTime}
+                onChange={(next) => update('endTime', next)}
+                placeholder="Pick an end time"
+                listLabel="End times"
+                className={errors.endTime ? 'ring-1 ring-destructive border-destructive/50' : undefined}
+              />
+              {errors.endTime && <span className="text-[10px] text-destructive px-1">{errors.endTime}</span>}
+            </div>
           </div>
+          {durationHint ? (
+            <p className="text-[11px] text-muted-foreground px-0.5">Duration: {durationHint}</p>
+          ) : null}
           <div className="space-y-2 pt-1">
             <p className="text-xs font-semibold text-foreground">Repeat</p>
             <div className="flex gap-1 rounded-xl bg-secondary/60 p-1" role="radiogroup" aria-label="Repeat">
@@ -571,7 +627,12 @@ export default function CreateEventPage() {
               Pin on map
               <span className="ml-1 text-[10px] font-normal text-muted-foreground">(search above or tap to set)</span>
             </label>
-            <LocationPickerMap latitude={pickedLat} longitude={pickedLng} onLocationChange={onMapLocationChange} />
+            <LocationPickerMap
+              latitude={pickedLat}
+              longitude={pickedLng}
+              onLocationChange={onMapLocationChange}
+              defaultCenter={[mapCenter.lat, mapCenter.lng]}
+            />
             {errors.mapLocation && <span className="block text-[10px] text-destructive px-1">{errors.mapLocation}</span>}
           </div>
         </FormSection>

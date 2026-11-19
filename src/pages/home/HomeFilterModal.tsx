@@ -1,6 +1,7 @@
 import { Calendar, MapPin, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import DatePickerField from '@/components/DatePickerField';
+import { clampBudgetMax, clampBudgetMin } from '@/pages/home/homeModel';
 
 type HomeFilterModalProps = {
   open: boolean;
@@ -35,6 +36,11 @@ export default function HomeFilterModal({
   onBudgetMaxChange,
   onClearFilters,
 }: HomeFilterModalProps) {
+  const sliderMax = Math.max(0, maxPrice);
+  const stacked = budgetMin === budgetMax;
+  const stackedAtStart = stacked && (sliderMax <= 0 || budgetMin <= sliderMax / 2);
+  const stackedAtEnd = stacked && !stackedAtStart;
+
   return (
     <AnimatePresence>
       {open && (
@@ -107,26 +113,26 @@ export default function HomeFilterModal({
                   <div
                     className="absolute h-1.5 rounded-full bg-primary pointer-events-none"
                     style={{
-                      left: `${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}%`,
-                      right: `${maxPrice > 0 ? 100 - (budgetMax / maxPrice) * 100 : 0}%`,
+                      left: `${sliderMax > 0 ? (budgetMin / sliderMax) * 100 : 0}%`,
+                      right: `${sliderMax > 0 ? 100 - (budgetMax / sliderMax) * 100 : 0}%`,
                     }}
                   />
-                  <input type="range" min={0} max={maxPrice} value={budgetMin}
+                  <input type="range" min={0} max={sliderMax} step={1} value={budgetMin}
                     aria-label="Minimum budget"
-                    onChange={(e) => onBudgetMinChange(Math.min(Number(e.target.value), budgetMax - 1))}
-                    className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    style={{ zIndex: budgetMin > maxPrice * 0.9 ? 5 : 3 }}
+                    onChange={(e) => onBudgetMinChange(clampBudgetMin(Number(e.target.value), budgetMax))}
+                    className={`dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer${stackedAtStart ? ' is-inert' : ''}`}
+                    style={{ zIndex: stackedAtEnd || budgetMin > sliderMax * 0.9 ? 5 : 3 }}
                   />
-                  <input type="range" min={0} max={maxPrice} value={budgetMax}
+                  <input type="range" min={0} max={sliderMax} step={1} value={budgetMax}
                     aria-label="Maximum budget"
-                    onChange={(e) => onBudgetMaxChange(Math.max(Number(e.target.value), budgetMin + 1))}
-                    className="dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    style={{ zIndex: 4 }}
+                    onChange={(e) => onBudgetMaxChange(clampBudgetMax(Number(e.target.value), budgetMin, sliderMax))}
+                    className={`dual-range-input absolute inset-0 w-full h-full opacity-0 cursor-pointer${stackedAtEnd ? ' is-inert' : ''}`}
+                    style={{ zIndex: stackedAtStart ? 6 : 4 }}
                   />
                   <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-                    style={{ left: `calc(${maxPrice > 0 ? (budgetMin / maxPrice) * 100 : 0}% - 7px)` }} />
+                    style={{ left: `calc(${sliderMax > 0 ? (budgetMin / sliderMax) * 100 : 0}% - 7px)` }} />
                   <div className="absolute h-3.5 w-3.5 rounded-full bg-primary border-2 border-background shadow pointer-events-none"
-                    style={{ left: `calc(${maxPrice > 0 ? (budgetMax / maxPrice) * 100 : 100}% - 7px)` }} />
+                    style={{ left: `calc(${sliderMax > 0 ? (budgetMax / sliderMax) * 100 : 100}% - 7px)` }} />
                 </div>
               </div>
             </div>

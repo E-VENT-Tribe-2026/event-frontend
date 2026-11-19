@@ -485,6 +485,12 @@
 .dual-range-input::-moz-range-track {
   background: transparent;
 }
+/* When both thumbs sit on the same value, disable one so the other can still be dragged. */
+.dual-range-input.is-inert,
+.dual-range-input.is-inert::-webkit-slider-thumb,
+.dual-range-input.is-inert::-moz-range-thumb {
+  pointer-events: none;
+}
 
 .adm {
   --adm-bg:           hsl(213 61% 11%);

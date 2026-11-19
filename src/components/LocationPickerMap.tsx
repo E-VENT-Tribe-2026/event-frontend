@@ -2,6 +2,9 @@ import { useEffect, useRef, useCallback } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
 
+/** Centre of Germany — used when the browser has not granted location access. */
+export const GERMANY_MAP_CENTER: [number, number] = [51.1657, 10.4515];
+
 export type LocationPickerMapProps = {
   latitude: number | null;
   longitude: number | null;
@@ -27,11 +30,18 @@ export const hasValidEventCoordinates = (lat: unknown, lng: unknown): boolean =>
 /**
  * Click the map to place or move the pin; drag the pin to fine-tune.
  */
+function zoomForCenter(center: [number, number]): number {
+  const [lat, lng] = center;
+  const germany = Math.abs(lat - GERMANY_MAP_CENTER[0]) < 0.05
+    && Math.abs(lng - GERMANY_MAP_CENTER[1]) < 0.05;
+  return germany ? 6 : 13;
+}
+
 export default function LocationPickerMap({
   latitude,
   longitude,
   onLocationChange,
-  defaultCenter = [40.7128, -74.006],
+  defaultCenter = GERMANY_MAP_CENTER,
   className = 'h-56',
 }: LocationPickerMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -40,6 +50,7 @@ export default function LocationPickerMap({
   const leafletRef = useRef<any>(null);
   const mapReadyRef = useRef(false);
   const defaultCenterRef = useRef(defaultCenter);
+  defaultCenterRef.current = defaultCenter;
   const onLocationChangeRef = useRef(onLocationChange);
   onLocationChangeRef.current = onLocationChange;
 
@@ -78,7 +89,7 @@ export default function LocationPickerMap({
         minZoom: 2,
         maxBounds: worldBounds,
         maxBoundsViscosity: 1.0,
-      }).setView(center, 11);
+      }).setView(center, zoomForCenter(center));
       mapInstanceRef.current = map;
       leafletRef.current = L;
 
@@ -120,6 +131,14 @@ export default function LocationPickerMap({
       markerRef.current = null;
     }
   }, [latitude, longitude, placeOrMoveMarker]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReadyRef.current) return;
+    if (hasValidEventCoordinates(latitude, longitude)) return;
+    const center = defaultCenterRef.current;
+    map.setView(center, zoomForCenter(center));
+  }, [defaultCenter[0], defaultCenter[1], latitude, longitude]);
 
   return (
     <div className="space-y-2">

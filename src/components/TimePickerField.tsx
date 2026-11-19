@@ -11,6 +11,8 @@ type TimePickerFieldProps = {
   min?: string;
   placeholder?: string;
   className?: string;
+  /** Accessible name for the slot list. */
+  listLabel?: string;
 };
 
 export default function TimePickerField({
@@ -20,6 +22,7 @@ export default function TimePickerField({
   min,
   placeholder = 'Pick a time',
   className,
+  listLabel = 'Event times',
 }: TimePickerFieldProps) {
   const [open, setOpen] = useState(false);
   const selectedRef = useRef<HTMLButtonElement | null>(null);
@@ -63,7 +66,7 @@ export default function TimePickerField({
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="z-[80] w-56 p-2" sideOffset={8}>
-          <div className="max-h-64 overflow-y-auto pr-1" role="listbox" aria-label="Event times">
+          <div className="max-h-64 overflow-y-auto pr-1" role="listbox" aria-label={listLabel}>
             {slots.map((slot) => {
               const disabled = Boolean(min && slot < min);
               const selected = slot === value;

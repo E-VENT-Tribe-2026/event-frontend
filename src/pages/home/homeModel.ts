@@ -24,6 +24,37 @@ const REQUEST_PATHS = [
   '/api/friends/requests/incoming?page=1&limit=50',
 ];
 
+/** Treat missing/invalid cost as free (€0). */
+export function eventBudgetAmount(budget: unknown): number {
+  const n = Number(budget);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function isBudgetInRange(budget: unknown, min: number, max: number): boolean {
+  const amount = eventBudgetAmount(budget);
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return amount >= lo && amount <= hi;
+}
+
+export function clampBudgetMin(value: number, budgetMax: number): number {
+  return Math.min(Math.max(0, value), budgetMax);
+}
+
+export function clampBudgetMax(value: number, budgetMin: number, maxPrice: number): number {
+  const ceiling = Math.max(0, maxPrice);
+  return Math.min(Math.max(budgetMin, value), ceiling);
+}
+
+/** Range input max: never 0, otherwise the thumbs cannot be dragged back up. */
+export const BUDGET_SLIDER_FALLBACK = 500;
+
+export function budgetSliderMax(apiMax: unknown): number {
+  return typeof apiMax === 'number' && Number.isFinite(apiMax) && apiMax > 0
+    ? apiMax
+    : BUDGET_SLIDER_FALLBACK;
+}
+
 export function toArray(body: unknown): any[] {
   if (Array.isArray(body)) return body;
   if (body && typeof body === 'object') {

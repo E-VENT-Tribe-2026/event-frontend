@@ -16,6 +16,35 @@ import { getOAuthCallbackUrl } from '@/lib/oauthRedirect';
 import { needsAdminVerification, setPendingAdminVerification, clearPendingAdminVerification, type AdminAuthStatus } from '@/lib/adminAuth';
 import { readSuspension, type SuspensionNotice } from '@/lib/suspension';
 
+/** User-facing text for a failed POST /api/auth/login. */
+export function loginFailureMessage(status: number, data: unknown): string {
+  const rec = data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown>)
+    : {};
+  const pieces = [rec.detail, rec.error, rec.message];
+  let text = '';
+  for (const piece of pieces) {
+    if (typeof piece === 'string' && piece.trim()) {
+      text = piece.trim();
+      break;
+    }
+    if (piece && typeof piece === 'object' && !Array.isArray(piece)) {
+      const nested = (piece as { message?: unknown }).message;
+      if (typeof nested === 'string' && nested.trim()) {
+        text = nested.trim();
+        break;
+      }
+    }
+  }
+  if (status === 429 || /rate limit|too many (requests|attempts)/i.test(text)) {
+    return 'Too many sign-in attempts. Please wait a minute and try again.';
+  }
+  if (text.toLowerCase().includes('not confirmed')) {
+    return 'Your email is not confirmed yet. Check your inbox/spam for the verification email.';
+  }
+  return text || 'Invalid credentials';
+}
+
 /** A suspension handed over by another page, e.g. the Google sign-in callback. */
 function suspensionFromState(state: unknown): SuspensionNotice | null {
   const s = (state as { suspension?: { reason?: unknown } } | null)?.suspension;
@@ -62,12 +91,7 @@ export default function LoginPage() {
         return;
       }
       if (!res.ok) {
-        const detail = String((data as any)?.detail || (data as any)?.message || '').trim();
-        const lowered = detail.toLowerCase();
-        const message = lowered.includes('not confirmed')
-          ? 'Your email is not confirmed yet. Check your inbox/spam for the verification email.'
-          : detail || 'Invalid credentials';
-        setToast({ show: true, message, type: 'error' });
+        setToast({ show: true, message: loginFailureMessage(res.status, data), type: 'error' });
         setIsSubmitting(false);
         return;
       }

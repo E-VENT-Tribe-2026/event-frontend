@@ -285,4 +285,43 @@ describe('HomePage', () => {
     expect(screen.queryByTestId('interest-marquee')).not.toBeInTheDocument();
   });
 
+  it('keeps free events when the budget range includes €0', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('max-price')) return Promise.resolve(jsonOk({ max_price: 500 }));
+      if (url.includes('/api/events')) {
+        return Promise.resolve(jsonOk({
+          data: [
+            { ...apiEventRow, id: 'free-e', title: 'Park Meetup', cost: 0 },
+            { ...apiEventRow, id: 'paid-e', title: 'Club Night', cost: 40 },
+          ],
+        }));
+      }
+      return Promise.reject(new Error('unmocked'));
+    });
+
+    renderHome();
+    await waitFor(() => {
+      expect(screen.getAllByText('Park Meetup').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Club Night').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
+    await waitFor(() => {
+      expect(screen.getByText('€0 to €500')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('Minimum budget'), { target: { value: '0' } });
+    expect(screen.getByText('€0 to €500')).toBeInTheDocument();
+    expect(screen.queryByText('€0 to €1')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Park Meetup').length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Maximum budget'), { target: { value: '0' } });
+    expect(screen.getByText('€0 to €0')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText('Park Meetup').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Club Night')).not.toBeInTheDocument();
+    });
+  });
+
 });

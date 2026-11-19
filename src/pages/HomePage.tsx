@@ -32,6 +32,8 @@ import {
   UPCOMING_PREVIEW,
   type SuggestedUser,
   fetchExcludedIds,
+  budgetSliderMax,
+  isBudgetInRange,
   toArray,
 } from '@/pages/home/homeModel';
 
@@ -89,7 +91,8 @@ export default function HomePage() {
   const upcomingInitialLoading =
     (myEventsLoading && myEventsData === undefined) || (joinedEventsLoading && joinedEventsData === undefined);
 
-  const maxPrice = maxPriceData?.max_price ?? 500;
+  const apiMaxPrice = maxPriceData?.max_price;
+  const maxPrice = budgetSliderMax(apiMaxPrice);
   const favoriteIds = favoriteIdsData ?? EMPTY_SET;
   const apiEvents = eventsData ?? EMPTY_EVENTS;
   const interestRecommendations = recommendationsData ?? EMPTY_EVENTS;
@@ -173,11 +176,11 @@ export default function HomePage() {
 
   // ---------- Budget bounds follow the API max ----------
   useEffect(() => {
-    if (maxPriceData?.max_price) {
-      setBudgetMax(maxPriceData.max_price);
+    if (typeof apiMaxPrice === 'number' && Number.isFinite(apiMaxPrice) && apiMaxPrice > 0) {
+      setBudgetMax(apiMaxPrice);
       setBudgetMin(0);
     }
-  }, [maxPriceData?.max_price]);
+  }, [apiMaxPrice]);
 
   // ---------- Keep user in sync with storage ----------
   useEffect(() => {
@@ -328,7 +331,7 @@ export default function HomePage() {
     list.filter((e) => {
       if (!isEventUpcoming(e)) return false;
       if (String(e.status || '').toLowerCase() === 'cancelled') return false;
-      if (e.budget < budgetMin || e.budget > budgetMax) return false;
+      if (!isBudgetInRange(e.budget, budgetMin, budgetMax)) return false;
       if (category !== 'All' && e.category !== category) return false;
       if (debouncedDate && e.date !== debouncedDate) return false;
       if (selectedCity && extractCityFromLocation(e.location || '') !== selectedCity) return false;
