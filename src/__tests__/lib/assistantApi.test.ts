@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   sendAssistantChat,
+  fetchAssistantHistory,
+  startAssistantConversation,
   searchAssistantEvents,
   getAssistantEventDetails,
   draftAssistantEvent,
@@ -359,6 +361,43 @@ Ready to publish?`;
       await expect(
         publishDraftEvent({ title: 'Invalid Event' })
       ).rejects.toThrow(/Start time cannot be in the past/);
+    });
+  });
+
+  describe('assistant history', () => {
+    it('loads the signed-in user history', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          conversation_id: 'conversation-1',
+          messages: [{ id: 'm1', role: 'user', content: 'Saved question' }],
+        }),
+      });
+      global.fetch = fetchMock;
+
+      const history = await fetchAssistantHistory();
+      expect(history.messages).toHaveLength(1);
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toContain('/api/assistant/messages');
+      expect(options.method).toBe('GET');
+      expect(options.headers).toMatchObject({ Authorization: 'Bearer mock-jwt-token' });
+    });
+
+    it('starts a new conversation for the signed-in user', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ conversation_id: 'conversation-2' }),
+      });
+      global.fetch = fetchMock;
+
+      const created = await startAssistantConversation();
+      expect(created.conversation_id).toBe('conversation-2');
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toContain('/api/assistant/conversations');
+      expect(options.method).toBe('POST');
+      expect(options.headers).toMatchObject({ Authorization: 'Bearer mock-jwt-token' });
     });
   });
 });

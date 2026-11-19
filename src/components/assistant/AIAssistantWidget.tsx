@@ -20,10 +20,13 @@ import { isAdministratorRole } from '@/lib/adminApi';
 import { getCurrentUser } from '@/lib/storage';
 import {
   sendAssistantChat,
+  fetchAssistantHistory,
+  startAssistantConversation,
   extractCardsFromReply,
   type AssistantChatMessage,
   type AssistantEventItem,
   type AssistantDraftEvent,
+  type AssistantHistoryMessage,
   AssistantApiError,
 } from '@/lib/assistantApi';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -85,6 +88,62 @@ function clearSharedAssistantStorage(): void {
   }
 }
 
+const CHAT_REQUEST_LIMIT = 20;
+
+function issueTexts(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const texts = value
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object' && 'message' in item) {
+        return String((item as { message: unknown }).message);
+      }
+      return '';
+    })
+    .filter(Boolean);
+  return texts.length > 0 ? texts : undefined;
+}
+
+function threadFromHistory(history: AssistantHistoryMessage[]): ChatThreadMessage[] {
+  return history.flatMap((message) => {
+    if ((message.role !== 'user' && message.role !== 'assistant') || !message.content?.trim()) {
+      return [];
+    }
+    const metadata = message.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+    const cards =
+      message.role === 'assistant'
+        ? extractCardsFromReply(message.content, {
+            events: Array.isArray(metadata.events) ? (metadata.events as AssistantEventItem[]) : undefined,
+            event:
+              metadata.event && typeof metadata.event === 'object'
+                ? (metadata.event as AssistantEventItem)
+                : undefined,
+            draft:
+              metadata.draft && typeof metadata.draft === 'object'
+                ? (metadata.draft as AssistantDraftEvent)
+                : undefined,
+            validation_issues: issueTexts(metadata.validation_issues),
+          })
+        : null;
+    const created = message.created_at ? new Date(message.created_at) : null;
+    return [
+      {
+        id: message.id,
+        role: message.role,
+        content: cards?.displayText || message.content,
+        timestamp:
+          created && !Number.isNaN(created.getTime())
+            ? created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '',
+        events: cards?.events,
+        eventDetail: cards?.eventDetail,
+        draft: cards?.draft,
+        validationIssues: cards?.validationIssues,
+      },
+    ];
+  });
+}
+
 const SUGGESTED_PROMPTS = [
   'What is E-VENT and what can you help me with?',
   '🔍 Search upcoming music events',
@@ -127,10 +186,15 @@ export const AIAssistantWidget: React.FC = () => {
     status?: number;
     canRetry: boolean;
   } | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [startingNewChat, setStartingNewChat] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastFailedPromptRef = useRef<string | null>(null);
   const [authEpoch, setAuthEpoch] = useState(0);
+  const historyRequest = useRef(0);
+  const localEdits = useRef(false);
   const activeAccountId = signedInAccountId();
   const thread = activeAccountId === accountId ? messages : [];
   void authEpoch;
@@ -143,6 +207,8 @@ export const AIAssistantWidget: React.FC = () => {
 
   useEffect(() => {
     if (activeAccountId === accountId) return;
+    historyRequest.current += 1;
+    localEdits.current = true;
     setAccountId(activeAccountId);
     setMessages(readStoredHistory(activeAccountId));
     setBannerError(null);
@@ -152,6 +218,7 @@ export const AIAssistantWidget: React.FC = () => {
     if (!activeAccountId) {
       setIsOpen(false);
       setIsMinimized(false);
+      setHistoryLoading(false);
       clearSharedAssistantStorage();
     }
   }, [activeAccountId, accountId]);
@@ -165,6 +232,26 @@ export const AIAssistantWidget: React.FC = () => {
       // Storage unavailable
     }
   }, [messages, accountId, activeAccountId]);
+
+  useEffect(() => {
+    if (!isOpen || isMinimized || !getAuthToken()) return;
+    const requestId = ++historyRequest.current;
+    const requestedAccountId = activeAccountId;
+    localEdits.current = false;
+    setHistoryLoading(true);
+    fetchAssistantHistory()
+      .then((history) => {
+        if (historyRequest.current !== requestId || localEdits.current) return;
+        if (signedInAccountId() !== requestedAccountId) return;
+        setMessages(threadFromHistory(history.messages));
+      })
+      .catch(() => {
+        // Keep the current account's thread when history cannot be loaded.
+      })
+      .finally(() => {
+        if (historyRequest.current === requestId) setHistoryLoading(false);
+      });
+  }, [isOpen, isMinimized, activeAccountId]);
 
   // Scroll to bottom on new messages or loading state change
   const scrollToBottom = useCallback((smooth = true) => {
@@ -199,6 +286,7 @@ export const AIAssistantWidget: React.FC = () => {
     return null;
   }
   const handleOpen = () => {
+    setHistoryLoading(true);
     setIsOpen(true);
     setIsMinimized(false);
     setTimeout(() => {
@@ -213,10 +301,25 @@ export const AIAssistantWidget: React.FC = () => {
   };
 
   const handleToggleMinimize = () => {
+    if (isMinimized) setHistoryLoading(true);
     setIsMinimized((prev) => !prev);
   };
 
-  const handleResetConversation = () => {
+  const handleNewChat = async () => {
+    if (historyLoading || startingNewChat) return;
+    historyRequest.current += 1;
+    localEdits.current = true;
+    setStartingNewChat(true);
+    try {
+      await startAssistantConversation();
+    } catch (err: unknown) {
+      localEdits.current = false;
+      const message = err instanceof AssistantApiError ? err.message : 'Could not start a new chat.';
+      setBannerError({ message, canRetry: false });
+      return;
+    } finally {
+      setStartingNewChat(false);
+    }
     setMessages([]);
     setBannerError(null);
     lastFailedPromptRef.current = null;
@@ -242,6 +345,7 @@ export const AIAssistantWidget: React.FC = () => {
 
     setBannerError(null);
     lastFailedPromptRef.current = trimmed;
+    localEdits.current = true;
 
     const userMsg: ChatThreadMessage = {
       id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -261,6 +365,7 @@ export const AIAssistantWidget: React.FC = () => {
     // Prepare full conversation turn history
     const apiHistory: AssistantChatMessage[] = nextMessages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .slice(-CHAT_REQUEST_LIMIT)
       .map((m) => ({
         role: m.role,
         content: m.content,
@@ -486,15 +591,18 @@ export const AIAssistantWidget: React.FC = () => {
 
               {/* Controls */}
               <div className="flex items-center gap-1">
-                {thread.length > 0 && (
+                {thread.length > 0 && !historyLoading && (
                   <button
                     type="button"
-                    onClick={handleResetConversation}
-                    aria-label="Reset conversation"
+                    data-testid="ai-new-chat"
+                    onClick={handleNewChat}
+                    disabled={startingNewChat}
+                    aria-label="New Chat"
                     title="Clear history"
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
+                    <span>New Chat</span>
                   </button>
                 )}
                 <button
@@ -557,9 +665,16 @@ export const AIAssistantWidget: React.FC = () => {
             {/* Message Thread Area */}
             <div
               data-testid="ai-chat-messages"
+              aria-busy={historyLoading}
               className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
             >
-              {thread.length === 0 ? (
+              {historyLoading ? (
+                <div data-testid="ai-history-skeleton" className="space-y-3" aria-hidden="true">
+                  <div className="h-10 w-2/3 animate-pulse rounded-2xl bg-muted/70" />
+                  <div className="ml-auto h-10 w-1/2 animate-pulse rounded-2xl bg-muted/50" />
+                  <div className="h-16 w-3/4 animate-pulse rounded-2xl bg-muted/70" />
+                </div>
+              ) : thread.length === 0 ? (
                 /* Welcome / Orientation Guidance */
                 <div className="flex h-full flex-col justify-center text-center px-2 py-6">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl gradient-assistant text-white shadow-assistant mb-3">

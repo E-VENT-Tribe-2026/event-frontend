@@ -49,6 +49,19 @@ export type AssistantCardPayload =
   | { type: 'draft'; draft: AssistantDraftEvent; validation_issues?: string[] }
   | { type: 'event_detail'; event: AssistantEventItem };
 
+export interface AssistantHistoryMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface AssistantHistoryResponse {
+  conversation_id: string | null;
+  messages: AssistantHistoryMessage[];
+}
+
 export interface AssistantChatResponse {
   reply: string;
   request_id?: string;
@@ -351,6 +364,70 @@ export async function sendAssistantChat(
 
   const data = await res.json().catch(() => ({ reply: '' }));
   return data as AssistantChatResponse;
+}
+
+/**
+ * Load the signed-in user's active conversation.
+ * GET /api/assistant/messages
+ */
+export async function fetchAssistantHistory(): Promise<AssistantHistoryResponse> {
+  const url = getApiUrl(API_ENDPOINTS.ASSISTANT_MESSAGES);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Network error';
+    throw new AssistantApiError(
+      `Network connection dropped (${msg}). Please check your connection and try again.`,
+      0,
+      'NETWORK_ERROR',
+      true
+    );
+  }
+  if (!res.ok) {
+    return handleAssistantError(res);
+  }
+  const data = await res.json().catch(() => ({}));
+  return {
+    conversation_id: typeof data?.conversation_id === 'string' ? data.conversation_id : null,
+    messages: Array.isArray(data?.messages) ? data.messages : [],
+  };
+}
+
+/**
+ * Start a fresh server-side conversation.
+ * POST /api/assistant/conversations
+ */
+export async function startAssistantConversation(): Promise<{ conversation_id: string }> {
+  const url = getApiUrl(API_ENDPOINTS.ASSISTANT_CONVERSATIONS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Network error';
+    throw new AssistantApiError(
+      `Network connection dropped (${msg}). Please check your connection and try again.`,
+      0,
+      'NETWORK_ERROR',
+      true
+    );
+  }
+  if (!res.ok) {
+    return handleAssistantError(res);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!data?.conversation_id) {
+    throw new AssistantApiError('Could not start a new chat.', 503, 'SERVICE_UNAVAILABLE', true);
+  }
+  return { conversation_id: String(data.conversation_id) };
 }
 
 /**
