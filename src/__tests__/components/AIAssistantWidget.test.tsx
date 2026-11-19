@@ -242,11 +242,40 @@ describe('AIAssistantWidget — Ticket #196', () => {
     // Click retry
     fireEvent.click(retryBtn);
 
-    // Succeeded on retry
+    // Succeeded on retry without a second copy of the failed question
     await waitFor(() => {
       expect(screen.getByText('Recovered response after retry!')).toBeInTheDocument();
     });
+    expect(screen.getAllByText('Tell me about festivals')).toHaveLength(1);
     expect(screen.queryByTestId('ai-retry-button')).not.toBeInTheDocument();
+    const retriedMessages = sendChatSpy.mock.calls[1][0];
+    expect(retriedMessages.filter((message) => message.content === 'Tell me about festivals')).toHaveLength(1);
+  });
+
+  it('sends only the newest 20 messages after the conversation is longer than the limit', async () => {
+    const sendChatSpy = vi.spyOn(assistantApiModule, 'sendAssistantChat').mockImplementation(async () => ({
+      reply: 'Noted.',
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByTestId('ai-assistant-fab'));
+    await screen.findByTestId('ai-assistant-drawer');
+
+    for (let turn = 1; turn <= 11; turn += 1) {
+      fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: `Question ${turn}` } });
+      fireEvent.click(screen.getByTestId('ai-chat-send'));
+      await waitFor(() => expect(sendChatSpy).toHaveBeenCalledTimes(turn));
+    }
+
+    const eleventhRequest = sendChatSpy.mock.calls[10][0];
+    expect(eleventhRequest).toHaveLength(20);
+    expect(eleventhRequest[0]).toEqual({ role: 'assistant', content: 'Noted.' });
+    expect(eleventhRequest[19]).toEqual({ role: 'user', content: 'Question 11' });
+    expect(eleventhRequest.some((message) => message.content === 'Question 1')).toBe(false);
   });
 
   it('renders rich event cards when assistant response includes events', async () => {
