@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import LoginPage from '@/pages/LoginPage';
+import LoginPage, { loginFailureMessage } from '@/pages/LoginPage';
 import { clearAuthToken } from '@/lib/auth';
 import { getPendingAdminVerification } from '@/lib/adminAuth';
 
@@ -61,6 +61,27 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
     expect(await screen.findByText('Email required')).toBeInTheDocument();
     expect(screen.getByText('Password required')).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('tells the user to wait after too many sign-in attempts', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'Rate limit exceeded: 10 per 1 minute' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'a@b.com' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(
+      await screen.findByText('Too many sign-in attempts. Please wait a minute and try again.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Invalid credentials')).not.toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -227,5 +248,13 @@ describe('LoginPage', () => {
       hasMfaLinked: true,
       factorId: '018f3a5e-aaaa',
     });
+  });
+});
+
+describe('loginFailureMessage', () => {
+  it('does not treat a 429 as invalid credentials', () => {
+    expect(loginFailureMessage(429, { error: 'Rate limit exceeded: 10 per 1 minute' })).toMatch(/too many sign-in attempts/i);
+    expect(loginFailureMessage(429, { detail: 'Rate limit exceeded: 10 per 1 minute' })).toMatch(/wait/i);
+    expect(loginFailureMessage(401, { detail: 'Invalid credentials' })).toBe('Invalid credentials');
   });
 });

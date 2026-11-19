@@ -160,7 +160,7 @@ describe('CreateEventPage', () => {
     fireEvent.change(screen.getByPlaceholderText('Event Title'), { target: { value: 'Meetup' } });
     fireEvent.change(screen.getByPlaceholderText('Description'), { target: { value: 'Details here' } });
     const dateInput = screen.getByLabelText(/event date/i) as HTMLInputElement;
-    const timeInput = screen.getByLabelText(/event time/i) as HTMLInputElement;
+    const timeInput = screen.getByLabelText(/start time/i) as HTMLInputElement;
     fireEvent.focus(dateInput);
     fireEvent.change(dateInput, { target: { value: tomorrowIsoDate() } });
     fireEvent.focus(timeInput);
@@ -214,7 +214,7 @@ describe('CreateEventPage', () => {
     fireEvent.change(screen.getByPlaceholderText('Event Title'), { target: { value: 'Weekly jam' } });
     fireEvent.change(screen.getByPlaceholderText('Description'), { target: { value: 'Bring a guitar' } });
     const dateInput = screen.getByLabelText(/event date/i) as HTMLInputElement;
-    const timeInput = screen.getByLabelText(/event time/i) as HTMLInputElement;
+    const timeInput = screen.getByLabelText(/start time/i) as HTMLInputElement;
     fireEvent.focus(dateInput);
     fireEvent.change(dateInput, { target: { value: tomorrowIsoDate() } });
     fireEvent.focus(timeInput);
@@ -229,5 +229,41 @@ describe('CreateEventPage', () => {
       expect(addEventMock).toHaveBeenCalledTimes(3);
     });
     expect(screen.getByText('Published 3 events in the series')).toBeInTheDocument();
+  });
+
+  it('publishes a custom duration from start and end times', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/events') && init?.method === 'POST') {
+        bodies.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({ id: 'evt-flex', created_by: 'u1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('not mocked', { status: 500 });
+    });
+
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Event Title'), { target: { value: 'Long meetup' } });
+    fireEvent.change(screen.getByPlaceholderText('Description'), { target: { value: 'Four and a half hours' } });
+    const dateInput = screen.getByLabelText(/event date/i) as HTMLInputElement;
+    fireEvent.focus(dateInput);
+    fireEvent.change(dateInput, { target: { value: tomorrowIsoDate() } });
+    fireEvent.change(screen.getByLabelText(/start time/i), { target: { value: '15:00' } });
+    fireEvent.change(screen.getByLabelText(/end time/i), { target: { value: '19:30' } });
+    fireEvent.change(screen.getByPlaceholderText(/Search venue, address or city/i), { target: { value: 'Hall' } });
+    fireEvent.click(screen.getByRole('button', { name: /set-map-pin/i }));
+    expect(await screen.findByText('Duration: 4.5 hours')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /publish event/i }));
+
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    });
+    const start = new Date(String(bodies[0].start_datetime)).getTime();
+    const end = new Date(String(bodies[0].end_datetime)).getTime();
+    expect(end - start).toBe(4.5 * 60 * 60 * 1000);
   });
 });

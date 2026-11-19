@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import { GERMANY_MAP_CENTER, hasValidEventCoordinates } from '@/components/LocationPickerMap';
 
 describe('hasValidEventCoordinates', () => {
   it('rejects null, NaN, and 0,0 placeholder', () => {
@@ -7,6 +7,12 @@ describe('hasValidEventCoordinates', () => {
     expect(hasValidEventCoordinates(1, null)).toBe(false);
     expect(hasValidEventCoordinates(NaN, 1)).toBe(false);
     expect(hasValidEventCoordinates(0, 0)).toBe(false);
+  });
+
+  it('defaults the empty map to Germany rather than New York', () => {
+    expect(GERMANY_MAP_CENTER[0]).toBeCloseTo(51.1657, 3);
+    expect(GERMANY_MAP_CENTER[1]).toBeCloseTo(10.4515, 3);
+    expect(GERMANY_MAP_CENTER[1]).not.toBeCloseTo(-74.006, 1);
   });
 
   it('accepts finite non-zero coordinates', () => {

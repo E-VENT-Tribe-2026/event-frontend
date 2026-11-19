@@ -66,8 +66,11 @@ export function useUserProfile(viewerId: string | undefined, userId: string | un
     queryKey: QK.userProfile(viewerId ?? '', userId ?? ''),
     queryFn: () => fetchUserProfile(userId as string),
     enabled: Boolean(viewerId && userId && getAuthToken()),
-    staleTime: 15 * 60 * 1000,
-    // A refused profile (private/missing) is not worth retrying.
+    // Friendship can change on the other person's device; never keep a 15–30 min snapshot.
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000,
     retry: false,
   });
 }

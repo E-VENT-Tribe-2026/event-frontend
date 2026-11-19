@@ -19,6 +19,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, MapPin, Loader2, LocateFixed, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { GERMANY_MAP_CENTER } from '@/components/LocationPickerMap';
 
 export interface LocationResult {
   lat: number;
@@ -37,8 +38,7 @@ interface Props {
   locateOnMount?: boolean;
 }
 
-// Germany centre as fallback
-const GERMANY_DEFAULT = { lat: 51.1657, lng: 10.4515 };
+const GERMANY_DEFAULT = { lat: GERMANY_MAP_CENTER[0], lng: GERMANY_MAP_CENTER[1] };
 
 async function searchNominatim(query: string): Promise<LocationResult[]> {
   const params = new URLSearchParams({

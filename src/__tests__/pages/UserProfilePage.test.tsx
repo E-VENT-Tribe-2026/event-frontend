@@ -194,6 +194,29 @@ describe('UserProfilePage', () => {
     }
   });
 
+  it('refetches friendship after reload so accept/decline is visible to the sender', async () => {
+    let friendship = { status: 'request_sent' as string, request_id: 7 as number | null };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      const json = (status: number, body: unknown) =>
+        ({ ok: status < 400, status, json: async () => body }) as Response;
+      if (method === 'GET' && url.includes(`/api/profile/${OTHER_ID}`)) {
+        return json(200, { ...baseProfile, friendship: { ...friendship } });
+      }
+      return json(200, { page: 1, limit: 50, has_more: false, data: [] });
+    }));
+
+    const first = renderPage();
+    expect(await screen.findByRole('button', { name: /cancel friend request/i })).toBeInTheDocument();
+    first.unmount();
+
+    friendship = { status: 'friends', request_id: null };
+    renderPage();
+    expect(await screen.findByRole('button', { name: /remove friend/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /cancel friend request/i })).not.toBeInTheDocument();
+  });
+
   it('offers "Send Friend Request" to a stranger and sends it, then offers cancel', async () => {
     const calls = mockBackend({ status: 'none', request_id: null });
     renderPage();
@@ -587,7 +610,7 @@ describe('UserProfilePage', () => {
     await waitFor(() => expect(screen.getByText('My own profile tab')).toBeInTheDocument());
   });
 
-  it('caches the profile: a second visit does not refetch while fresh', async () => {
+  it('refetches the profile on a second visit so friendship is not stale', async () => {
     const calls = mockBackend({ status: 'none', request_id: null });
     const first = renderPage();
     await screen.findByText('Jane Doe');
@@ -595,6 +618,10 @@ describe('UserProfilePage', () => {
 
     renderPage();
     expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
-    expect(calls.filter((c) => c.method === 'GET' && c.url.includes(`/api/profile/${OTHER_ID}`))).toHaveLength(1);
+    await waitFor(() => {
+      expect(
+        calls.filter((c) => c.method === 'GET' && c.url.includes(`/api/profile/${OTHER_ID}`) && !c.url.includes('/friends')),
+      ).toHaveLength(2);
+    });
   });
 });
