@@ -331,7 +331,7 @@ export const AIAssistantWidget: React.FC = () => {
     }
   };
 
-  const sendMessage = async (rawContent: string) => {
+  const sendMessage = async (rawContent: string, options?: { reuseExisting?: boolean }) => {
     const trimmed = rawContent.trim();
     if (!trimmed || isLoading) return;
 
@@ -356,6 +356,22 @@ export const AIAssistantWidget: React.FC = () => {
 
     const nextMessages = [...thread, userMsg];
     setMessages(nextMessages);
+    const lastMessage = messages[messages.length - 1];
+    const reuseExisting =
+      options?.reuseExisting === true &&
+      lastMessage?.role === 'user' &&
+      lastMessage.content === trimmed;
+    const userMsg: ChatThreadMessage = reuseExisting
+      ? lastMessage
+      : {
+          id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          role: 'user',
+          content: trimmed,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+    const nextMessages = reuseExisting ? messages : [...messages, userMsg];
+    if (!reuseExisting) setMessages(nextMessages);
     setInput('');
     if (textareaRef.current) {
       textareaRef.current.style.height = '40px';
@@ -427,7 +443,7 @@ export const AIAssistantWidget: React.FC = () => {
   const handleRetry = () => {
     if (lastFailedPromptRef.current) {
       const promptToRetry = lastFailedPromptRef.current;
-      sendMessage(promptToRetry);
+      sendMessage(promptToRetry, { reuseExisting: true });
     }
   };
 
