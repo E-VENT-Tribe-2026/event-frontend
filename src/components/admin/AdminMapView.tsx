@@ -5,6 +5,7 @@ import type { EventItem } from '@/lib/storage';
 import { ALL_INTERESTS } from '@/lib/interests';
 import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
+import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
 
 interface AdminMapViewProps {
   /** Events already mapped with mapApiEventToItem (so they have lat / lng). */
@@ -136,9 +137,8 @@ export default function AdminMapView({
       }).setView([40.7128, -74.006], 3);
       mapInstance.current = map;
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        noWrap: true,
+      L.tileLayer(LEAFLET_TILE_URL, {
+        ...LEAFLET_TILE_OPTIONS,
         bounds: WORLD_BOUNDS,
       }).addTo(map);
 

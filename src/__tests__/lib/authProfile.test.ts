@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
+import { clearAuthUserCache, fetchAuthUserFromToken, sameAuthUserId } from '@/lib/authProfile';
 
 describe('sameAuthUserId', () => {
   it('returns false for missing values', () => {
@@ -17,6 +17,7 @@ describe('fetchAuthUserFromToken', () => {
   const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>();
 
   beforeEach(() => {
+    clearAuthUserCache();
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -53,5 +54,23 @@ describe('fetchAuthUserFromToken', () => {
     });
     const [, init] = fetchMock.mock.calls[0];
     expect(init?.headers).toMatchObject({ Authorization: 'Bearer bearer' });
+  });
+
+  it('reuses a successful lookup for the same token', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: 'uuid-2', email: 'b@x.com' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(fetchAuthUserFromToken('same-tok')).resolves.toEqual({
+      id: 'uuid-2',
+      email: 'b@x.com',
+    });
+    await expect(fetchAuthUserFromToken('same-tok')).resolves.toEqual({
+      id: 'uuid-2',
+      email: 'b@x.com',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

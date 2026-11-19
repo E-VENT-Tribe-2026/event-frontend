@@ -2,13 +2,22 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { setAuthToken } from '@/lib/auth';
+import { announceAccountRefusal } from '@/lib/accountRefusal';
+import { readSuspension, type SuspensionNotice } from '@/lib/suspension';
 import { setCurrentUserFromOAuth } from '@/lib/storage';
 import { getApiUrl } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/apiUrls';
-import { destinationAfterSignIn } from '@/lib/username';
+import { destinationAfterSignIn, hasChosenUsername } from '@/lib/username';
 import { pickDefaultIconUrl } from '@/lib/uploadAvatar';
 import { rememberGoogleName } from '@/pages/ChooseUsernamePage';
-import { fetchMfaStatus, needsAdminVerification, setPendingAdminVerification } from '@/lib/adminAuth';
+import {
+  fetchMfaStatus,
+  isAdministratorAuthStatus,
+  needsAdminVerification,
+  setPendingAdminVerification,
+} from '@/lib/adminAuth';
+import { consumeOAuthNextPath } from '@/lib/oauthRedirect';
+import { isPasswordResetAuthType, readAuthLinkType } from '@/lib/authLink';
 
 function normalizeNextPath(raw: string | null): string {
   const fallback = '/home';
@@ -26,6 +35,24 @@ function normalizeNextPath(raw: string | null): string {
   }
 }
 
+/**
+ * Google sign-in never calls /api/auth/login, so a suspension is checked here.
+ * Returns the notice only for a 403 with the suspended code; anything else
+ * (success, other errors, network failure) returns null so sign-in continues.
+ */
+async function fetchSuspension(accessToken: string): Promise<SuspensionNotice | null> {
+  try {
+    const res = await fetch(getApiUrl('/api/auth/me'), {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+    if (res.status !== 403) return null;
+    const body = await res.json().catch(() => null);
+    return readSuspension((body as { detail?: unknown } | null)?.detail);
+  } catch {
+    return null;
+  }
+}
+
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
 
@@ -33,14 +60,14 @@ export default function AuthCallbackPage() {
     const handleCallback = async () => {
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
       const queryParams = new URLSearchParams(window.location.search);
-      const recoveryType = hashParams.get('type') || queryParams.get('type');
-      const nextPath = normalizeNextPath(queryParams.get('next'));
+      const recoveryType = readAuthLinkType();
+      const nextPath = normalizeNextPath(queryParams.get('next') || consumeOAuthNextPath());
       const recoveryToken =
         hashParams.get('access_token') ||
         queryParams.get('access_token') ||
         queryParams.get('token');
 
-      if (recoveryType === 'recovery' && recoveryToken) {
+      if (isPasswordResetAuthType(recoveryType) && recoveryToken) {
         navigate(`/reset-password?token=${encodeURIComponent(recoveryToken)}`, { replace: true });
         return;
       }
@@ -62,7 +89,7 @@ export default function AuthCallbackPage() {
         session = exchanged.session;
       } else {
         const { data, error } = await supabase.auth.getSession();
-        if (recoveryType === 'recovery' && data?.session?.access_token) {
+        if (isPasswordResetAuthType(recoveryType) && data?.session?.access_token) {
           navigate(`/reset-password?token=${encodeURIComponent(data.session.access_token)}`, { replace: true });
           return;
         }
@@ -73,23 +100,8 @@ export default function AuthCallbackPage() {
         session = data.session;
       }
 
-      if (recoveryType === 'recovery' && session?.access_token) {
+      if (isPasswordResetAuthType(recoveryType) && session?.access_token) {
         navigate(`/reset-password?token=${encodeURIComponent(session.access_token)}`, { replace: true });
-        return;
-      }
-
-      setAuthToken(session.access_token);
-
-      // Scenario F: Google sign-in never calls /api/auth/login,
-      // so an administrator's status is checked separately here.
-      const mfaStatus = await fetchMfaStatus(session.access_token);
-      if (mfaStatus && needsAdminVerification(mfaStatus)) {
-        setPendingAdminVerification({
-          accessToken: session.access_token,
-          hasMfaLinked: Boolean(mfaStatus.has_mfa_linked),
-          factorId: mfaStatus.factor_id,
-        });
-        navigate('/admin-verify', { replace: true });
         return;
       }
 
@@ -97,6 +109,43 @@ export default function AuthCallbackPage() {
         session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
       ).trim();
       rememberGoogleName(googleName);
+
+      // Scenario F: Google sign-in never calls /api/auth/login.
+      // Check MFA before installing the token so SessionGuard / WarningsGate
+      // do not hit user-only endpoints (those 403 administrators and 401 aal1 tokens).
+      const mfaStatus = await fetchMfaStatus(session.access_token);
+      if (mfaStatus && needsAdminVerification(mfaStatus)) {
+        setPendingAdminVerification({
+          accessToken: session.access_token,
+          hasMfaLinked: Boolean(mfaStatus.has_mfa_linked),
+          factorId: mfaStatus.factor_id,
+        });
+        setAuthToken(session.access_token);
+        navigate('/admin-verify', { replace: true });
+        return;
+      }
+      if (isAdministratorAuthStatus(mfaStatus)) {
+        setCurrentUserFromOAuth({
+          id: session.user.id,
+          email: session.user.email || '',
+          name: googleName || session.user.email?.split('@')[0] || 'Administrator',
+          avatar: String(session.user.user_metadata?.avatar_url || ''),
+          role: 'administrator',
+        });
+        setAuthToken(session.access_token);
+        navigate('/admin', { replace: true });
+        return;
+      }
+
+      setAuthToken(session.access_token);
+
+      const suspension = await fetchSuspension(session.access_token);
+      if (suspension) {
+        // Keep the token so RequireAuth does not bounce them; the overlay
+        // is the only way out (welcome or sign-in, both of which sign out).
+        announceAccountRefusal({ kind: 'suspended', reason: suspension.reason });
+        return;
+      }
 
       let avatarUrl = String(session.user.user_metadata?.avatar_url || '');
       let fullName = googleName || session.user.email?.split('@')[0] || '';
@@ -118,16 +167,18 @@ export default function AuthCallbackPage() {
 
         if (/googleusercontent|ggpht\.com/i.test(avatarUrl)) {
           const defaultIcon = pickDefaultIconUrl();
-          await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
-            method: 'PUT',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({ avatar_url: defaultIcon }),
-          });
           avatarUrl = defaultIcon;
+          if (hasChosenUsername(username)) {
+            await fetch(getApiUrl(API_ENDPOINTS.PROFILE_ME), {
+              method: 'PUT',
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+              },
+              body: JSON.stringify({ avatar_url: defaultIcon }),
+            });
+          }
         }
       } catch {
         /* use metadata defaults */
@@ -137,6 +188,7 @@ export default function AuthCallbackPage() {
         id: session.user.id,
         email: session.user.email || '',
         name: fullName,
+        username,
         avatar: avatarUrl,
         bio,
         interests,

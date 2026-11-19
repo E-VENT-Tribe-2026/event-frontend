@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ProfilePage from '@/pages/ProfilePage';
 import { clearAuthToken, setAuthToken } from '@/lib/auth';
@@ -189,63 +189,66 @@ describe('ProfilePage: Events / Friends tabs and event sub-tabs', () => {
 
   it('Upcoming tab (default) shows organized and joined upcoming events only', async () => {
     await renderPage();
+    const list = await screen.findByTestId('profile-event-list');
 
-    expect(await screen.findByText('Organized Upcoming Party')).toBeInTheDocument();
-    expect(screen.getByText('Joined Upcoming Concert')).toBeInTheDocument();
+    expect(within(list).getByText('Organized Upcoming Party')).toBeInTheDocument();
+    expect(within(list).getByText('Joined Upcoming Concert')).toBeInTheDocument();
 
-    expect(screen.queryByText('Organized Cancelled Trip')).not.toBeInTheDocument();
-    expect(screen.queryByText('Joined Cancelled Workshop')).not.toBeInTheDocument();
-    expect(screen.queryByText('Organized Past Meetup')).not.toBeInTheDocument();
-    expect(screen.queryByText('Joined Past Hackathon')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Organized Cancelled Trip')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Joined Cancelled Workshop')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Organized Past Meetup')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Joined Past Hackathon')).not.toBeInTheDocument();
   });
 
   it('labels organized events "Created" and joined events "Joined"', async () => {
     await renderPage();
 
-    await screen.findByText('Organized Upcoming Party');
-    expect(screen.getByText('Created')).toBeInTheDocument();
-    expect(screen.getByText('Joined')).toBeInTheDocument();
+    const list = await screen.findByTestId('profile-event-list');
+    expect(within(list).getByText('Created')).toBeInTheDocument();
+    expect(within(list).getByText('Joined')).toBeInTheDocument();
   });
 
   it('Past tab shows organized and joined past events only', async () => {
     await renderPage();
-    await screen.findByText('Organized Upcoming Party');
+    await screen.findByTestId('profile-event-list');
 
     openSubTab('past');
 
-    expect(await screen.findByText('Organized Past Meetup')).toBeInTheDocument();
-    expect(screen.getByText('Joined Past Hackathon')).toBeInTheDocument();
+    const list = screen.getByTestId('profile-event-list');
+    expect(await within(list).findByText('Organized Past Meetup')).toBeInTheDocument();
+    expect(within(list).getByText('Joined Past Hackathon')).toBeInTheDocument();
 
-    expect(screen.queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
-    expect(screen.queryByText('Joined Upcoming Concert')).not.toBeInTheDocument();
-    expect(screen.queryByText('Organized Cancelled Trip')).not.toBeInTheDocument();
-    expect(screen.queryByText('Joined Cancelled Workshop')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Joined Upcoming Concert')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Organized Cancelled Trip')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Joined Cancelled Workshop')).not.toBeInTheDocument();
   });
 
   it('Cancelled tab shows organized and joined cancelled events only', async () => {
     await renderPage();
-    await screen.findByText('Organized Upcoming Party');
+    await screen.findByTestId('profile-event-list');
 
     openSubTab('cancelled');
 
-    expect(await screen.findByText('Organized Cancelled Trip')).toBeInTheDocument();
-    expect(screen.getByText('Joined Cancelled Workshop')).toBeInTheDocument();
+    const list = screen.getByTestId('profile-event-list');
+    expect(await within(list).findByText('Organized Cancelled Trip')).toBeInTheDocument();
+    expect(within(list).getByText('Joined Cancelled Workshop')).toBeInTheDocument();
 
-    expect(screen.queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
-    expect(screen.queryByText('Joined Upcoming Concert')).not.toBeInTheDocument();
-    expect(screen.queryByText('Organized Past Meetup')).not.toBeInTheDocument();
-    expect(screen.queryByText('Joined Past Hackathon')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Joined Upcoming Concert')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Organized Past Meetup')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Joined Past Hackathon')).not.toBeInTheDocument();
   });
 
   it('Favourites tab shows saved events only', async () => {
     await renderPage();
-    await screen.findByText('Organized Upcoming Party');
+    await screen.findByTestId('profile-full-name');
 
     openSubTab('favourites');
 
     expect(await screen.findByText('Saved Events')).toBeInTheDocument();
     expect(screen.getByText('Saved Dream Vacation')).toBeInTheDocument();
-    expect(screen.queryByText('Organized Upcoming Party')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('profile-event-list')).not.toBeInTheDocument();
   });
 
   it('Friends tab shows empty states for accepted friends and requests', async () => {
@@ -257,6 +260,9 @@ describe('ProfilePage: Events / Friends tabs and event sub-tabs', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /requests/i }));
     expect(screen.getByText('No pending friend requests.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /blocked/i }));
+    expect(screen.getByText('You have not blocked anyone.')).toBeInTheDocument();
 
     // Event sub-tabs are not rendered while on Friends
     expect(screen.queryByTestId('tab-upcoming')).not.toBeInTheDocument();

@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import AppToast from '@/components/AppToast';
 import { getAuthToken } from '@/lib/auth';
+import { invalidatePrefix } from '@/lib/queryCache';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001';
 const DEFAULT_IMAGE = 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=600&q=80';
@@ -119,6 +120,7 @@ export default function PaymentPage() {
             setToast({ show: true, message: (err.detail || 'Could not join this event') as string, type: 'error' });
             return;
           }
+          invalidatePrefix('/api/participants/my/events'); // the new event's chat must show up in Chats
         } catch {
           setProcessing(false);
           setToast({ show: true, message: 'Cannot reach server. Try again.', type: 'error' });

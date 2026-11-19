@@ -3,7 +3,7 @@
  *
  * Features:
  * - In-memory cache with configurable TTL (time-to-live)
- * - sessionStorage persistence for selected keys (survives soft navigation)
+ * - sessionStorage persistence for the tab session (survives reload, cleared on tab close)
  * - In-flight request deduplication (same key won't fire twice simultaneously)
  * - Manual invalidation by key or key prefix
  * - Stale-while-revalidate: returns cached data immediately, refreshes in background
@@ -28,10 +28,10 @@ const PERSISTENT_KEYS = new Set<string>();
 
 // ── Default TTLs (ms) ────────────────────────────────────────────────────────
 export const TTL = {
-  SHORT:   30_000,   //  30 s  — participant counts, my-status
-  MEDIUM:  120_000,  //   2 m  — events list, favorites
-  LONG:    300_000,  //   5 m  — max-price, recommendations, profile
-  SESSION: 900_000,  //  15 m  — my-events, joined-events (rarely change mid-session)
+  SHORT:   30_000,              //  30 s  — notifications, chat, attendee counts
+  MEDIUM:  10 * 60_000,         //  10 m  — events list, favorites, friends
+  LONG:    30 * 60_000,         //  30 m  — profile, max-price, recommendations
+  SESSION: 8 * 60 * 60_000,     //   8 h  — tab session (reload still hits cache)
 } as const;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -71,37 +71,30 @@ function removeFromSession(key: string): void {
  * @param key       Unique cache key (e.g. "/api/events/max-price")
  * @param fetcher   Async function that returns the data
  * @param ttl       How long the cached value is considered fresh (ms)
- * @param persist   Whether to also persist to sessionStorage
+ * @param persist   Whether to also persist to sessionStorage (default: yes, for the tab session)
  */
-export async function cachedFetch<T>(
-  key: string,
-  fetcher: () => Promise<T>,
-  ttl: number = TTL.MEDIUM,
-  persist = false,
-): Promise<T> {
-  // 1. Check memory cache
+function readEntry<T>(key: string, persist: boolean): CacheEntry<T> | null {
   const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
-  if (memEntry && !isStale(memEntry)) {
-    return memEntry.data;
-  }
-
-  // 2. Check sessionStorage (for persistent keys)
+  if (memEntry) return memEntry;
   if (persist || PERSISTENT_KEYS.has(key)) {
     const sessEntry = readFromSession<T>(key);
-    if (sessEntry && !isStale(sessEntry)) {
-      // Warm memory cache from session
+    if (sessEntry) {
       memoryCache.set(key, sessEntry);
-      return sessEntry.data;
+      return sessEntry;
     }
   }
+  return null;
+}
 
-  // 3. Deduplicate in-flight requests
+function runFetch<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttl: number,
+  persist: boolean,
+): Promise<T> {
   const existing = inFlight.get(key);
-  if (existing) {
-    return existing.promise as Promise<T>;
-  }
+  if (existing) return existing.promise as Promise<T>;
 
-  // 4. Fire the request
   const promise = fetcher().then((data) => {
     const entry: CacheEntry<T> = { data, fetchedAt: Date.now(), ttl };
     memoryCache.set(key, entry);
@@ -119,6 +112,26 @@ export async function cachedFetch<T>(
   return promise;
 }
 
+export async function cachedFetch<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttl: number = TTL.MEDIUM,
+  persist = true,
+): Promise<T> {
+  const cached = readEntry<T>(key, persist);
+  if (cached && !isStale(cached)) {
+    return cached.data;
+  }
+
+  // Stale-while-revalidate: navigating back should not wait on the network.
+  if (cached) {
+    void runFetch(key, fetcher, ttl, persist).catch(() => { /* keep stale copy */ });
+    return cached.data;
+  }
+
+  return runFetch(key, fetcher, ttl, persist);
+}
+
 /**
  * Stale-while-revalidate: return cached data immediately (even if stale),
  * then refresh in the background and call onUpdate with fresh data.
@@ -128,18 +141,21 @@ export function staleWhileRevalidate<T>(
   fetcher: () => Promise<T>,
   ttl: number = TTL.MEDIUM,
   onUpdate: (data: T) => void,
-  persist = false,
+  persist = true,
 ): T | null {
   // Return whatever we have immediately
   const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
   const sessEntry = (persist || PERSISTENT_KEYS.has(key)) ? readFromSession<T>(key) : null;
   const cached = memEntry ?? sessEntry ?? null;
 
-  // Revalidate in background if stale or missing
-  if (!cached || isStale(cached)) {
-    cachedFetch(key, fetcher, ttl, persist)
+  if (!cached) {
+    void runFetch(key, fetcher, ttl, persist)
       .then(onUpdate)
       .catch(() => { /* silent background refresh failure */ });
+  } else if (isStale(cached)) {
+    void runFetch(key, fetcher, ttl, persist)
+      .then(onUpdate)
+      .catch(() => { /* keep stale copy */ });
   }
 
   return cached?.data ?? null;
@@ -152,13 +168,23 @@ export function setCacheEntry<T>(
   key: string,
   data: T,
   ttl: number = TTL.MEDIUM,
-  persist = false,
+  persist = true,
 ): void {
   const entry: CacheEntry<T> = { data, fetchedAt: Date.now(), ttl };
   memoryCache.set(key, entry);
   if (persist || PERSISTENT_KEYS.has(key)) {
     writeToSession(key, entry);
   }
+}
+
+/**
+ * Read a cached value without fetching, even if it is stale. Returns null when nothing is cached.
+ */
+export function peekCache<T>(key: string): T | null {
+  const memEntry = memoryCache.get(key) as CacheEntry<T> | undefined;
+  if (memEntry) return memEntry.data;
+  const sessEntry = readFromSession<T>(key);
+  return sessEntry?.data ?? null;
 }
 
 /**
@@ -211,7 +237,19 @@ export function clearCache(): void {
  * Get a cached value synchronously (returns null if not cached or stale).
  */
 export function getCached<T>(key: string): T | null {
-  const entry = memoryCache.get(key) as CacheEntry<T> | undefined;
+  const entry = readEntry<T>(key, true);
   if (entry && !isStale(entry)) return entry.data;
   return null;
+}
+
+if (typeof window !== 'undefined') {
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const storageKey = sessionStorage.key(i);
+      if (!storageKey?.startsWith('qc:')) continue;
+      const key = storageKey.slice(3);
+      const entry = readFromSession(key);
+      if (entry) memoryCache.set(key, entry);
+    }
+  } catch { /* ignore */ }
 }

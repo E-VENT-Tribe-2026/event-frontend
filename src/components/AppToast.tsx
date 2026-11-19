@@ -29,7 +29,7 @@ export default function AppToast({ message, type = 'success', show, onClose }: T
           initial={{ y: -60, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -60, opacity: 0 }}
-          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] rounded-xl px-6 py-3 text-sm font-medium shadow-glow ${colors[type]}`}
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[1600] rounded-xl px-6 py-3 text-sm font-medium shadow-glow ${colors[type]}`}
         >
           {message}
         </motion.div>

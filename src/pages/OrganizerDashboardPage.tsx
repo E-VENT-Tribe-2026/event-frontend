@@ -4,6 +4,7 @@ import { getCurrentUser, getEvents, getJoinRequests, updateJoinRequest, joinEven
 import { BarChart3, Users, DollarSign, Ticket, Check, X, Trash2, Edit, Plus, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
+import TopNavProfile from '@/components/TopNavProfile';
 import AppToast from '@/components/AppToast';
 
 export default function OrganizerDashboardPage() {
@@ -69,7 +70,10 @@ export default function OrganizerDashboardPage() {
       <AppToast message={toast.message} type={toast.type} show={toast.show} onClose={() => setToast(t => ({ ...t, show: false }))} />
 
       <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-lg px-4 py-3">
-        <h1 className="text-lg font-bold text-gradient">Dashboard</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-lg font-bold text-gradient">Dashboard</h1>
+          <TopNavProfile />
+        </div>
       </header>
 
       {/* Tabs */}

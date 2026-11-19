@@ -1,5 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import 'leaflet/dist/leaflet.css';
+import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
+
+/** Centre of Germany — used when the browser has not granted location access. */
+export const GERMANY_MAP_CENTER: [number, number] = [51.1657, 10.4515];
 
 export type LocationPickerMapProps = {
   latitude: number | null;
@@ -14,29 +18,30 @@ export type LocationPickerMapProps = {
  * Validates that coordinates are present, 
  * not NaN, and not the 0,0 placeholder.
  */
-export const hasValidEventCoordinates = (lat: any, lng: any): boolean => {
-  // Check for null, undefined, or NaN
-  if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
-    return false;
-  }
-
-  // Check for the 0,0 placeholder specifically (Null Island)
-  if (lat === 0 && lng === 0) {
-    return false;
-  }
-
-  // Ensure they are finite numbers (prevents Infinity issues)
-  return Number.isFinite(lat) && Number.isFinite(lng);
-}; // <--- Make sure this brace is here!
+export const hasValidEventCoordinates = (lat: unknown, lng: unknown): boolean => {
+  if (lat === null || lng === null || lat === undefined || lng === undefined) return false;
+  const latN = typeof lat === 'number' ? lat : Number(lat);
+  const lngN = typeof lng === 'number' ? lng : Number(lng);
+  if (!Number.isFinite(latN) || !Number.isFinite(lngN)) return false;
+  if (latN === 0 && lngN === 0) return false;
+  return latN >= -90 && latN <= 90 && lngN >= -180 && lngN <= 180;
+};
 
 /**
  * Click the map to place or move the pin; drag the pin to fine-tune.
  */
+function zoomForCenter(center: [number, number]): number {
+  const [lat, lng] = center;
+  const germany = Math.abs(lat - GERMANY_MAP_CENTER[0]) < 0.05
+    && Math.abs(lng - GERMANY_MAP_CENTER[1]) < 0.05;
+  return germany ? 6 : 13;
+}
+
 export default function LocationPickerMap({
   latitude,
   longitude,
   onLocationChange,
-  defaultCenter = [40.7128, -74.006],
+  defaultCenter = GERMANY_MAP_CENTER,
   className = 'h-56',
 }: LocationPickerMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -45,6 +50,7 @@ export default function LocationPickerMap({
   const leafletRef = useRef<any>(null);
   const mapReadyRef = useRef(false);
   const defaultCenterRef = useRef(defaultCenter);
+  defaultCenterRef.current = defaultCenter;
   const onLocationChangeRef = useRef(onLocationChange);
   onLocationChangeRef.current = onLocationChange;
 
@@ -83,14 +89,11 @@ export default function LocationPickerMap({
         minZoom: 2,
         maxBounds: worldBounds,
         maxBoundsViscosity: 1.0,
-      }).setView(center, 11);
+      }).setView(center, zoomForCenter(center));
       mapInstanceRef.current = map;
       leafletRef.current = L;
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        noWrap: true,
-      }).addTo(map);
+      L.tileLayer(LEAFLET_TILE_URL, LEAFLET_TILE_OPTIONS).addTo(map);
 
       map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
         const { lat, lng } = e.latlng;
@@ -128,6 +131,14 @@ export default function LocationPickerMap({
       markerRef.current = null;
     }
   }, [latitude, longitude, placeOrMoveMarker]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReadyRef.current) return;
+    if (hasValidEventCoordinates(latitude, longitude)) return;
+    const center = defaultCenterRef.current;
+    map.setView(center, zoomForCenter(center));
+  }, [defaultCenter[0], defaultCenter[1], latitude, longitude]);
 
   return (
     <div className="space-y-2">
