@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AIAssistantWidget from '@/components/assistant/AIAssistantWidget';
+import { AUTH_TOKEN_EVENT } from '@/lib/auth';
 import * as authModule from '@/lib/auth';
 import * as assistantApiModule from '@/lib/assistantApi';
 import * as storageModule from '@/lib/storage';
@@ -348,5 +349,65 @@ describe('AIAssistantWidget — Ticket #196', () => {
       fireEvent.click(screen.getByTestId('ai-chat-send'));
       await waitFor(() => expect(sendChatSpy).toHaveBeenCalledTimes(i + 1));
     }
+  });
+
+  it('keeps another account conversation out of the drawer and the next request', async () => {
+    const privateText = 'Private conversation belonging to Account A';
+    const accountA = { id: 'account-a', role: 'participant' } as storageModule.User;
+    const accountB = { id: 'account-b', role: 'participant' } as storageModule.User;
+    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue(accountA);
+    window.sessionStorage.setItem(
+      'event_assistant_chat_history_v1:account-a',
+      JSON.stringify([{ id: 'a1', role: 'user', content: privateText, timestamp: '10:00' }])
+    );
+    window.sessionStorage.setItem(
+      'event_assistant_chat_history_v1',
+      JSON.stringify([{ id: 'legacy', role: 'user', content: 'Legacy shared thread', timestamp: '09:00' }])
+    );
+    window.sessionStorage.setItem('event_assistant_draft_prefill', JSON.stringify({ title: 'Account A draft' }));
+
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <AIAssistantWidget />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByTestId('ai-assistant-fab'));
+    expect(await screen.findByText(privateText)).toBeInTheDocument();
+    expect(screen.queryByText('Legacy shared thread')).not.toBeInTheDocument();
+
+    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue(null);
+    vi.spyOn(authModule, 'getAuthToken').mockReturnValue(null);
+    act(() => {
+      window.dispatchEvent(new Event(AUTH_TOKEN_EVENT));
+    });
+
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem('event_assistant_chat_history_v1')).toBeNull();
+      expect(window.sessionStorage.getItem('event_assistant_draft_prefill')).toBeNull();
+    });
+    expect(window.sessionStorage.getItem('event_assistant_chat_history_v1:account-a')).toContain(privateText);
+
+    vi.spyOn(storageModule, 'getCurrentUser').mockReturnValue(accountB);
+    vi.spyOn(authModule, 'getAuthToken').mockReturnValue('account-b-token');
+    const sendChatSpy = vi.spyOn(assistantApiModule, 'sendAssistantChat').mockResolvedValue({
+      reply: 'Hello B',
+    });
+    act(() => {
+      window.dispatchEvent(new Event(AUTH_TOKEN_EVENT));
+    });
+
+    fireEvent.click(await screen.findByTestId('ai-assistant-fab'));
+    expect(await screen.findByText('Welcome to E-VENT AI')).toBeInTheDocument();
+    expect(screen.queryByText(privateText)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('ai-chat-input'), { target: { value: 'Hello from Account B' } });
+    fireEvent.click(screen.getByTestId('ai-chat-send'));
+
+    await waitFor(() => expect(sendChatSpy).toHaveBeenCalledTimes(1));
+    expect(sendChatSpy).toHaveBeenCalledWith([
+      { role: 'user', content: 'Hello from Account B' },
+    ]);
+    expect(JSON.stringify(sendChatSpy.mock.calls[0][0])).not.toContain(privateText);
   });
 });
