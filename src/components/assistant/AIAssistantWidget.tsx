@@ -347,16 +347,7 @@ export const AIAssistantWidget: React.FC = () => {
     lastFailedPromptRef.current = trimmed;
     localEdits.current = true;
 
-    const userMsg: ChatThreadMessage = {
-      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      role: 'user',
-      content: trimmed,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    const nextMessages = [...thread, userMsg];
-    setMessages(nextMessages);
-    const lastMessage = messages[messages.length - 1];
+    const lastMessage = thread[thread.length - 1];
     const reuseExisting =
       options?.reuseExisting === true &&
       lastMessage?.role === 'user' &&
@@ -370,7 +361,7 @@ export const AIAssistantWidget: React.FC = () => {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
 
-    const nextMessages = reuseExisting ? messages : [...messages, userMsg];
+    const nextMessages = reuseExisting ? thread : [...thread, userMsg];
     if (!reuseExisting) setMessages(nextMessages);
     setInput('');
     if (textareaRef.current) {
