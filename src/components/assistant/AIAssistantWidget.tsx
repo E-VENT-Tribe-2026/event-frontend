@@ -15,7 +15,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { getAuthToken } from '@/lib/auth';
+import { AUTH_TOKEN_EVENT, getAuthToken } from '@/lib/auth';
 import { isAdministratorRole } from '@/lib/adminApi';
 import { getCurrentUser } from '@/lib/storage';
 import {
@@ -47,8 +47,46 @@ export interface ChatThreadMessage {
   validationIssues?: string[];
 }
 
-const STORAGE_KEY = 'event_assistant_chat_history_v1';
+const LEGACY_HISTORY_KEY = 'event_assistant_chat_history_v1';
+const DRAFT_PREFILL_KEY = 'event_assistant_draft_prefill';
 const MAX_CHAR_COUNT = 1000;
+
+function historyStorageKey(userId: string): string {
+  return `${LEGACY_HISTORY_KEY}:${userId}`;
+}
+
+function readStoredHistory(userId: string | null): ChatThreadMessage[] {
+  if (!userId) return [];
+  try {
+    const saved = window.sessionStorage.getItem(historyStorageKey(userId));
+    if (!saved) return [];
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is ChatThreadMessage =>
+        Boolean(item) &&
+        (item.role === 'user' || item.role === 'assistant') &&
+        typeof item.content === 'string'
+    );
+  } catch {
+    return [];
+  }
+}
+
+function signedInAccountId(): string | null {
+  if (!getAuthToken()) return null;
+  const userId = getCurrentUser()?.id;
+  return userId ? String(userId) : null;
+}
+
+function clearSharedAssistantStorage(): void {
+  try {
+    window.sessionStorage.removeItem(LEGACY_HISTORY_KEY);
+    window.sessionStorage.removeItem(DRAFT_PREFILL_KEY);
+  } catch {
+    // Storage unavailable
+  }
+}
 
 const CHAT_REQUEST_LIMIT = 20;
 
@@ -138,18 +176,8 @@ export const AIAssistantWidget: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [messages, setMessages] = useState<ChatThreadMessage[]>(() => {
-    try {
-      const saved = window.sessionStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // Ignore parse errors
-    }
-    return [];
-  });
+  const [accountId, setAccountId] = useState<string | null>(() => signedInAccountId());
+  const [messages, setMessages] = useState<ChatThreadMessage[]>(() => readStoredHistory(signedInAccountId()));
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -164,35 +192,66 @@ export const AIAssistantWidget: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastFailedPromptRef = useRef<string | null>(null);
+  const [authEpoch, setAuthEpoch] = useState(0);
   const historyRequest = useRef(0);
   const localEdits = useRef(false);
+  const activeAccountId = signedInAccountId();
+  const thread = activeAccountId === accountId ? messages : [];
+  void authEpoch;
 
-  // Sync messages to sessionStorage
   useEffect(() => {
+    const onToken = () => setAuthEpoch((value) => value + 1);
+    window.addEventListener(AUTH_TOKEN_EVENT, onToken);
+    return () => window.removeEventListener(AUTH_TOKEN_EVENT, onToken);
+  }, []);
+
+  useEffect(() => {
+    if (activeAccountId === accountId) return;
+    historyRequest.current += 1;
+    localEdits.current = true;
+    setAccountId(activeAccountId);
+    setMessages(readStoredHistory(activeAccountId));
+    setBannerError(null);
+    setInput('');
+    lastFailedPromptRef.current = null;
+    setIsLoading(false);
+    if (!activeAccountId) {
+      setIsOpen(false);
+      setIsMinimized(false);
+      setHistoryLoading(false);
+      clearSharedAssistantStorage();
+    }
+  }, [activeAccountId, accountId]);
+
+  useEffect(() => {
+    if (!accountId || accountId !== activeAccountId) return;
     try {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      window.sessionStorage.setItem(historyStorageKey(accountId), JSON.stringify(messages));
+      window.sessionStorage.removeItem(LEGACY_HISTORY_KEY);
     } catch {
       // Storage unavailable
     }
-  }, [messages]);
+  }, [messages, accountId, activeAccountId]);
 
   useEffect(() => {
-    if (!isOpen || isMinimized) return;
+    if (!isOpen || isMinimized || !getAuthToken()) return;
     const requestId = ++historyRequest.current;
+    const requestedAccountId = activeAccountId;
     localEdits.current = false;
     setHistoryLoading(true);
     fetchAssistantHistory()
       .then((history) => {
         if (historyRequest.current !== requestId || localEdits.current) return;
+        if (signedInAccountId() !== requestedAccountId) return;
         setMessages(threadFromHistory(history.messages));
       })
       .catch(() => {
-        // Keep the thread already on screen when history cannot be loaded.
+        // Keep the current account's thread when history cannot be loaded.
       })
       .finally(() => {
         if (historyRequest.current === requestId) setHistoryLoading(false);
       });
-  }, [isOpen, isMinimized]);
+  }, [isOpen, isMinimized, activeAccountId]);
 
   // Scroll to bottom on new messages or loading state change
   const scrollToBottom = useCallback((smooth = true) => {
@@ -265,7 +324,8 @@ export const AIAssistantWidget: React.FC = () => {
     setBannerError(null);
     lastFailedPromptRef.current = null;
     try {
-      window.sessionStorage.removeItem(STORAGE_KEY);
+      if (activeAccountId) window.sessionStorage.removeItem(historyStorageKey(activeAccountId));
+      window.sessionStorage.removeItem(LEGACY_HISTORY_KEY);
     } catch {
       // Ignore
     }
@@ -287,6 +347,15 @@ export const AIAssistantWidget: React.FC = () => {
     lastFailedPromptRef.current = trimmed;
     localEdits.current = true;
 
+    const userMsg: ChatThreadMessage = {
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      role: 'user',
+      content: trimmed,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    const nextMessages = [...thread, userMsg];
+    setMessages(nextMessages);
     const lastMessage = messages[messages.length - 1];
     const reuseExisting =
       options?.reuseExisting === true &&
@@ -328,7 +397,7 @@ export const AIAssistantWidget: React.FC = () => {
       const parsed = extractCardsFromReply(res.reply || '', res);
       if (parsed.draft) {
         try {
-          window.sessionStorage.setItem('event_assistant_draft_prefill', JSON.stringify(parsed.draft));
+          window.sessionStorage.setItem(DRAFT_PREFILL_KEY, JSON.stringify(parsed.draft));
           window.dispatchEvent(new CustomEvent('assistant-draft-updated', { detail: parsed.draft }));
         } catch {
           // The chat card still shows the updated draft when storage is unavailable.
@@ -538,7 +607,7 @@ export const AIAssistantWidget: React.FC = () => {
 
               {/* Controls */}
               <div className="flex items-center gap-1">
-                {messages.length > 0 && !historyLoading && (
+                {thread.length > 0 && !historyLoading && (
                   <button
                     type="button"
                     data-testid="ai-new-chat"
@@ -621,7 +690,7 @@ export const AIAssistantWidget: React.FC = () => {
                   <div className="ml-auto h-10 w-1/2 animate-pulse rounded-2xl bg-muted/50" />
                   <div className="h-16 w-3/4 animate-pulse rounded-2xl bg-muted/70" />
                 </div>
-              ) : messages.length === 0 ? (
+              ) : thread.length === 0 ? (
                 /* Welcome / Orientation Guidance */
                 <div className="flex h-full flex-col justify-center text-center px-2 py-6">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl gradient-assistant text-white shadow-assistant mb-3">
@@ -656,7 +725,7 @@ export const AIAssistantWidget: React.FC = () => {
                 </div>
               ) : (
                 /* Chat Messages */
-                messages.map((msg) => {
+                thread.map((msg) => {
                   const isUser = msg.role === 'user';
 
                   return (
