@@ -1,3 +1,6 @@
+// @cpt-comp:cpt-eventfrontend-component-markdown-renderer:p1
+// @cpt-algo:cpt-eventfrontend-algo-ai-assistant-markdown:p1
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-entry
 import React, { useState } from 'react';
 import { Copy, Check, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -34,7 +37,9 @@ type Block =
   | { type: 'codeblock'; language: string; code: string }
   | { type: 'blockquote'; text: string }
   | { type: 'paragraph'; text: string };
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-entry
 
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-parse-blocks
 function parseMarkdownBlocks(rawText: string): Block[] {
   const lines = rawText.replace(/\r\n/g, '\n').split('\n');
   const blocks: Block[] = [];
@@ -139,7 +144,9 @@ function parseMarkdownBlocks(rawText: string): Block[] {
 
   return blocks;
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-parse-blocks
 
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-render-blocks
 function renderBlock(block: Block, key: number): React.ReactNode {
   switch (block.type) {
     case 'heading': {
@@ -203,10 +210,12 @@ function renderBlock(block: Block, key: number): React.ReactNode {
       return null;
   }
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-render-blocks
 
 /**
  * Render inline tokens: **bold**, *italic*, `code`, [link](url), etc.
  */
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-render-inline
 export function renderInline(text: string): React.ReactNode[] {
   // Regex pattern matching links, code, bold/italic
   const tokenRegex = /(\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*\*([^*]+)\*\*\*|\*\*([^*]+)\*\*|\*([^*]+)\*|__([^_]+)__|~~([^~]+)~~)/g;
@@ -340,3 +349,4 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     </div>
   );
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-markdown:p1:inst-markdown-render-inline

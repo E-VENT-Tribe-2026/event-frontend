@@ -1,3 +1,8 @@
+// @cpt-comp:cpt-eventfrontend-component-chat-panel:p1
+// @cpt-flow:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1
+// @cpt-state:cpt-eventfrontend-state-ai-assistant-widget:p1
+// @cpt-dod:cpt-eventfrontend-dod-ai-assistant-implementation:p1
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-storage-helpers
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
@@ -89,7 +94,9 @@ function clearSharedAssistantStorage(): void {
 }
 
 const CHAT_REQUEST_LIMIT = 20;
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-storage-helpers
 
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-history-normalize
 function issueTexts(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const texts = value
@@ -143,7 +150,9 @@ function threadFromHistory(history: AssistantHistoryMessage[]): ChatThreadMessag
     ];
   });
 }
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-history-normalize
 
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-route-guards
 const SUGGESTED_PROMPTS = [
   'What is E-VENT and what can you help me with?',
   '🔍 Search upcoming music events',
@@ -168,7 +177,9 @@ export function isHiddenAssistantRoute(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(path) || PUBLIC_PATHS.includes(pathname)) return true;
   return path === '/admin' || path.startsWith('/admin');
 }
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-route-guards
 
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-state-init
 export const AIAssistantWidget: React.FC = () => {
   const location = useLocation();
   const token = getAuthToken();
@@ -204,7 +215,9 @@ export const AIAssistantWidget: React.FC = () => {
     window.addEventListener(AUTH_TOKEN_EVENT, onToken);
     return () => window.removeEventListener(AUTH_TOKEN_EVENT, onToken);
   }, []);
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-state-init
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-account-sync
   useEffect(() => {
     if (activeAccountId === accountId) return;
     historyRequest.current += 1;
@@ -252,7 +265,9 @@ export const AIAssistantWidget: React.FC = () => {
         if (historyRequest.current === requestId) setHistoryLoading(false);
       });
   }, [isOpen, isMinimized, activeAccountId]);
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-account-sync
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-ui-effects
   // Scroll to bottom on new messages or loading state change
   const scrollToBottom = useCallback((smooth = true) => {
     messagesEndRef.current?.scrollIntoView({
@@ -285,6 +300,10 @@ export const AIAssistantWidget: React.FC = () => {
   if (!token || isHiddenAssistantRoute(location.pathname) || isAdministratorRole(viewer?.role)) {
     return null;
   }
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-ui-effects
+
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-window-controls
+  // @cpt-begin:cpt-eventfrontend-state-ai-assistant-widget:p1:inst-state-open
   const handleOpen = () => {
     setHistoryLoading(true);
     setIsOpen(true);
@@ -294,16 +313,19 @@ export const AIAssistantWidget: React.FC = () => {
       scrollToBottom(false);
     }, 150);
   };
+  // @cpt-end:cpt-eventfrontend-state-ai-assistant-widget:p1:inst-state-open
 
   const handleClose = () => {
     setIsOpen(false);
     setIsMinimized(false);
   };
 
+  // @cpt-begin:cpt-eventfrontend-state-ai-assistant-widget:p1:inst-state-minimize
   const handleToggleMinimize = () => {
     if (isMinimized) setHistoryLoading(true);
     setIsMinimized((prev) => !prev);
   };
+  // @cpt-end:cpt-eventfrontend-state-ai-assistant-widget:p1:inst-state-minimize
 
   const handleNewChat = async () => {
     if (historyLoading || startingNewChat) return;
@@ -330,7 +352,9 @@ export const AIAssistantWidget: React.FC = () => {
       // Ignore
     }
   };
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-window-controls
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-prepare-turn
   const sendMessage = async (rawContent: string, options?: { reuseExisting?: boolean }) => {
     const trimmed = rawContent.trim();
     if (!trimmed || isLoading) return;
@@ -377,7 +401,9 @@ export const AIAssistantWidget: React.FC = () => {
         role: m.role,
         content: m.content,
       }));
+    // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-prepare-turn
 
+    // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-send-turn
     try {
       // Standard multi-turn chat API. The latest draft goes with the turn so a
       // clarification is merged onto it and comes back on this same reply.
@@ -444,7 +470,9 @@ export const AIAssistantWidget: React.FC = () => {
       sendMessage(input);
     }
   };
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-send-turn
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-fab
   return (
     <>
       {/* Floating Action Button (FAB) */}
@@ -548,7 +576,9 @@ export const AIAssistantWidget: React.FC = () => {
           </button>
         </motion.div>
       )}
+      {/* // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-fab */}
 
+      {/* // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-header */}
       {/* Main Slide-Out / Modal Chat Container */}
       <AnimatePresence>
         {isOpen && !isMinimized && (
@@ -668,7 +698,9 @@ export const AIAssistantWidget: React.FC = () => {
                 </div>
               </div>
             )}
+            {/* // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-header */}
 
+            {/* // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-thread */}
             {/* Message Thread Area */}
             <div
               data-testid="ai-chat-messages"
@@ -805,7 +837,9 @@ export const AIAssistantWidget: React.FC = () => {
 
               <div ref={messagesEndRef} />
             </div>
+            {/* // @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-thread */}
 
+            {/* // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-composer */}
             {/* Quick Tools Bar */}
             <div className="flex items-center gap-1.5 border-t border-border/40 bg-card/50 px-3 py-1.5 text-[11px] text-muted-foreground">
               <span className="text-[10px] font-semibold uppercase tracking-wider">Quick:</span>
@@ -880,3 +914,4 @@ export const AIAssistantWidget: React.FC = () => {
 };
 
 export default AIAssistantWidget;
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-chat-panel:p1:inst-chat-panel-render-composer

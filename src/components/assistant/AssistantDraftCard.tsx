@@ -1,3 +1,6 @@
+// @cpt-comp:cpt-eventfrontend-component-draft-card:p1
+// @cpt-flow:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-init
 import React, { useState } from 'react';
 import {
   Sparkles,
@@ -63,7 +66,9 @@ export const AssistantDraftCard: React.FC<AssistantDraftCardProps> = ({
       return startStr;
     }
   };
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-init
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-handlers
   const handleUseInCreator = () => {
     if (onApplyDraft) {
       onApplyDraft(draft);
@@ -129,7 +134,9 @@ export const AssistantDraftCard: React.FC<AssistantDraftCardProps> = ({
 
   const dateText = formatDateTime(draft.start_datetime, draft.end_datetime);
   const isFree = draft.cost === 0 || draft.cost === undefined;
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-handlers
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-render-body
   return (
     <div
       data-testid="assistant-draft-card"
@@ -220,7 +227,9 @@ export const AssistantDraftCard: React.FC<AssistantDraftCardProps> = ({
           )}
         </div>
       </div>
+      {/* // @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-render-body */}
 
+      {/* // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-render-footer */}
       {/* Validation Issues if any */}
       {validationIssues.length > 0 && !publishedEventId && (
         <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
@@ -320,3 +329,4 @@ export const AssistantDraftCard: React.FC<AssistantDraftCardProps> = ({
 };
 
 export default AssistantDraftCard;
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-draft-card-render-footer
