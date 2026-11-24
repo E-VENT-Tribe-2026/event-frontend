@@ -1,3 +1,6 @@
+// @cpt-comp:cpt-eventfrontend-component-event-detail-card:p1
+// @cpt-flow:cpt-eventfrontend-flow-ai-assistant-event-cards:p1
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-detail-handlers
 import React from 'react';
 import { Calendar, MapPin, Users, Tag, ArrowRight, User as UserIcon, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -52,7 +55,9 @@ export const AssistantEventDetailCard: React.FC<AssistantEventDetailCardProps> =
   const isFree = event.cost === 0 || event.cost === undefined;
   const organizerName = event.created_by || 'Community Organizer';
   const organizerAvatar = getGeneratedAvatarUrl(event.created_by || 'organizer');
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-detail-handlers
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-detail-render
   return (
     <div
       data-testid={`assistant-event-detail-card-${event.id || 'current'}`}
@@ -163,3 +168,4 @@ export const AssistantEventDetailCard: React.FC<AssistantEventDetailCardProps> =
 };
 
 export default AssistantEventDetailCard;
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-detail-render

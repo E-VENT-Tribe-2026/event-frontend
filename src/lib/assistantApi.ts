@@ -1,3 +1,7 @@
+// @cpt-comp:cpt-eventfrontend-component-assistant-api:p1
+// @cpt-algo:cpt-eventfrontend-algo-ai-assistant-api-client:p1
+// @cpt-dod:cpt-eventfrontend-dod-ai-assistant-implementation:p1
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-contracts
 import { getApiUrl } from './api';
 import { API_ENDPOINTS } from './apiUrls';
 import { getAuthToken, notifyAuthExpired } from './auth';
@@ -125,12 +129,14 @@ export class AssistantApiError extends Error {
     this.canRetry = canRetry;
   }
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-contracts
 
 /**
  * Parses assistant reply markdown for embedded structured cards
  * like ```json { "events": [...] } ``` or ```json { "draft": { ... } } ```
  * or extracts them when returned in the JSON response payload.
  */
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-extract-cards
 export function extractCardsFromReply(
   replyText: string,
   responseObj?: Partial<AssistantChatResponse>
@@ -222,7 +228,9 @@ export function extractCardsFromReply(
 
   return { displayText, events, eventDetail, draft, validationIssues };
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-extract-cards
 
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-error-handling
 function getAuthHeaders(): HeadersInit {
   const token = getAuthToken();
   const headers: Record<string, string> = {
@@ -322,11 +330,13 @@ async function handleAssistantError(res: Response): Promise<never> {
     true
   );
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-error-handling
 
 /**
  * Send full conversation turn history to backend AI Assistant
  * POST /api/assistant/chat
  */
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-chat-history
 export async function sendAssistantChat(
   messages: AssistantChatMessage[],
   signal?: AbortSignal,
@@ -429,12 +439,14 @@ export async function startAssistantConversation(): Promise<{ conversation_id: s
   }
   return { conversation_id: String(data.conversation_id) };
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-chat-history
 
 /**
  * Call tool: Search Events
  * POST /api/assistant/tools/search-events
  * Includes fallback to standard /api/events/?search= so events from database are always found.
  */
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-search-events
 export async function searchAssistantEvents(
   query: string,
   signal?: AbortSignal
@@ -508,12 +520,14 @@ export async function searchAssistantEvents(
     events: [],
   };
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-search-events
 
 /**
  * Call tool: Event Details
  * POST /api/assistant/tools/event-details
  * Includes fallback to GET /api/events/{event_id}.
  */
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-details-and-draft
 export async function getAssistantEventDetails(
   eventId: string,
   signal?: AbortSignal
@@ -611,7 +625,9 @@ export async function draftAssistantEvent(
 
   return (await res.json()) as AssistantDraftResponse;
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-details-and-draft
 
+// @cpt-begin:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-publish-draft
 export interface PublishDraftResult {
   success: boolean;
   eventId?: string;
@@ -757,3 +773,4 @@ export async function publishDraftEvent(
     eventId: finalId,
   };
 }
+// @cpt-end:cpt-eventfrontend-algo-ai-assistant-api-client:p1:inst-api-publish-draft

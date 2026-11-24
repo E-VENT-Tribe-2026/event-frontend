@@ -1,3 +1,6 @@
+// @cpt-comp:cpt-eventfrontend-component-create-event-sync:p1
+// @cpt-flow:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-helpers
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Type, Calendar, MapPin, Users, Euro } from 'lucide-react';
@@ -88,7 +91,9 @@ function extractCreatedEventPayload(res: unknown): { id?: string; created_by?: s
 }
 
 const GERMANY_DEFAULT = { lat: GERMANY_MAP_CENTER[0], lng: GERMANY_MAP_CENTER[1] };
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-helpers
 
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-draft-sync
 export default function CreateEventPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -191,7 +196,9 @@ export default function CreateEventPage() {
     window.addEventListener('assistant-draft-updated', onDraft);
     return () => window.removeEventListener('assistant-draft-updated', onDraft);
   }, [applyAssistantDraft]);
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-draft-sync
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-validation
   const update = (key: string, value: string | boolean) => {
     setForm((f) => {
       const next = { ...f, [key]: value };
@@ -286,7 +293,9 @@ export default function CreateEventPage() {
     setErrors(e);
     return Object.keys(e).length === 0;
   };
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-validation
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-submit
   const resolveApiToken = async (): Promise<string | null> => {
     const existing = getAuthToken();
     if (existing) return existing;
@@ -442,7 +451,9 @@ export default function CreateEventPage() {
       setIsSubmitting(false);
     }
   };
+  // @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-submit
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-render-main
   const inputCls = (field: string) =>
     `w-full rounded-xl bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none border border-border/50 focus:border-primary/40 focus:ring-2 ${
       errors[field] ? 'ring-1 ring-destructive border-destructive/50' : 'focus:ring-primary/50'
@@ -609,7 +620,9 @@ export default function CreateEventPage() {
             )}
           </div>
         </FormSection>
+        {/* // @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-render-main */}
 
+        {/* // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-render-location-cost */}
         <FormSection icon={MapPin} title="Location">
           <div className="space-y-1">
             <label className="block text-xs font-semibold text-foreground">Search address</label>
@@ -697,3 +710,4 @@ export default function CreateEventPage() {
     </div>
   );
 }
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-draft-sync:p1:inst-create-event-render-location-cost

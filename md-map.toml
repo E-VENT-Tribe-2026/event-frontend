@@ -1,0 +1,30 @@
+# Constructor Studio Map Viewer Configuration
+show_uncategorized = false
+
+[[categories]]
+name = "sdlc-specs"
+paths = ["docs/**", "architecture/**"]
+[categories.style]
+color = "#3b82f6"
+background = "#eff6ff"
+
+[[categories]]
+name = "frontend-components"
+paths = ["src/components/**", "src/app/**"]
+[categories.style]
+color = "#14b8a6"
+background = "#f0fdfa"
+
+[[categories]]
+name = "frontend-pages"
+paths = ["src/pages/**"]
+[categories.style]
+color = "#6366f1"
+background = "#eef2ff"
+
+[[categories]]
+name = "frontend-services-hooks"
+paths = ["src/lib/**", "src/hooks/**"]
+[categories.style]
+color = "#f59e0b"
+background = "#fffbeb"

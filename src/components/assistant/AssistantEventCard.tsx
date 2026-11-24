@@ -1,3 +1,6 @@
+// @cpt-comp:cpt-eventfrontend-component-event-search-card:p1
+// @cpt-flow:cpt-eventfrontend-flow-ai-assistant-event-cards:p1
+// @cpt-begin:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-card-handlers
 import React from 'react';
 import { Calendar, MapPin, Users, Tag, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -49,7 +52,9 @@ export const AssistantEventCard: React.FC<AssistantEventCardProps> = ({ event, o
 
   const dateText = formatDateTime(event.start_datetime, event.end_datetime);
   const isFree = event.cost === 0 || event.cost === undefined;
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-card-handlers
 
+  // @cpt-begin:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-card-render
   return (
     <div
       onClick={handleCardClick}
@@ -137,3 +142,4 @@ export const AssistantEventCard: React.FC<AssistantEventCardProps> = ({ event, o
     </div>
   );
 };
+// @cpt-end:cpt-eventfrontend-flow-ai-assistant-event-cards:p1:inst-event-card-render
