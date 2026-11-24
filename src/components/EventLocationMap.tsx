@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { hasValidEventCoordinates } from '@/components/LocationPickerMap';
+import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
 
 const WORLD_BOUNDS: [[number, number], [number, number]] = [
   [-85, -180],
@@ -8,8 +9,8 @@ const WORLD_BOUNDS: [[number, number], [number, number]] = [
 ];
 
 type EventLocationMapProps = {
-  latitude: number;
-  longitude: number;
+  latitude: number | string | null | undefined;
+  longitude: number | string | null | undefined;
   /** Extra height for readability */
   className?: string;
 };
@@ -23,12 +24,14 @@ export default function EventLocationMap({
   longitude,
   className = 'h-52',
 }: EventLocationMapProps) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
 
   useEffect(() => {
-    if (!hasValidEventCoordinates(latitude, longitude) || !containerRef.current) return;
+    if (!hasValidEventCoordinates(lat, lng) || !containerRef.current) return;
 
     let cancelled = false;
 
@@ -60,18 +63,17 @@ export default function EventLocationMap({
         worldCopyJump: false,
         maxBounds: WORLD_BOUNDS,
         maxBoundsViscosity: 1,
-      }).setView([latitude, longitude], 14);
+      }).setView([lat, lng], 14);
 
       mapRef.current = map;
       map.setMaxBounds(WORLD_BOUNDS);
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        noWrap: true,
+      L.tileLayer(LEAFLET_TILE_URL, {
+        ...LEAFLET_TILE_OPTIONS,
         bounds: WORLD_BOUNDS,
       }).addTo(map);
 
-      markerRef.current = L.marker([latitude, longitude]).addTo(map);
+      markerRef.current = L.marker([lat, lng]).addTo(map);
 
       // Keep map inside world bounds after any movement
       const keepInsideWorld = () => map.panInsideBounds(WORLD_BOUNDS, { animate: false });
@@ -90,9 +92,9 @@ export default function EventLocationMap({
         markerRef.current = null;
       }
     };
-  }, [latitude, longitude]);
+  }, [lat, lng]);
 
-  if (!hasValidEventCoordinates(latitude, longitude)) {
+  if (!hasValidEventCoordinates(lat, lng)) {
     return (
       <div
         className={`flex items-center justify-center rounded-xl border border-border/50 bg-secondary/80 text-center text-xs text-muted-foreground ${className}`}
@@ -107,7 +109,7 @@ export default function EventLocationMap({
       ref={containerRef}
       className={`z-0 w-full overflow-hidden rounded-xl border border-border/50 ${className}`}
       role="img"
-      aria-label={`Map showing event location at ${latitude}, ${longitude}`}
+      aria-label={`Map showing event location at ${lat}, ${lng}`}
     />
   );
 }

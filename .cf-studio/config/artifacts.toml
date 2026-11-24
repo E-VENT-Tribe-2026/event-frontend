@@ -4,8 +4,19 @@
 name = "EventFrontend"
 slug = "eventfrontend"
 kit = "sdlc"
-artifacts = []
 children = []
+
+[[systems.artifacts]]
+name = "AI Assistant & Agent Tool Specification"
+path = "docs/agent-tool-specification.md"
+kind = "DESIGN"
+traceability = "FULL"
+
+[[systems.artifacts]]
+name = "AI Assistant Frontend Feature Specification"
+path = "architecture/features/ai-assistant.md"
+kind = "FEATURE"
+traceability = "FULL"
 
 [[systems.codebase]]
 path = "src"

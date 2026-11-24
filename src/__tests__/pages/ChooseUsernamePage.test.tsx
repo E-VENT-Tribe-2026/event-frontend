@@ -48,7 +48,7 @@ describe('ChooseUsernamePage', () => {
     expect(mockNavigate).not.toHaveBeenCalledWith('/home');
   });
 
-  it('saves the full name and a lowercased username, then continues', async () => {
+  it('saves username and full name together, then continues', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/profile/me') && (!init || !init.method || init.method === 'GET')) {
@@ -69,11 +69,57 @@ describe('ChooseUsernamePage', () => {
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'John_42' } });
     fireEvent.click(screen.getByRole('button', { name: /continue/i }));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true }));
-    const bodies = fetchMock.mock.calls
-      .filter((call) => (call[1] as RequestInit | undefined)?.body)
-      .map((call) => JSON.parse(String((call[1] as RequestInit).body)));
-    expect(bodies).toEqual(expect.arrayContaining([
-      { full_name: 'Alex Smith', username: 'john_42' },
-    ]));
+    const writes = fetchMock.mock.calls.filter((call) => {
+      const method = (call[1] as RequestInit | undefined)?.method;
+      return Boolean(method && method !== 'GET');
+    });
+    expect(writes).toHaveLength(1);
+    expect(String(writes[0][0])).toContain('/api/profile/choose-username');
+    expect((writes[0][1] as RequestInit).method).toBe('POST');
+    expect(JSON.parse(String((writes[0][1] as RequestInit).body))).toEqual({
+      full_name: 'Alex Smith',
+      username: 'john_42',
+    });
+  });
+
+  it('sends an administrator with a username to the admin panel', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ username: 'admin_1', role: 'administrator' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })),
+    );
+    renderPage();
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/admin', { replace: true }));
+  });
+
+  it('skips the form when a wrapped profile already has a username', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ data: { username: 'alex', full_name: 'Alex Smith' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })),
+    );
+    renderPage();
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true }));
+  });
+
+  it('still shows the form when GET /profile/me says setup is required', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          detail: 'Profile setup required: please choose a username and enter your full name.',
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      )),
+    );
+    rememberGoogleName('Alex Smith');
+    renderPage();
+    expect(await screen.findByLabelText('Username')).toBeInTheDocument();
+    expect(screen.getByLabelText('Full name')).toHaveValue('Alex Smith');
+    expect(mockNavigate).not.toHaveBeenCalledWith('/home', { replace: true });
   });
 });

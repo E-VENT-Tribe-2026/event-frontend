@@ -16,6 +16,10 @@ describe('needsAdminVerification', () => {
     expect(needsAdminVerification({ is_admin: false, is_verified: true })).toBe(false);
   });
 
+  it('needs verification when the role is administrator even without is_admin', () => {
+    expect(needsAdminVerification({ role: 'administrator', is_verified: false })).toBe(true);
+  });
+
   it('Scenario B — unverified administrator needs verification', () => {
     expect(needsAdminVerification({ is_admin: true, has_mfa_linked: false, is_verified: false })).toBe(true);
   });
