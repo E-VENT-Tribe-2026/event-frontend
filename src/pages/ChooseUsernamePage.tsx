@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AtSign, KeyRound, User } from 'lucide-react';
+import { AtSign, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 import AppToast from '@/components/AppToast';
 import { getAuthToken } from '@/lib/auth';
@@ -18,7 +18,6 @@ import {
   profileFromMeResponse,
 } from '@/lib/username';
 import { getCurrentUser } from '@/lib/storage';
-import { normalizeInviteCode } from '@/lib/signupInvite';
 
 const GOOGLE_NAME_KEY = 'eventapp:google-name';
 
@@ -37,8 +36,6 @@ export default function ChooseUsernamePage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
-  // A new account from "Continue with Google" skipped the signup form, so the server asks for the invite here.
-  const [inviteCode, setInviteCode] = useState('');
   const [role, setRole] = useState<string | null>(getCurrentUser()?.role ?? null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
@@ -109,15 +106,13 @@ export default function ChooseUsernamePage() {
         body: JSON.stringify({
           username: normalizeUsername(username),
           full_name: normalizeFullName(fullName),
-          ...(inviteCode.trim() ? { invite_code: normalizeInviteCode(inviteCode) } : {}),
         }),
       });
       const usernameData = await usernameRes.json().catch(() => ({} as { detail?: string }));
       if (!usernameRes.ok) {
         const detail = String(usernameData.detail || 'Username could not be saved');
         const lowered = detail.toLowerCase();
-        if (lowered.includes('invitation')) setErrors({ inviteCode: detail });
-        else setErrors(lowered.includes('name') && !lowered.includes('username')
+        setErrors(lowered.includes('name') && !lowered.includes('username')
           ? { fullName: detail }
           : { username: detail });
         setToast({ show: true, message: detail, type: 'error' });
@@ -193,28 +188,6 @@ export default function ChooseUsernamePage() {
               </div>
               <p id="choose-full-name-rules" className="text-[11px] text-muted-foreground px-1">{FULL_NAME_RULES_HINT}</p>
               {errors.fullName && <p className="text-xs text-destructive px-1">{errors.fullName}</p>}
-            </div>
-            <div className="space-y-1">
-              <div className="relative">
-                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Invitation code (ABCD-2345)"
-                  value={inviteCode}
-                  autoComplete="off"
-                  aria-label="Invitation code"
-                  aria-describedby="choose-invite-code-hint"
-                  onChange={(e) => {
-                    setInviteCode(normalizeInviteCode(e.target.value));
-                    if (errors.inviteCode) setErrors((prev) => ({ ...prev, inviteCode: '' }));
-                  }}
-                  className={inputCls}
-                />
-              </div>
-              <p id="choose-invite-code-hint" className="text-[11px] text-muted-foreground px-1">
-                New account? Enter the code from the invitation sent to your email.
-              </p>
-              {errors.inviteCode && <p className="text-xs text-destructive px-1">{errors.inviteCode}</p>}
             </div>
             <button
               type="submit"

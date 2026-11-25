@@ -122,32 +122,4 @@ describe('ChooseUsernamePage', () => {
     expect(screen.getByLabelText('Full name')).toHaveValue('Alex Smith');
     expect(mockNavigate).not.toHaveBeenCalledWith('/home', { replace: true });
   });
-  it('sends the invitation code for a new Google account and shows an invitation error under it', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes('/api/profile/me') && (!init || !init.method || init.method === 'GET')) {
-        return new Response(JSON.stringify({ username: null, full_name: 'Alex Smith' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      return new Response(JSON.stringify({ detail: 'A valid invitation code is required to register.' }), {
-        status: 400,
-        headers: { 'content-type': 'application/json' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    renderPage();
-    await screen.findByLabelText('Full name');
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'John_42' } });
-    fireEvent.change(screen.getByLabelText('Invitation code'), { target: { value: 'abcd2345' } });
-    expect(screen.getByLabelText('Invitation code')).toHaveValue('ABCD-2345');
-    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
-
-    const errors = await screen.findAllByText('A valid invitation code is required to register.');
-    expect(errors.length).toBeGreaterThan(0);
-    const write = fetchMock.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === 'POST');
-    expect(JSON.parse(String((write![1] as RequestInit).body))).toMatchObject({ invite_code: 'ABCD-2345' });
-    expect(mockNavigate).not.toHaveBeenCalledWith('/home', { replace: true });
-  });
 });
