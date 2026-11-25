@@ -209,10 +209,21 @@ describe('Admin Panel — Ticket #248', () => {
     const grantBtn = await screen.findByRole('button', { name: /Make Admin/i });
     fireEvent.click(grantBtn);
 
-    // Confirmation dialog
+    // Confirmation dialog: lists what is removed and asks for the username
     expect(await screen.findByText(/Grant Administrator Role\?/i)).toBeInTheDocument();
+    const removed = screen.getByRole('list', { name: /What will be removed/i });
+    expect(removed).toHaveTextContent(/signed out on every device/i);
+    expect(removed).toHaveTextContent(/upcoming events are cancelled/i);
+    expect(removed).toHaveTextContent(/friends and friend requests are deleted/i);
+    expect(removed).toHaveTextContent(/saved events are deleted/i);
 
     const confirmBtn = screen.getByRole('button', { name: /Grant Admin/i });
+    expect(confirmBtn).toBeDisabled();
+    const confirmInput = screen.getByLabelText(/Type the username to confirm/i);
+    fireEvent.change(confirmInput, { target: { value: 'someone_else' } });
+    expect(confirmBtn).toBeDisabled();
+    fireEvent.change(confirmInput, { target: { value: '@alex_smith' } });
+    expect(confirmBtn).toBeEnabled();
     fireEvent.click(confirmBtn);
 
     // After success: role badge updates to Admin and Make Admin button disappears
