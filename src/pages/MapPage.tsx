@@ -15,6 +15,7 @@ import { extractCityFromLocation, getEventCities } from '@/lib/eventLocation';
 import { isEventUpcoming, isEventCancelled } from '@/lib/eventTime';
 import { friendsAttendingHtml } from '@/lib/friendsAttendingPopup';
 import { fetchMapEvents, peekMapEvents } from '@/lib/mapEventsApi';
+import { EVENTS_CHANGED_EVENT } from '@/lib/realtimeEvents';
 import { fetchOrganizerProfile } from '@/lib/organizerProfile';
 import { LEAFLET_TILE_OPTIONS, LEAFLET_TILE_URL } from '@/lib/leafletTiles';
 
@@ -182,6 +183,14 @@ export default function MapPage() {
 
   useEffect(() => {
     loadEvents(category, debouncedTitle, debouncedFilterDate);
+  }, [category, debouncedTitle, debouncedFilterDate, loadEvents]);
+
+  // Realtime: an event created, changed or cancelled by anyone clears the events cache and
+  // fires EVENTS_CHANGED_EVENT; reload so the open map shows it without a page reload.
+  useEffect(() => {
+    const refresh = () => loadEvents(category, debouncedTitle, debouncedFilterDate);
+    window.addEventListener(EVENTS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(EVENTS_CHANGED_EVENT, refresh);
   }, [category, debouncedTitle, debouncedFilterDate, loadEvents]);
 
   const filteredEvents = useMemo(() => {

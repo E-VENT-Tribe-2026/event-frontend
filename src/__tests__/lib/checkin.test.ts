@@ -13,10 +13,10 @@ describe('checkin', () => {
     expect(listCheckins('evt-1').map((c) => c.name)).toEqual(['Ada']);
   });
 
-  it('opens the door window from 2h before start until 12h after', () => {
+  it('opens the door window from 3h before start until 12h after, like the server', () => {
     const start = Date.parse('2030-01-01T18:00:00.000Z');
-    expect(isCheckinWindow(start, Date.parse('2030-01-01T15:59:00.000Z'))).toBe(false);
-    expect(isCheckinWindow(start, Date.parse('2030-01-01T16:00:00.000Z'))).toBe(true);
+    expect(isCheckinWindow(start, Date.parse('2030-01-01T14:59:00.000Z'))).toBe(false);
+    expect(isCheckinWindow(start, Date.parse('2030-01-01T15:00:00.000Z'))).toBe(true);
     expect(isCheckinWindow(start, Date.parse('2030-01-02T06:00:00.000Z'))).toBe(true);
     expect(isCheckinWindow(start, Date.parse('2030-01-02T06:00:01.000Z'))).toBe(false);
   });

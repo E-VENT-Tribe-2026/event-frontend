@@ -75,8 +75,8 @@ describe('EventDetailsCheckin', () => {
     vi.mocked(Date.now).mockRestore();
   });
 
-  it('disables participant check-in until 2 hours before the event and shows an info control', () => {
-    vi.spyOn(Date, 'now').mockReturnValue(start - 3 * 60 * 60 * 1000);
+  it('disables participant check-in until 3 hours before the event and shows an info control', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(start - 4 * 60 * 60 * 1000);
     const onSubmit = vi.fn();
 
     render(
@@ -91,7 +91,7 @@ describe('EventDetailsCheckin', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /check-in opens 2 hours before the event/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /check-in opens 3 hours before the event/i })).toBeInTheDocument();
     expect(screen.getByLabelText('Check-in code')).toBeDisabled();
     expect(screen.getByRole('button', { name: /^check in$/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /scan qr code/i })).toBeDisabled();

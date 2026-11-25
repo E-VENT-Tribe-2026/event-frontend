@@ -462,6 +462,7 @@ export default function AdminUserDetail({
 
   const [dialogKind, setDialogKind] = useState<DialogKind>(null);
   const [reason, setReason] = useState<string>('');
+  const [adminConfirmText, setAdminConfirmText] = useState<string>('');
   const [acting, setActing] = useState<boolean>(false);
   const [hoveredBack, setHoveredBack] = useState(false);
 
@@ -522,11 +523,13 @@ export default function AdminUserDetail({
 
   const openDialog = (kind: DialogKind) => {
     setReason('');
+    setAdminConfirmText('');
     setDialogKind(kind);
   };
 
   const handleConfirm = async () => {
     if (!user || acting) return;
+    if (dialogKind === 'makeAdmin' && !adminConfirmMatches) return;
     setActing(true);
     try {
       if (dialogKind === 'warn') {
@@ -605,6 +608,11 @@ export default function AdminUserDetail({
   const isAdmin = Boolean(user?.is_admin || user?.role === 'administrator');
   const isSuspended = user ? isSuspendedAccount(user) : false;
   const needsReason = dialogKind === 'warn' || dialogKind === 'suspend' || dialogKind === 'lift';
+  // Granting the role cannot be undone and wipes the account's activity, so the admin types the username first.
+  const adminConfirmTarget = (user?.username || user?.full_name || '').trim();
+  const adminConfirmMatches =
+    adminConfirmTarget !== '' &&
+    adminConfirmText.trim().replace(/^@/, '').toLowerCase() === adminConfirmTarget.toLowerCase();
 
   const extra = (user ?? {}) as UserExtra;
   const reportLists = userReportListsFromDetails(user);
@@ -628,7 +636,7 @@ export default function AdminUserDetail({
     warn: `Provide a reason for warning ${user?.full_name ?? 'this user'}.`,
     suspend: `Provide a reason for suspending ${user?.full_name ?? 'this user'}.`,
     lift: `Provide a reason for lifting the suspension on ${user?.full_name ?? 'this user'}. They will regain access immediately.`,
-    makeAdmin: `Promote ${user?.full_name ?? 'this user'} to administrator? They will receive full administrative access.`,
+    makeAdmin: `Promote ${user?.full_name ?? 'this user'} to administrator? This cannot be undone, and the following is removed from the account:`,
   };
 
   const dialogAction: Record<NonNullable<DialogKind>, string> = {
@@ -1177,6 +1185,38 @@ export default function AdminUserDetail({
             </AlertDialogDescription>
           </AlertDialogHeader>
 
+          {dialogKind === 'makeAdmin' && (
+            <div className="space-y-3 text-xs" style={{ color: 'var(--adm-fg)' }}>
+              <ul className="list-disc space-y-1 pl-5" aria-label="What will be removed">
+                <li>They are signed out on every device.</li>
+                <li>Their upcoming events are cancelled, and participants are notified.</li>
+                <li>They leave every upcoming event they joined.</li>
+                <li>Their friends and friend requests are deleted.</li>
+                <li>Their blocked users are deleted.</li>
+                <li>Their saved events are deleted.</li>
+                <li>Their notifications are deleted.</li>
+              </ul>
+              <label className="block space-y-1.5">
+                <span>
+                  Type <strong>{user?.username ? `@${user.username}` : adminConfirmTarget}</strong> to confirm.
+                </span>
+                <input
+                  type="text"
+                  value={adminConfirmText}
+                  onChange={(e) => setAdminConfirmText(e.target.value)}
+                  aria-label="Type the username to confirm"
+                  autoComplete="off"
+                  className="w-full rounded-xl border px-3 py-2.5 text-xs outline-none placeholder:opacity-60"
+                  style={{
+                    borderColor: 'var(--adm-border)',
+                    background: 'var(--adm-secondary)',
+                    color: 'var(--adm-fg)',
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
           {needsReason && (
             <textarea
               value={reason}
@@ -1198,7 +1238,11 @@ export default function AdminUserDetail({
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={acting || (needsReason && !reason.trim())}
+              disabled={
+                acting ||
+                (needsReason && !reason.trim()) ||
+                (dialogKind === 'makeAdmin' && !adminConfirmMatches)
+              }
               onClick={(e) => {
                 e.preventDefault();
                 void handleConfirm();

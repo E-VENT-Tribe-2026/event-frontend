@@ -55,12 +55,12 @@ export function addCheckin(eventId: string, record: Omit<CheckinRecord, 'at'> & 
   return saved;
 }
 
-/** Check-in is offered from 2h before start until 12h after start. */
+/** Same window as the server: from 3h before start until 12h after start. */
 export function isCheckinWindow(startMs: number, now = Date.now()): boolean {
   if (!Number.isFinite(startMs)) return false;
-  const twoHours = 2 * 60 * 60 * 1000;
+  const threeHours = 3 * 60 * 60 * 1000;
   const twelveHours = 12 * 60 * 60 * 1000;
-  return now >= startMs - twoHours && now <= startMs + twelveHours;
+  return now >= startMs - threeHours && now <= startMs + twelveHours;
 }
 
 export function parseTicketQr(raw: string): { name?: string; event?: string; ticketId?: string } | null {

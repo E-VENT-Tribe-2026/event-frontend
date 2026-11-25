@@ -125,14 +125,14 @@ export default function EventDetailsCheckin({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label="Check-in opens 2 hours before the event"
+                  aria-label="Check-in opens 3 hours before the event"
                   className="inline-flex rounded-full p-0.5 text-muted-foreground hover:text-foreground"
                 >
                   <Info className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-[220px] text-xs">
-                Check-in opens 2 hours before the event starts.
+                Check-in opens 3 hours before the event starts.
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
